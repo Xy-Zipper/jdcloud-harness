@@ -283,9 +283,10 @@ export class SessionCommandController {
   /**
    * Admit one browser prompt after explicit Agent resume and image validation.
    * @param request - Session identity, prompt content, source metadata, and delivery mode.
+   * @param signal - caller cancellation used by prompt-admission listeners.
    * @returns acknowledgement that the Agent accepted the prompt.
    */
-  async prompt(request: SessionPromptRequest): Promise<SessionPromptValue> {
+  async prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue> {
     const clientTimeZone = request.clientTimeZone === undefined
       ? undefined
       : canonicalClientTimeZone(request.clientTimeZone)
@@ -305,6 +306,11 @@ export class SessionCommandController {
         { provider: selection.provider, model: selection.model },
       )
     }
+    await this.ctx.waterfall(
+      'api-session/prompt-admission',
+      { sessionId: request.sessionId, signal },
+      () => Promise.resolve(),
+    )
     const source: MessageSource = {
       kind: 'user',
       rpcId: request.requestId,

@@ -1,0 +1,151 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(320px, 42%) minmax(420px, 1fr);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+}
+
+.brandPanel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px;
+  background: var(--dsw-alias-bg-layer-2);
+  border-right: 1px solid var(--dsw-alias-border-l2);
+}
+
+.brandContent {
+  width: min(420px, 100%);
+}
+
+.mark {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-brand-primary);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.eyebrow {
+  margin: 28px 0 10px;
+  color: var(--dsw-alias-brand-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.brandTitle {
+  max-width: 360px;
+  margin: 0;
+  font-size: clamp(30px, 3.5vw, 48px);
+  line-height: 1.18;
+  letter-spacing: -1.5px;
+}
+
+.formPanel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+
+.card {
+  width: min(420px, 100%);
+}
+
+.heading {
+  margin-bottom: 32px;
+}
+
+.heading h2 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+}
+
+.heading p {
+  margin: 10px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.field input {
+  height: 44px;
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  padding: 0 14px;
+  outline: none;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  font: inherit;
+  font-weight: 400;
+}
+
+.field input:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.field input:disabled {
+  opacity: 0.6;
+}
+
+.status,
+.error {
+  margin: 16px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.status {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.error {
+  color: var(--dsw-alias-label-error);
+}
+
+.submit {
+  width: 100%;
+  height: 44px;
+  margin-top: 24px;
+  border-radius: 12px;
+}
+
+@media (max-width: 760px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+
+  .brandPanel {
+    justify-content: flex-start;
+    padding: 36px 28px;
+    border-right: 0;
+    border-bottom: 1px solid var(--dsw-alias-border-l2);
+  }
+
+  .brandTitle {
+    font-size: 28px;
+  }
+
+  .formPanel {
+    align-items: flex-start;
+    padding: 36px 28px 48px;
+  }
+}

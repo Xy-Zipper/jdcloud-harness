@@ -1034,6 +1034,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'jdcloudAuthController',
+    summary: 'Store credentials, expose login commands, and validate each browser prompt.',
+    description: 'Store credentials, expose login commands, and validate each browser prompt.',
+    methods: [
+      {
+        signature: '@Remote async status(): Promise<JdcloudAuthStatus>',
+        description: 'Read redacted stored authentication state.',
+        parameters: [],
+        returns: 'Current redacted authentication state.',
+      },
+      {
+        signature: '@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Authenticate, validate the resulting token, and commit it to Host credentials.',
+        parameters: [{ name: 'request', description: 'Service address and password credentials.' }, { name: 'signal', description: 'Caller cancellation for login and validation requests.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
+        signature: '@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Select another tenant for the stored JDCloud login.',
+        parameters: [{ name: 'corpId', description: 'Tenant identity from the current authenticated status.' }, { name: 'signal', description: 'Caller cancellation for the switch and confirmation requests.' }],
+        returns: 'Redacted authenticated state with the confirmed current tenant.',
+      },
+      {
+        signature: '@Remote async logout(): Promise<JdcloudAuthStatus>',
+        description: 'Delete the stored JDCloud token.',
+        parameters: [],
+        returns: 'Redacted unauthenticated state.',
+      },
+    ],
+  },
+  {
     key: 'jobs',
     summary: 'Abstract background job registry.',
     description: 'Abstract background job registry. Subclass, implement the abstract methods, and load the subclass as a plugin — it registers as `ctx.jobs` (one implementation per context; loading a second throws, which is cordis\' standard duplicate-service behavior).\n\nImplementations must honor these semantics:\n\n- Registrations outlive producer and controller fibers. Owner and service disposal cancel live work and await compliant producers; a throwing teardown cancel force-fails only the record. Teardown cancellation also marks the record reported, because a record its owner is being destroyed for has no reader left.\n- Owned-job access is fenced by the owner\'s session id. Ids are predictable, so authorization — not secrecy — is the boundary.\n- Settlement is first-wins: one terminal record, released waiters, and one round of contained listener notification, even against a late producer outcome. Completion is announced last, after the record is committed and every other observer of the settlement has seen it, because a reporter may open a model turn synchronously.\n- start refuses work while no attached job controller serves the spec\'s owner, so a producer cannot start work that owner cannot collect or stop. One registry serves every composition in the process, so this question — and completion-listener delivery — is owner-relative rather than process-wide: registrations made from an unscoped context serve every owner, and registrations made under an agent composition\'s scope serve exactly the agents composed under it.',
@@ -2969,6 +3000,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'message', description: 'user-safe failure chain.' }],
   },
   {
+    name: 'api-session/prompt-admission',
+    mode: 'waterfall',
+    signature: '\'api-session/prompt-admission\'( request: { readonly sessionId: SessionId; readonly signal: AbortSignal }, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one browser prompt before attachment persistence or Agent inbox delivery.',
+    description: 'Admit one browser prompt before attachment persistence or Agent inbox delivery. Listeners call `next()` after their policy accepts the request; rejection leaves the submitted content outside the Session and Agent lifecycle.',
+    parameters: [{ name: 'request', description: '.signal - caller cancellation for admission work.' }],
+  },
+  {
     name: 'api-session/removed',
     mode: 'emit',
     signature: '\'api-session/removed\'(sessionId: SessionId): void',
@@ -4143,6 +4182,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'JdcloudAuthStatus',
+    declaration: 'export type JdcloudAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly corpId: string;\n    readonly corpName: string;\n    readonly corps: readonly JdcloudCorp[];\n};',
+  },
+  {
+    name: 'JdcloudCorp',
+    declaration: 'export interface JdcloudCorp {\n    readonly corpId: string;\n    readonly corpName: string;\n}',
+  },
+  {
+    name: 'JdcloudLoginRequest',
+    declaration: 'export interface JdcloudLoginRequest {\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly password: string;\n}',
   },
   {
     name: 'JobDoneListener',

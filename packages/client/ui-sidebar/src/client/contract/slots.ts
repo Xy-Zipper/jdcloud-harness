@@ -27,6 +27,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.brand.name': { kind: 'single'; scope: 'root'; owner: SidebarBrandNameOwnerProps }
     /**
+     * Optional authenticated-account summary below the brand row. Feature
+     * packages own its identity data and actions; the shell supplies only
+     * the wide-versus-rail presentation state.
+     */
+    'sidebar.account': { kind: 'single'; scope: 'root'; owner: SidebarAccountOwnerProps }
+    /**
      * The workspace/session browsing region: section header, search, the
      * grouped/flat session list, and every workspace dialog. Declared by this
      * package's 'sidebar' entry (declaring is claiming); ui-workspace
@@ -57,6 +63,12 @@ export interface SidebarBrandMarkOwnerProps {
 export interface SidebarBrandNameOwnerProps {
   /** Marker field: the occupant owns its own content and width. */
   children?: never
+}
+
+/** Owner share for the optional authenticated-account summary. */
+export interface SidebarAccountOwnerProps {
+  /** Whether the sidebar renders the full row instead of its rail icon. */
+  wide: boolean
 }
 
 /**
@@ -111,6 +123,7 @@ export type SidebarRootComponentProps =
   & PropsRenderSlots<
     | 'sidebar.brand.mark'
     | 'sidebar.brand.name'
+    | 'sidebar.account'
     | 'sidebar.workspaces'
     | 'sidebar.settings'
     | 'sidebar.footer.action'

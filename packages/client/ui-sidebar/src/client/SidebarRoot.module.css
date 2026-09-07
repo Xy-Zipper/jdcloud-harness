@@ -64,6 +64,7 @@
    horizontally fixed. Only a live collapse gets .railIn; a cold collapsed
    render stays static. */
 .railIn .iconButton,
+.railIn .accountArea,
 .railIn .newSession,
 .railIn .regionArea {
   animation: rail-in 150ms var(--ds-ease-in-out) backwards;
@@ -244,6 +245,24 @@
   white-space: nowrap;
 }
 
+/* Optional identity-provider seat below the brand row. */
+.accountArea {
+  flex: none;
+  display: flex;
+  min-width: 0;
+  margin: 0 2px 8px;
+}
+
+.accountArea:empty {
+  display: none;
+}
+
+.collapsed .accountArea {
+  align-self: flex-start;
+  width: 36px;
+  margin: 0 0 12px;
+}
+
 /* New Session: 38px bar, 12px radius (figma 133:7634 geometry, squared-off
    corners); collapsed it renders as the rail's plain icon control. */
 .newSession {
@@ -350,6 +369,7 @@
   .wide,
   .fading > *,
   .railIn .iconButton,
+  .railIn .accountArea,
   .railIn .newSession,
   .railIn .footArea,
   .railIn .regionArea {

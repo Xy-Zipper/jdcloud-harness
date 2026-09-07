@@ -22,6 +22,7 @@ export const API_REMOTE_FORWARDED_EVENTS = [
   { event: 'api-session/removed', mode: 'emit' },
   { event: 'api-session/status', mode: 'emit' },
   { event: 'commands/change', mode: 'emit' },
+  { event: 'credentials/record-updated', mode: 'emit' },
   { event: 'credentials/reference-updated', mode: 'emit' },
   { event: 'cordis/request-run', mode: 'emit' },
   { event: 'cordis/request-run-resolved', mode: 'emit' },

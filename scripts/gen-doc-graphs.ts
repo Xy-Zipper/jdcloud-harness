@@ -178,6 +178,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Projects the credential-reference seam onto the generated Remote namespace: batch fan-out, view projection, and refusal mapping live here, not on the seam Definition.',
   },
   {
+    key: 'jdcloudAuthController',
+    pkg: 'api-jdcloud-auth-controller',
+    title: 'Host JDCloud authentication Remote controller',
+    mode: 'core',
+    note: 'Owns password login, durable token storage, and tenant validation before browser prompts enter a Session.',
+  },
+  {
     key: 'settingsController',
     pkg: 'api-settings-controller',
     title: 'Host settings-surface Remote controller',

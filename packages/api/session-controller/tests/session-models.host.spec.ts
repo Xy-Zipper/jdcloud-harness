@@ -158,6 +158,41 @@ function currentSelection(ctx: Context, sessionId: SessionId) {
 }
 
 describe('Web session model selection', () => {
+  it('runs prompt admission before attachment persistence and inbox delivery', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const saveImage = vi.fn()
+    ctx.provide('attachments', Object.setPrototypeOf({
+      imageLimits: {
+        maxImageBytes: 4,
+        maxImagesPerMessage: 2,
+        maxMessageImageBytes: 4,
+        maxImagePixels: 4,
+        maxImageDimension: 2000,
+        mediaTypes: ['image/png'],
+      },
+      validateImage: vi.fn(() => Promise.resolve()),
+      saveImage,
+    }, AttachmentStore.prototype) as never)
+    ctx.on('api-session/prompt-admission', () => {
+      throw new RemoteError('gateway/internal', 'admission refused', {})
+    })
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    expect(await remote.prompt(promptRequest({
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'image', mediaType: 'image/png', data: 'AQ==' }],
+    }))).toMatchObject({ ok: false, error: { code: 'gateway/internal', message: 'admission refused' } })
+    expect(saveImage).not.toHaveBeenCalled()
+    expect(followup).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
+
   it('validates an ordered image batch before persisting any member', async () => {
     const { ctx, agent, sessionId } = await harness()
     const validateImage = vi.fn((_input: { data: Uint8Array }) => Promise.resolve())

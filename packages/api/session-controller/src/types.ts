@@ -42,6 +42,23 @@ declare module '@deepseek-ai/dsh-session/types' {
   }
 }
 
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Admit one browser prompt before attachment persistence or Agent inbox delivery.
+     * Listeners call `next()` after their policy accepts the request; rejection leaves
+     * the submitted content outside the Session and Agent lifecycle.
+     * @param request.sessionId - Session addressed by the prompt.
+     * @param request.signal - caller cancellation for admission work.
+     * @mode waterfall
+     */
+    'api-session/prompt-admission'(
+      request: { readonly sessionId: SessionId; readonly signal: AbortSignal },
+      next: () => Promise<void>,
+    ): Promise<void>
+  }
+}
+
 /** Persisted hints used to summarize a cold Session. */
 export interface SessionListMetadata {
   /** Whether the folded prefix contains no turn. */

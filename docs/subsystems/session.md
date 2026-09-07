@@ -1003,6 +1003,28 @@ Types: [SessionId](core.md)
 
 Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 
+<a id="api-sessionprompt-admission--waterfall"></a>
+
+#### `api-session/prompt-admission` — waterfall
+
+Admit one browser prompt before attachment persistence or Agent inbox delivery. Listeners call `next()` after their policy accepts the request; rejection leaves the submitted content outside the Session and Agent lifecycle.
+
+```ts cordis-catalog
+/**
+ * Admit one browser prompt before attachment persistence or Agent inbox delivery.
+ * Listeners call `next()` after their policy accepts the request; rejection leaves
+ * the submitted content outside the Session and Agent lifecycle.
+ * @param request.sessionId - Session addressed by the prompt.
+ * @param request.signal - caller cancellation for admission work.
+ * @mode waterfall
+ */
+'api-session/prompt-admission'( request: { readonly sessionId: SessionId; readonly signal: AbortSignal }, next: () => Promise<void>, ): Promise<void>
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
+
 <a id="api-sessionremoved--emit"></a>
 
 #### `api-session/removed` — emit

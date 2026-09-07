@@ -186,6 +186,12 @@ export function SidebarRoot({
         </Tooltip>
       </div>
 
+      {/* Authentication integrations may occupy the account seat without
+          coupling the sidebar shell to one identity provider. */}
+      <div className={css.accountArea}>
+        {renderSlot('sidebar.account', { wide })}
+      </div>
+
       {/* Expanded, the button carries its own label — tooltip only on the rail. */}
       <Tooltip label={t('session.new.label')} delayMs={500} disabled={wide}>
         <button

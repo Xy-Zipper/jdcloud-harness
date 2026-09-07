@@ -1,0 +1,10 @@
+# Optional Web-profile layer for JDCloud low-code authentication.
+- insert:
+    - id: jdcloud-auth-controller
+      name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'
+      config:
+        defaultBaseUrl: !!js process.env.JDCLOUD_DEFAULT_BASE_URL
+        requestTimeoutMs: 15000
+
+    - id: ui-jdcloud-login
+      name: '@deepseek-ai/dsh-client-ui-jdcloud-login'

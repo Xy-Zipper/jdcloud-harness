@@ -253,6 +253,44 @@ Host service backing the generated `ctx.remote.credentials` namespace. It carrie
 
 Source: [`packages/api/settings-controller/src/credentials.ts`](../../packages/api/settings-controller/src/credentials.ts)
 
+<a id="ctxjdcloudauthcontroller--jdcloudauthcontroller"></a>
+
+### `ctx.jdcloudAuthController` — `JdcloudAuthController`
+
+Store credentials, expose login commands, and validate each browser prompt.
+
+```ts cordis-catalog
+/**
+ * Read redacted stored authentication state.
+ * @returns Current redacted authentication state.
+ */
+@Remote async status(): Promise<JdcloudAuthStatus>
+
+/**
+ * Authenticate, validate the resulting token, and commit it to Host credentials.
+ * @param request - Service address and password credentials.
+ * @param signal - Caller cancellation for login and validation requests.
+ * @returns Redacted authenticated state.
+ */
+@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
+ * Select another tenant for the stored JDCloud login.
+ * @param corpId - Tenant identity from the current authenticated status.
+ * @param signal - Caller cancellation for the switch and confirmation requests.
+ * @returns Redacted authenticated state with the confirmed current tenant.
+ */
+@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
+ * Delete the stored JDCloud token.
+ * @returns Redacted unauthenticated state.
+ */
+@Remote async logout(): Promise<JdcloudAuthStatus>
+```
+
+Source: [`packages/api/jdcloud-auth-controller/src/index.ts`](../../packages/api/jdcloud-auth-controller/src/index.ts)
+
 <a id="authorization-events"></a>
 
 ### `authorization/*` events
