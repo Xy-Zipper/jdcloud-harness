@@ -50,7 +50,7 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
         if (key === 'sidebar.brand.mark') return brandMark
         if (key === 'sidebar.brand.name') return brandName
         if (key === 'sidebar.account') {
-          accountOwner = owner as SidebarAccountOwnerProps
+          accountOwner = owner
           return <div data-testid="account-seat" data-wide={owner.wide} />
         }
         if (key === 'sidebar.settings') {

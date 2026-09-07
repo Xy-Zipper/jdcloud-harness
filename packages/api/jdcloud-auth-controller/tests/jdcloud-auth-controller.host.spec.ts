@@ -65,7 +65,7 @@ describe('minimal JDCloud HTTP client', () => {
 
   it('copies password-login query and MD5 semantics without a tenant parameter', async () => {
     const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } })))
-    const client = new JdcloudClient('https://kindoucloud.com', fetcher as typeof fetch)
+    const client = new JdcloudClient('https://kindoucloud.com', fetcher)
     await expect(client.loginPassword('user', 'secret', AbortSignal.timeout(1000))).resolves.toBe('bearer token')
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
     const parsed = new URL(url)
@@ -74,7 +74,9 @@ describe('minimal JDCloud HTTP client', () => {
       client_id: 'admin', client_secret: '123456', scope: 'all', grant_type: 'password',
     })
     expect(parsed.searchParams.has('corpId')).toBe(false)
-    expect(JSON.parse(String(init.body))).toEqual({
+    expect(typeof init.body).toBe('string')
+    if (typeof init.body !== 'string') throw new Error('login request body must be a string')
+    expect(JSON.parse(init.body)).toEqual({
       username: 'user',
       password: createHash('md5').update('secret').digest('hex'),
     })
@@ -88,7 +90,7 @@ describe('minimal JDCloud HTTP client', () => {
   ])('rejects a login response without a usable token', async (data, message) => {
     const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
       code: 200, msg: 'ok', data,
-    }))) as typeof fetch)
+    }))))
     await expect(client.loginPassword('user', 'secret', AbortSignal.timeout(1000))).rejects.toThrow(message)
   })
 
@@ -134,13 +136,13 @@ describe('minimal JDCloud HTTP client', () => {
   ])('rejects an unusable tenant-list payload', async (data, message) => {
     const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
       code: 200, msg: 'ok', data,
-    }))) as typeof fetch)
+    }))))
     await expect(client.getCorpList('token', AbortSignal.timeout(1000))).rejects.toThrow(message)
   })
 
   it('switches tenants with the current token and an encoded path identity', async () => {
     const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data: 'corp/next' })))
-    const client = new JdcloudClient('https://kindoucloud.com', fetcher as typeof fetch)
+    const client = new JdcloudClient('https://kindoucloud.com', fetcher)
     await expect(client.switchCorp('token', 'corp/next', AbortSignal.timeout(1000))).resolves.toBe('corp/next')
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://kindoucloud.com/api/system/corp/switchCorp/corp%2Fnext')
@@ -150,7 +152,7 @@ describe('minimal JDCloud HTTP client', () => {
   it.each([null, '', 'another-corp'])('rejects an unconfirmed tenant switch result %j', async (data) => {
     const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
       code: 200, msg: 'ok', data,
-    }))) as typeof fetch)
+    }))))
     await expect(client.switchCorp('token', 'corp-next', AbortSignal.timeout(1000)))
       .rejects.toThrow('did not confirm the requested tenant')
   })
