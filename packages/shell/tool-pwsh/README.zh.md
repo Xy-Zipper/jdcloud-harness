@@ -55,7 +55,7 @@ kind: "package-reference"
 
 ### Windows 特有的沙箱行为
 
-在沙箱执行器下，被拒绝的命令会报告 `[sandbox: file access denied under <mode> mode]`，并适用相同的单次升权路径：用 `sandbox_permissions` 加一句 `justification`，经用户审批后重试完全相同的命令一次。工具还会在其描述中教授两条 Windows 受限令牌约定：只读 pwsh 运行在 ConstrainedLanguage 中（`.NET` 静态调用、`Add-Type`、COM 与反射会以 "only core types" 错误失败）；两种受限模式下程序都无法打开命名管道，因此通过管道 stdio 捕获另一程序输出的命令会以 EPERM 失败——请升权该确切命令一次，或重构命令以避免捕获输出。
+在沙箱执行器下，被拒绝的命令会报告 `[sandbox: file access denied under <mode> mode]`。审批可用时，请求 schema 只公开严格更宽的模式，并允许用 `sandbox_permissions` 加一句 `justification` 重试一次完全相同的命令；否则 schema 与结果都会省略升权指导。工具始终教授适用的 Windows 受限令牌约定：只读 pwsh 运行在 ConstrainedLanguage 中（`.NET` 静态调用、`Add-Type`、COM 与反射会以 "only core types" 错误失败）；两种受限模式下程序都无法打开命名管道，因此通过管道 stdio 捕获另一程序输出的命令会以 EPERM 失败——schema 提供升权路径时可升权，否则应重构命令以避免捕获输出。
 
 ### 可能出什么问题
 

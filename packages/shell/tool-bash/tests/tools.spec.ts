@@ -135,7 +135,7 @@ class RecordingSandboxExecutor extends ShellExecutor {
       stderr: { text: '', truncated: false },
       sandbox: {
         mode: spec.sandboxPolicy?.mode ?? 'read-only',
-        denied: false,
+        denied: spec.command === 'denied',
         ...spec.command === 'without optional sandbox facts'
           ? {}
           : { enforcement: 'full' as const, runnerFailed: false },
@@ -617,6 +617,55 @@ describe('sandbox escalation through the generic task producer', () => {
     ]) {
       expect((await call(ctx, 'bash', args)).isError).toBe(true)
     }
+  })
+
+  it('projects only strictly wider escalation modes when approval is usable', async () => {
+    const { ctx } = await setupSandboxed(true)
+    const propertiesFor = async (agent: Agent) => {
+      const assembly = await ctx.systemPrompt.assemble({ agent, scope: agent })
+      const schema = assembly.tools.find(item => item.name === 'bash')!
+      return schema.parameters.properties as Record<string, { enum?: string[] }>
+    }
+
+    expect((await propertiesFor(sandboxAgent('read-only')))['sandbox_permissions']?.enum)
+      .toEqual(['workspace-write', 'danger-full-access'])
+    expect((await propertiesFor(sandboxAgent('workspace-write')))['sandbox_permissions']?.enum)
+      .toEqual(['danger-full-access'])
+    expect((await propertiesFor(sandboxAgent('danger-full-access')))['sandbox_permissions']).toBeUndefined()
+
+    const never = sandboxAgent('read-only')
+    never.session.append('approval/policy', { policy: 'never' })
+    expect((await propertiesFor(never))['sandbox_permissions']).toBeUndefined()
+  })
+
+  it('hides escalation fields and prose when no approval service is composed', async () => {
+    const { ctx } = await setupSandboxed()
+    const agent = sandboxAgent('read-only')
+    const schema = (await ctx.systemPrompt.assemble({ agent, scope: agent })).tools.find(item => item.name === 'bash')!
+    expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
+    expect(schema.parameters.properties).not.toHaveProperty('justification')
+    expect(schema.description).not.toContain('sandbox_permissions')
+  })
+
+  it('omits an unactionable escalation hint from a denied result', async () => {
+    const withoutApproval = await setupSandboxed()
+    const denied = await call(
+      withoutApproval.ctx,
+      'bash',
+      { command: 'denied', description: 'trigger sandbox denial' },
+      sandboxAgent('read-only'),
+    )
+    expect(text(denied)).toContain('[sandbox: file access denied under read-only mode]')
+    expect(text(denied)).not.toContain('[sandbox: escalation available')
+
+    const withApproval = await setupSandboxed(true)
+    const actionable = await call(
+      withApproval.ctx,
+      'bash',
+      { command: 'denied', description: 'trigger sandbox denial' },
+      sandboxAgent('read-only'),
+    )
+    expect(text(actionable)).toContain('[sandbox: escalation available')
   })
 
   it('rejects injected escalation without a sandbox and non-widening escalation without prompting', async () => {

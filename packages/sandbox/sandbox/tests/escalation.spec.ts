@@ -10,9 +10,11 @@ import { describe, expect, it } from 'vitest'
 import {
   ESCALATION_TARGETS,
   WIDER_MODES,
+  availableEscalationModes,
   approveEscalation,
   escalationHintMarker,
   sandboxDenialMarker,
+  stripEscalationHint,
   validateEscalationArgs,
 } from '@deepseek-ai/dsh-sandbox'
 import type { EscalationApprover, EscalationOutcome } from '@deepseek-ai/dsh-sandbox'
@@ -26,6 +28,13 @@ describe('the strictly-wider ladder', () => {
 
   it('the target enum is the closed set every session could escalate TO (read-only is the floor)', () => {
     expect(ESCALATION_TARGETS).toEqual(['workspace-write', 'danger-full-access'])
+  })
+
+  it('advertises only strictly wider modes when approval is available', () => {
+    expect(availableEscalationModes('read-only', true)).toEqual(['workspace-write', 'danger-full-access'])
+    expect(availableEscalationModes('workspace-write', true)).toEqual(['danger-full-access'])
+    expect(availableEscalationModes('danger-full-access', true)).toEqual([])
+    expect(availableEscalationModes('read-only', false)).toEqual([])
   })
 })
 
@@ -51,6 +60,12 @@ describe('the model-facing markers', () => {
   it('the hint marker names the family subject', () => {
     expect(escalationHintMarker('command')).toContain('retry this exact command once with sandbox_permissions')
     expect(escalationHintMarker('operation')).toContain('retry this exact operation once with sandbox_permissions')
+  })
+
+  it('removes only the exact escalation hint line', () => {
+    const text = `output\n${escalationHintMarker('command')}\n[exit code: 1]`
+    expect(stripEscalationHint(text, 'command')).toBe('output\n[exit code: 1]')
+    expect(stripEscalationHint('ordinary output', 'command')).toBe('ordinary output')
   })
 })
 

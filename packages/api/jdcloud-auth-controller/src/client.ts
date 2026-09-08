@@ -135,10 +135,14 @@ export class JdcloudClient {
         signal,
       },
     )
-    if (typeof result.data !== 'string' || result.data !== corpId) {
+    let confirmedCorpId: unknown = result.data
+    if (typeof result.data === 'object' && result.data !== null && !Array.isArray(result.data)) {
+      confirmedCorpId = Reflect.get(result.data, 'corpId') as unknown
+    }
+    if (confirmedCorpId !== corpId) {
       throw new Error('JDCloud tenant-switch response did not confirm the requested tenant')
     }
-    return result.data
+    return confirmedCorpId
   }
 
   /**

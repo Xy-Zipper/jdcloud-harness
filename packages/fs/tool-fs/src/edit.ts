@@ -8,7 +8,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { DiffCallView, DiffResultView, ToolResult } from '@deepseek-ai/dsh-tools'
+import type { ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
@@ -79,16 +81,20 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     text: 'Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.',
   })
 
+  /** Build the static execution schema or one request's narrower model schema. */
+  const parameters = (modes: readonly SandboxMode[]) => ({
+    file_path: { type: 'string', required: true, description: 'Path to edit, resolved by the filesystem backend.' },
+    old_string: { type: 'string', required: true, description: 'Literal text to replace. Must match exactly.' },
+    new_string: { type: 'string', required: true, description: 'Literal replacement text. Use an empty string to delete the match.' },
+    replace_all: { type: 'boolean', description: 'Replace all matches. Defaults to false; when false, old_string must appear exactly once.' },
+    ...modes.length > 0 ? sandbox.schemaFields(modes) : {},
+  } as const satisfies ParameterSchemaSpec)
+
   ctx.tools.register(defineTool({
     name: 'edit',
     description: 'Edit an existing UTF-8 text file by replacing literal text.',
-    parameters: {
-      file_path: { type: 'string', required: true, description: 'Path to edit, resolved by the filesystem backend.' },
-      old_string: { type: 'string', required: true, description: 'Literal text to replace. Must match exactly.' },
-      new_string: { type: 'string', required: true, description: 'Literal replacement text. Use an empty string to delete the match.' },
-      replace_all: { type: 'boolean', description: 'Replace all matches. Defaults to false; when false, old_string must appear exactly once.' },
-      ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
-    },
+    parameters: parameters(sandbox.escalationModes),
+    modelSchema: context => ({ parameters: parameters(sandbox.modelEscalationModes(context)) }),
     output: {
       schema: {
         type: 'object',
@@ -134,7 +140,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
         // A sandbox denial becomes the shared [sandbox: …] marker (the model
         // recognizes it from bash); guarded mutation failures receive their
         // stable model-facing diagnostic; anything else passes through.
-        throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath)
+        throw remediateFsError(sandbox.mapError(error, sandboxPolicy, exec), target.displayPath)
       }
       ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
       return {

@@ -26,7 +26,7 @@ kind: "package-reference"
 
 `login()` 使用原接口的 `client_id=admin`、`client_secret=123456`、`scope=all` 和 `grant_type=password` query 参数调用 `POST /api/oauth/login`。JSON body 只包含去除首尾空白的账号和 MD5 密码，不发送租户 id。收到 Token 后，controller 会调用 `GET /api/system/corp/getCorpList`，合并 `corpList` 与 `joinCorpList`，解析 `data.corpId` 指定的当前租户，并一起保存规范化服务地址、Token、账号、当前租户和可用租户列表。
 
-`switchCorp()` 只接受认证状态中返回的租户，使用已保存的 Token 调用 `GET /api/system/corp/switchCorp/{corpId}`，随后再次读取租户列表。JDCloud 会在服务端刷新 Token 对应的租户上下文，因此 controller 保留已保存的 Token。切换成功会返回已确认租户的认证状态；普通失败保留当前登录，业务码 `600`、`601`、`602` 则删除过期登录。
+`switchCorp()` 只接受认证状态中返回的租户，使用已保存的 Token 调用 `GET /api/system/corp/switchCorp/{corpId}`，支持从 `data: corpId` 或 `data: { corpId }` 读取后端确认的租户 id，随后再次读取租户列表。JDCloud 会在服务端刷新 Token 对应的租户上下文，因此 controller 保留已保存的 Token。切换成功会返回已确认租户的认证状态；普通失败保留当前登录，业务码 `600`、`601`、`602` 则删除过期登录。
 
 Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 会使用已保存的 Token 调用同一租户列表接口。业务码 `600`、`601`、`602` 会删除登录记录，并以 Token 过期拒绝本次 Prompt。网络失败和其他业务码只拒绝本次提交，不删除登录状态。
 

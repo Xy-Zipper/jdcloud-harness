@@ -41,6 +41,17 @@ export const WIDER_MODES: Record<string, readonly SandboxMode[]> = {
 export const ESCALATION_TARGETS: readonly SandboxMode[] = ['workspace-write', 'danger-full-access']
 
 /**
+ * Resolve the model-visible escalation choices for one request. Approval must
+ * be usable, and every returned mode is strictly wider than the current mode.
+ * @param effectiveMode - the request's current sandbox mode.
+ * @param approvalAvailable - whether this request can reach user approval.
+ * @returns the legal one-shot escalation targets for the request.
+ */
+export function availableEscalationModes(effectiveMode: SandboxMode, approvalAvailable: boolean): readonly SandboxMode[] {
+  return approvalAvailable ? WIDER_MODES[effectiveMode] ?? [] : []
+}
+
+/**
  * Validate the escalation argument pairing a tool schema cannot express:
  * `sandbox_permissions` and `justification` travel together — an approval
  * prompt without a reason, or a reason driving nothing, is a malformed ask —
@@ -83,6 +94,18 @@ export function sandboxDenialMarker(mode: SandboxMode): string {
  */
 export function escalationHintMarker(subject: string): string {
   return `[sandbox: escalation available — retry this exact ${subject} once with sandbox_permissions (the narrowest wider mode that suffices) + justification; the approval prompt asks the user]`
+}
+
+/**
+ * Remove the exact model-facing escalation hint when the current request has
+ * no legal approval path. Other result text and sandbox markers are preserved.
+ * @param text - rendered tool output that may contain the hint line.
+ * @param subject - the tool family's noun used to build the exact hint.
+ * @returns the output without that one line.
+ */
+export function stripEscalationHint(text: string, subject: string): string {
+  const hint = escalationHintMarker(subject)
+  return text.split('\n').filter(line => line !== hint).join('\n')
 }
 
 /**

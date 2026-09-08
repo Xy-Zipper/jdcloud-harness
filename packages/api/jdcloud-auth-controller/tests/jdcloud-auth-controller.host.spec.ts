@@ -141,8 +141,11 @@ describe('minimal JDCloud HTTP client', () => {
     await expect(client.getCorpList('token', AbortSignal.timeout(1000))).rejects.toThrow(message)
   })
 
-  it('switches tenants with the current token and an encoded path identity', async () => {
-    const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data: 'corp/next' })))
+  it.each([
+    ['string', 'corp/next'],
+    ['object', { corpId: 'corp/next' }],
+  ])('switches tenants when the backend confirms the encoded path identity as a %s', async (_format, data) => {
+    const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data })))
     const client = new JdcloudClient('https://kindoucloud.com', fetcher)
     await expect(client.switchCorp('token', 'corp/next', AbortSignal.timeout(1000))).resolves.toBe('corp/next')
     const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
@@ -150,13 +153,16 @@ describe('minimal JDCloud HTTP client', () => {
     expect(init).toMatchObject({ method: 'GET', headers: { authorization: 'token' }, cache: 'no-store' })
   })
 
-  it.each([null, '', 'another-corp'])('rejects an unconfirmed tenant switch result %j', async (data) => {
-    const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
-      code: 200, msg: 'ok', data,
-    }))))
-    await expect(client.switchCorp('token', 'corp-next', AbortSignal.timeout(1000)))
-      .rejects.toThrow('did not confirm the requested tenant')
-  })
+  it.each([null, '', 'another-corp', {}, { corpId: '' }, { corpId: 'another-corp' }])(
+    'rejects an unconfirmed tenant switch result %j',
+    async (data) => {
+      const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
+        code: 200, msg: 'ok', data,
+      }))))
+      await expect(client.switchCorp('token', 'corp-next', AbortSignal.timeout(1000)))
+        .rejects.toThrow('did not confirm the requested tenant')
+    },
+  )
 
   it('rejects non-JSON, invalid, and message-less business responses', async () => {
     const fetcher = vi.fn()
@@ -380,7 +386,7 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
-      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: next.corpId }))
+      .mockResolvedValueOnce(json({ code: 200, msg: '切换成功', data: { corpId: next.corpId } }))
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData(next.corpId, next.corpName, false, [
           { corpId: 'corp-current', corpName: 'Current Tenant' },

@@ -11,15 +11,16 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
+import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { defineTool, TOOL_ABORTED } from '@deepseek-ai/dsh-tools'
-import type { GenericCallView, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
+import type { GenericCallView, ParameterSchemaSpec, TerminalCallView, ToolExecution, ToolResult, ToolResultView } from '@deepseek-ai/dsh-tools'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, canonicalPath, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, availableEscalationModes, canonicalPath, stripEscalationHint, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { DSH_ENV_PREFIX } from '@deepseek-ai/dsh-shell'
 import type { ShellRunResult } from '@deepseek-ai/dsh-shell'
@@ -198,6 +199,21 @@ export function apply(ctx: Context, config: Config = {}): void {
   const resolveSandboxPolicy = (exec: ToolExecution): SandboxExecutionPolicy | undefined =>
     sandboxPolicy?.resolve(exec.agent === undefined ? {} : { session: exec.agent.session })
 
+  /** Resolve only escalation modes this model request can legally obtain. */
+  const modelEscalationModes = (context: AssembleContext): readonly SandboxMode[] => {
+    if (escalationModes.length === 0) return []
+    const agent = context.agent
+    if (agent === undefined) return escalationModes
+    const approval = ctx.get('approval')
+    const approvalAvailable = approval !== undefined && approval.policyOf(agent.session) === 'ask'
+    const effectiveMode = (sandboxPolicy as SandboxPolicyService).resolve({ session: agent.session }).mode
+    return availableEscalationModes(effectiveMode, approvalAvailable)
+  }
+  /** Resolve the escalation modes that may be mentioned in one call's result. */
+  const resultEscalationModes = (exec: ToolExecution): readonly SandboxMode[] => exec.agent === undefined
+    ? escalationModes
+    : modelEscalationModes({ agent: exec.agent, scope: exec.agent })
+
   /**
    * Resolve a sandbox-escalation request through `ctx.approval` BEFORE
    * anything executes, delegating the shared fail-closed sequence (strict
@@ -238,34 +254,43 @@ export function apply(ctx: Context, config: Config = {}): void {
     text: 'Check the [exit code: N] marker on every bash result; investigate failures before moving on.',
   })
 
+  const parameters = (modes: readonly SandboxMode[]) => ({
+    command: { type: 'string', required: true, description: 'The bash command to execute.' },
+    description: {
+      type: 'string',
+      required: true,
+      description: 'Clear, concise description of what this command does in active voice, '
+        + '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; '
+        + '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
+    },
+    timeoutMs: { type: 'number', description: 'Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.' },
+    workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
+    ...backgroundEnabled ? {
+      run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
+    } : {},
+    ...modes.length > 0 ? {
+      sandbox_permissions: {
+        type: 'string' as const,
+        enum: [...modes],
+        description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
+      },
+      justification: {
+        type: 'string' as const,
+        description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
+      },
+    } : {},
+  } as const satisfies ParameterSchemaSpec)
+
   ctx.tools.register(defineTool({
     name: 'bash',
     description: bashDescription(backgroundEnabled, escalationModes),
-    parameters: {
-      command: { type: 'string', required: true, description: 'The bash command to execute.' },
-      description: {
-        type: 'string',
-        required: true,
-        description: 'Clear, concise description of what this command does in active voice, '
-          + '5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; '
-          + '"git status" → "Show working tree status"; "npm install" → "Install package dependencies".',
-      },
-      timeoutMs: { type: 'number', description: 'Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.' },
-      workdir: { type: 'string', description: 'Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.' },
-      ...backgroundEnabled ? {
-        run_in_background: { type: 'boolean' as const, description: 'Run in the background and return a job id immediately (collect with job_output, stop with job_kill). No timeout applies.' },
-      } : {},
-      ...escalationModes.length > 0 ? {
-        sandbox_permissions: {
-          type: 'string' as const,
-          enum: [...escalationModes],
-          description: 'The wider sandbox mode this command needs. Only valid as a one-shot retry of a command the sandbox just denied; requires justification and user approval.',
-        },
-        justification: {
-          type: 'string' as const,
-          description: 'Required with sandbox_permissions: one sentence for the user explaining why this exact command needs the wider access.',
-        },
-      } : {},
+    parameters: parameters(escalationModes),
+    modelSchema: (context) => {
+      const modes = modelEscalationModes(context)
+      return {
+        description: bashDescription(backgroundEnabled, modes),
+        parameters: parameters(modes),
+      }
     },
     output: {
       schema: {
@@ -326,6 +351,11 @@ export function apply(ctx: Context, config: Config = {}): void {
           : renderResult(value as { kind: 'foreground' } & ShellRunResult, escalationModes),
       }],
     },
+    finalizeContent: (exec, result) => resultEscalationModes(exec).length > 0
+      ? undefined
+      : result.content.map(block => block.type === 'text'
+        ? { ...block, text: stripEscalationHint(block.text, 'command') }
+        : block),
     async execute(args: BashToolArgs, exec) {
       validateBashArgs(args)
       // Description is display metadata; workdir defaults to the caller's session.
@@ -370,7 +400,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             return {
               cancel: () => void proc.kill(),
               done: proc.done.then(() => processOutcome(proc)),
-              readOutput: () => renderProcessRead(proc.readOutput(), proc.sandbox, escalationModes),
+              readOutput: () => renderProcessRead(proc.readOutput(), proc.sandbox, resultEscalationModes(exec)),
             }
           },
         })

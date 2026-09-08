@@ -11,9 +11,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import { ESCALATION_TARGETS, approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
+import { ESCALATION_TARGETS, approveEscalation, availableEscalationModes, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
 import { FsError } from '@deepseek-ai/dsh-fs'
 
@@ -54,13 +55,14 @@ export class FsSandboxController {
    * only under a confining backend (guard on {@link escalationModes}); the
    * enum pins the closed target vocabulary, the strict-wider check happens per
    * call at execution.
+   * @param modes - target modes to expose; defaults to the composition-wide set.
    * @returns the two escalation parameter specs.
    */
-  schemaFields(): EscalationSchemaFields {
+  schemaFields(modes: readonly SandboxMode[] = this.escalationModes): EscalationSchemaFields {
     return {
       sandbox_permissions: {
         type: 'string',
-        enum: [...this.escalationModes],
+        enum: [...modes],
         description: 'The wider sandbox mode this file operation needs. Only valid as a one-shot retry '
           + 'of an operation the sandbox just denied; requires justification and user approval.',
       },
@@ -70,6 +72,22 @@ export class FsSandboxController {
           + 'why this exact file operation needs the wider access.',
       },
     }
+  }
+
+  /**
+   * Resolve only escalation modes the current model request can legally obtain.
+   * Agent-less catalog assembly retains the composition-wide target vocabulary.
+   * @param context - the current model-request assembly context.
+   * @returns the request's strictly wider, approvable modes.
+   */
+  modelEscalationModes(context: AssembleContext): readonly SandboxMode[] {
+    if (this.escalationModes.length === 0) return []
+    const agent = context.agent
+    if (agent === undefined) return this.escalationModes
+    const approval = this.ctx.get('approval')
+    const approvalAvailable = approval !== undefined && approval.policyOf(agent.session) === 'ask'
+    const effectiveMode = (this.policy as SandboxPolicyService).resolve({ session: agent.session }).mode
+    return availableEscalationModes(effectiveMode, approvalAvailable)
   }
 
   /**
@@ -119,13 +137,19 @@ export class FsSandboxController {
    * hint always applies here.
    * @param error - the error thrown by the mutation.
    * @param policy - the policy stamped onto the call (names the mode in the marker).
+   * @param exec - the current execution, used to decide whether an escalation hint is actionable.
    * @returns the error to throw — the marker `FsError` for a sandbox denial, else the original.
    */
-  mapError(error: unknown, policy: SandboxExecutionPolicy | undefined): unknown {
+  mapError(error: unknown, policy: SandboxExecutionPolicy | undefined, exec: ToolExecution): unknown {
     if (!(error instanceof FsError) || error.code !== 'FS_SANDBOX_DENIED') return error
     // A FS_SANDBOX_DENIED only arises under a confining backend, whose tool
     // path always resolves a policy before mutation.
     const mode = (policy as SandboxExecutionPolicy).mode
-    return new FsError(`${sandboxDenialMarker(mode)}\n${escalationHintMarker('operation')}`, 'FS_SANDBOX_DENIED', { cause: error })
+    const marker = sandboxDenialMarker(mode)
+    const modes = exec.agent === undefined
+      ? this.escalationModes
+      : this.modelEscalationModes({ agent: exec.agent, scope: exec.agent })
+    const message = modes.length > 0 ? `${marker}\n${escalationHintMarker('operation')}` : marker
+    return new FsError(message, 'FS_SANDBOX_DENIED', { cause: error })
   }
 }

@@ -1938,6 +1938,44 @@ describe('ToolRuntime', () => {
     }])
   })
 
+  it('projects a request-specific model schema without changing execution validation', async () => {
+    const ctx = await setup()
+    ctx.tools.register(defineTool({
+      name: 'dynamic-schema',
+      description: 'static description',
+      parameters: {
+        text: { type: 'string', required: true },
+        approval: { type: 'string' },
+      },
+      modelSchema: context => context.signal === undefined
+        ? {}
+        : {
+          description: 'request description',
+          parameters: { text: { type: 'string', required: true } },
+        },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+      execute: async args => args.approval ?? args.text,
+    }))
+
+    const assembly = await ctx.systemPrompt.assemble({ signal: testToolSignal })
+    expect(assembly.tools.find(tool => tool.name === 'dynamic-schema')).toEqual({
+      name: 'dynamic-schema',
+      description: 'request description',
+      parameters: {
+        type: 'object',
+        properties: { text: { type: 'string' } },
+        required: ['text'],
+      },
+    })
+    expect(ctx.tools.schemas().find(tool => tool.name === 'dynamic-schema')?.description).toBe('static description')
+    expect((await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: ToolCallId('dynamic-schema-exec'),
+      name: 'dynamic-schema',
+      arguments: { text: 'fallback', approval: 'accepted by the execution schema' },
+    })).value).toBe('accepted by the execution schema')
+  })
+
   it('schemas() snapshots deeply nested parameters without using structured-clone recursion', async () => {
     const ctx = await setup()
     const depth = 5_000

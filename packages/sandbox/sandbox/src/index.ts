@@ -12,9 +12,11 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 export {
   ESCALATION_TARGETS,
   WIDER_MODES,
+  availableEscalationModes,
   approveEscalation,
   escalationHintMarker,
   sandboxDenialMarker,
+  stripEscalationHint,
   validateEscalationArgs,
 } from './escalation.ts'
 export type { EscalationApproval, EscalationApprover, EscalationOutcome, EscalationRequest } from './escalation.ts'

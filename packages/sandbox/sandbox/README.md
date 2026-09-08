@@ -63,7 +63,7 @@ Enforcement is reported per call: `full` means the backend governs every promise
 
 ### Denied calls and escalation
 
-When a confined call is denied, the operation reports a denial marker naming the mode — `[sandbox: file access denied under <mode> mode]` — and, when the composition advertises escalation, an escalation hint. The model may retry the exact call once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a `justification`; the user sees one approval prompt and can allow once, reject, or cancel. The escalation must be strictly wider than the call's effective mode, and it applies to that one call only.
+When a confined call is denied, the operation reports a denial marker naming the mode — `[sandbox: file access denied under <mode> mode]` — and adds an escalation hint only when that session can ask for a strictly wider mode. The request schema exposes only those wider modes; it omits `sandbox_permissions` and `justification` when the mode is already `danger-full-access`, approval policy is `never`, or no approval service is composed. The model may retry the exact call once with a visible `sandbox_permissions` choice plus a `justification`; the user sees one approval prompt and can allow once, reject, or cancel. The escalation applies to that one call only.
 
 ### Fail-closed behavior
 
@@ -97,7 +97,7 @@ This section explains the design decisions behind the contract and points at the
 
 ### Escalation choreography
 
-The ladder is a closed table — `read-only` may escalate to `workspace-write` or `danger-full-access`, `workspace-write` only to `danger-full-access` — checked at execution, never baked into a tool schema, whose enum stays the closed target vocabulary. [`approveEscalation`](src/escalation.ts) validates the `sandbox_permissions`/`justification` pairing, rejects non-widening requests without prompting a human, and maps every approval outcome to its own error before anything executes.
+The ladder is a closed table — `read-only` may escalate to `workspace-write` or `danger-full-access`, `workspace-write` only to `danger-full-access`. Request assembly projects the applicable row into the tool schema when approval is usable; execution independently checks the same strict-widening rule. [`approveEscalation`](src/escalation.ts) validates the `sandbox_permissions`/`justification` pairing, rejects non-widening requests without prompting a human, and maps every approval outcome to its own error before anything executes.
 
 ### Writable roots
 

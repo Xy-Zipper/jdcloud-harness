@@ -3,6 +3,7 @@
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRunContext, ToolResult } from './index.ts'
 import { assertSupportedJsonSchema, isJsonSchemaRecord, isPlainJsonArray, JsonSchemaError, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode, JsonSchemaScalar, ObjectJsonSchema } from './json-schema.ts'
@@ -487,6 +488,17 @@ export interface DefineToolOptions<S extends ParameterSchemaSpec, O extends Valu
   readonly description: string
   /** Per-property parameter schema compiled to an implicit open object root. */
   readonly parameters: S
+  /**
+   * Pure per-request projection of model-visible schema fields. Its parameter
+   * map must be equal to or narrower than {@link parameters}; execution keeps
+   * validating against the complete static map.
+   * @param context - the current model-request assembly context.
+   * @returns model-facing replacements, or an empty object to keep both fields.
+   */
+  modelSchema?(context: AssembleContext): {
+    readonly description?: string
+    readonly parameters?: ParameterSchemaSpec
+  }
   /** Canonical output schema plus pure Native and presentation projections. */
   readonly output: {
     /** Schema enforced against every successful body or policy-replaced value. */
@@ -549,6 +561,8 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
   // oxlint-disable-next-line typescript/unbound-method
   const userExecute = options.execute
   // oxlint-disable-next-line typescript/unbound-method
+  const userModelSchema = options.modelSchema
+  // oxlint-disable-next-line typescript/unbound-method
   const userFinalizeContent = options.finalizeContent
   // oxlint-disable-next-line typescript/unbound-method
   const userRender = options.output.render
@@ -587,6 +601,17 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
       if (violations.length > 0) throw new ToolArgsError(violations)
       return userExecute(args as InferArgs<S>, exec) as Promise<JsonValue>
     },
+  }
+  if (userModelSchema) {
+    tool.modelSchema = (context) => {
+      const projected = userModelSchema(context)
+      return {
+        ...projected.description === undefined ? {} : { description: projected.description },
+        ...projected.parameters === undefined
+          ? {}
+          : { parameters: parameterSchemaSpecToJsonSchema(projected.parameters) as unknown as Record<string, unknown> },
+      }
+    }
   }
   if (userFinalizeContent) {
     tool.finalizeContent = (exec, result) => userFinalizeContent(exec, result)

@@ -106,6 +106,7 @@ export function AccountSeat({ wide, status, logout, switchCorp, t }: JdcloudAcco
         footer={footer}
         viewportClassName={css.tenantViewport as string}
         selectedId={`${CORP_ID_PREFIX}${status.corpId}`}
+        selection="fill"
         onSelect={onSelect}
         portal
         anchor={(
