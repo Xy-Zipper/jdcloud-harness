@@ -594,6 +594,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   CredentialRecordInfo: 'credentials.md',
   ResolvedCredential: 'credentials.md',
   JdcloudAuthStatus: 'credentials.md',
+  JdcloudAuthenticatedRequest: 'credentials.md',
   JdcloudLoginRequest: 'credentials.md',
   AskUserQuestionAnswer: 'user-questions.md',
   AskUserQuestionRequest: 'user-questions.md',

@@ -22,6 +22,8 @@
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - paragraph: partial
 - status: Deep diving...
+- region "To-dos":
+  - button "To-dos 1 in progress"
 - textbox "Message or run a task... / commands, @ files or sessions"
 - button "Commands":
   - img

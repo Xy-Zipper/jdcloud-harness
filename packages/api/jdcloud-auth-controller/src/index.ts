@@ -7,7 +7,12 @@ import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { isJdcloudAuthError, JdcloudApiError, JdcloudClient, normalizeJdcloudBaseUrl } from './client.ts'
-import type { JdcloudAuthStatus, JdcloudCorp, JdcloudLoginRequest } from './types.ts'
+import type {
+  JdcloudAuthenticatedRequest,
+  JdcloudAuthStatus,
+  JdcloudCorp,
+  JdcloudLoginRequest,
+} from './types.ts'
 
 export type * from './types.ts'
 export { isJdcloudAuthError, JdcloudApiError, JdcloudClient, normalizeJdcloudBaseUrl } from './client.ts'
@@ -203,6 +208,29 @@ export class JdcloudAuthController extends TypertRemoteService {
   async logout(): Promise<JdcloudAuthStatus> {
     await this.ctx.credentials.deleteRecord(AUTH_KEY)
     return { authenticated: false, baseUrl: this.defaultBaseUrl }
+  }
+
+  /**
+   * Send one Host-only JDCloud API request with the stored login.
+   * @param request - Fixed API path, method, and optional JSON body.
+   * @param signal - Caller cancellation combined with the configured request timeout.
+   * @returns JDCloud response data without exposing the stored token.
+   */
+  async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T> {
+    const auth = await this.readAuth()
+    if (auth === undefined) {
+      throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
+    }
+    try {
+      return await new JdcloudClient(auth.baseUrl, this.fetcher)
+        .requestAuthenticated<T>(auth.token, request, this.operationSignal(signal))
+    } catch (error) {
+      if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
+        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' })
+      }
+      throw error
+    }
   }
 
   private async validateStoredLogin(callerSignal: AbortSignal): Promise<void> {

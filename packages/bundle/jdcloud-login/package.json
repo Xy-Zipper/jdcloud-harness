@@ -34,7 +34,8 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-api-jdcloud-auth-controller": "workspace:^",
-    "@deepseek-ai/dsh-client-ui-jdcloud-login": "workspace:^"
+    "@deepseek-ai/dsh-client-ui-jdcloud-login": "workspace:^",
+    "@deepseek-ai/dsh-tool-jdcloud-lowcode": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^"

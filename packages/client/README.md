@@ -41,7 +41,7 @@ The kernel packages boot and serve the page; the UI feature packages present it.
 | [`ui-primitives/`](ui-primitives/README.md) | Provides shared React controls, icons, and content renderers | — |
 | [`ui-attachment/`](ui-attachment/README.md) | Registers composer and message-image attachment presentation | — |
 | [`ui-layout/`](ui-layout/README.md) | Arranges the main application regions | — |
-| [`ui-jdcloud-login/`](ui-jdcloud-login/README.md) | Shadows the Web root with optional JDCloud login until Host authentication succeeds | — |
+| [`ui-jdcloud-login/`](ui-jdcloud-login/README.md) | Adds JDCloud login, account controls, and JDCloud Harness Web branding | — |
 | [`ui-sidebar/`](ui-sidebar/README.md) | Presents workspace and session navigation | — |
 | [`ui-brand-official/`](ui-brand-official/README.md) | Fills the generic browser-brand slots with the official name and marks | — |
 | [`ui-workspace/`](ui-workspace/README.md) | Provides workspace selection and creation surfaces | — |

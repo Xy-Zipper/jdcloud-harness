@@ -287,6 +287,14 @@ Store credentials, expose login commands, and validate each browser prompt.
  * @returns Redacted unauthenticated state.
  */
 @Remote async logout(): Promise<JdcloudAuthStatus>
+
+/**
+ * Send one Host-only JDCloud API request with the stored login.
+ * @param request - Fixed API path, method, and optional JSON body.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns JDCloud response data without exposing the stored token.
+ */
+async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>
 ```
 
 Source: [`packages/api/jdcloud-auth-controller/src/index.ts`](../../packages/api/jdcloud-auth-controller/src/index.ts)

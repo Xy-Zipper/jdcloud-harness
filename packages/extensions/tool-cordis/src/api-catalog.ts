@@ -1155,6 +1155,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
         returns: 'Redacted unauthenticated state.',
       },
+      {
+        signature: 'async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>',
+        description: 'Send one Host-only JDCloud API request with the stored login.',
+        parameters: [{ name: 'request', description: 'Fixed API path, method, and optional JSON body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'JDCloud response data without exposing the stored token.',
+      },
     ],
   },
   {
@@ -4347,6 +4353,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'JdcloudAuthenticatedRequest',
+    declaration: 'export interface JdcloudAuthenticatedRequest {\n    readonly path: `/api/${string}`;\n    readonly method: \'GET\' | \'POST\' | \'PUT\' | \'DELETE\';\n    readonly body?: unknown;\n}',
   },
   {
     name: 'JdcloudAuthStatus',

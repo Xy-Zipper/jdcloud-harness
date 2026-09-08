@@ -1453,8 +1453,12 @@ function projectionFramesOf(
   if (type === 'goal/change') {
     return [{ type: 'projection', sessionId: id, key: 'goal', value: backscanGoal(log), seq: event.seq }]
   }
-  // Standing-plan fold: writes replace the list; turn/start clears it (null).
-  if (type === 'todo/write' || type === 'turn/start') {
+  // Standing-plan fold: writes replace the list; the next turn or a user stop
+  // clears it (null), while other turn endings retain it.
+  const userStoppedTurn = event.type === 'turn/end'
+    && event.data.reason.kind === 'aborted'
+    && event.data.reason.reason.kind === 'user'
+  if (type === 'todo/write' || type === 'turn/start' || userStoppedTurn) {
     return [{
       type: 'projection',
       sessionId: id,
@@ -1667,13 +1671,16 @@ function compareSearchCandidates(a: FixtureSearchCandidate, b: FixtureSearchCand
 
 /**
  * Current plan projection over the full log (host parallel: latest todo/write
- * with no later turn/start; a new turn retires the previous plan).
+ * with no later turn/start or user-aborted turn/end).
  */
 function backscanTodos(log: readonly SessionEvent[]): TodoItem[] | undefined {
   for (let i = log.length - 1; i >= 0; i--) {
     const event = log[i]
     if (event === undefined) continue
-    if (event.type === 'turn/start') return undefined
+    if (event.type === 'turn/start'
+      || (event.type === 'turn/end'
+        && event.data.reason.kind === 'aborted'
+        && event.data.reason.reason.kind === 'user')) return undefined
     if (event.type === 'todo/write') return event.data.todos
   }
   return undefined

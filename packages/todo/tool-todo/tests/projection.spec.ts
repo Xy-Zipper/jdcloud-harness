@@ -82,7 +82,7 @@ describe('todos projection provider', () => {
     expect(projections?.asOfSeq).toBe(session.seq - 1)
   })
 
-  it('clears the standing plan on the next turn/start (turn/end keeps it)', async () => {
+  it('clears the standing plan on the next turn/start (completed turn/end keeps it)', async () => {
     const bench = await harness(true)
     const session = bench.session
     seedMessage(session)
@@ -92,6 +92,24 @@ describe('todos projection provider', () => {
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     expect((await bench.tailProjections())?.values.todos).toEqual(list)
     session.append('turn/start', { turn: 2 })
+    const cleared = await bench.tailProjections()
+    expect(cleared?.values.todos).toBeNull()
+    expect(cleared?.asOfSeq).toBe(session.seq - 1)
+  })
+
+  it('clears the standing plan only when the user stops the turn', async () => {
+    const bench = await harness(true)
+    const session = bench.session
+    seedMessage(session)
+    const list: TodoItem[] = [{ content: 'active', status: 'in_progress' }]
+    session.append('turn/start', { turn: 1 })
+    session.append('todo/write', { todos: list })
+    session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'parent' } } })
+    expect((await bench.tailProjections())?.values.todos).toEqual(list)
+
+    session.append('turn/start', { turn: 2 })
+    session.append('todo/write', { todos: list })
+    session.append('turn/end', { turn: 2, reason: { kind: 'aborted', reason: { kind: 'user' } } })
     const cleared = await bench.tailProjections()
     expect(cleared?.values.todos).toBeNull()
     expect(cleared?.asOfSeq).toBe(session.seq - 1)

@@ -1,4 +1,4 @@
-# Agent Note: Web todo 展示——快照副作用通道 + 两个渲染面
+# Agent Note: Web todo 展示——Host 投影 + 两个渲染面
 
 Status: implemented
 
@@ -10,11 +10,11 @@ Status: implemented
 
 ## 决策
 
-把 `todo/write` 当作会话副作用消费，而非 surface 节点，并在两个面上渲染它，这两个面正对应 TUI 已经绘制的那套划分。
+把 `todo/write` 折叠进 Host 会话投影，而非对话节点，并在两个面上渲染它，这两个面正对应 TUI 已经绘制的那套划分。
 
-### 副作用通道，与窗口回放收敛
+### Host 投影，通过基线与帧收敛
 
-`applyEventSideEffects` 新增一个 `todo/write` 分支（整份列表，后写覆盖先写），并在 `turn/start` 清空（[按轮次界定的计划生命周期](2026-07-28-todo-plan-clears-on-next-turn.zh.md)）。`rebuildDerivedFromWindow` 从空计划扫过窗口，仅当窗口从未判定计划（无 `todo/write` 且无 `turn/start`）时恢复尾页种子；否则以窗口内写入／`turn/start` 折叠为准。`installWindow` 的每个调用方都是尾页请求（`doOpen`、其补洞重拉、`repairGap`；`loadOlder` 只往前拼接、不再播种），而 host 对尾页请求要么带上投影、要么在没有当前有效的计划时省略——因此字段缺失就是权威的空列表，直接照此赋值。这个区分在回滚场景上要紧：若 host 在持久化实时写入前崩溃，log 里就是空的，此时保留旧值会让已回滚的计划永远留在屏幕上。`ConversationSnapshot.todos` 是读取面。这遵循事件自身的约定（「仅存在于日志中的 UI 状态；绝不纳入派生历史」）：把每次写入作为对话节点呈现，会让已被取代的列表看起来仍然有效。
+`dsh-tool-todo` 通过 `ctx.sessionProjections` 注册 `todos` 单元。它的 Host 折叠把每个 `todo/write` 作为整份列表替换，在 `turn/start` 和用户中止型 `turn/end` 时返回 `null`，并为其他事件保留当前引用（[按轮次界定的计划生命周期](2026-07-28-todo-plan-clears-on-next-turn.zh.md)、[用户停止修正](../bug-fix/2026-09-08-user-stop-clears-todo-plan.zh.md)）。Session Controller 在会话 follow 打开基线和控制流基线中携带已完成的值，并把后续变化发布为整值 `projection` 帧。每个会话的 `ProjectionValueStore` 按较高序号优先规则合并这些输入，并暴露标识稳定的逐键读取面；浏览器不执行 todo 专用事件折叠，`ConversationSnapshot` 也不携带投影值。标准件把该读取面绑定为 `useProjection`，`TodoDock` 再读取 `useProjection('todos')`：列表会渲染横条，而 `null` 或缺失的 `undefined` 值不会渲染任何内容。当前值不进入对话节点，从而避免已被取代的 todo 快照显示成当前对话内容。
 
 ### TodoPanel：持久化列表作为一条常驻横条
 
@@ -33,4 +33,4 @@ Status: implemented
 
 ## 后果
 
-回放正确性由一条代码路径掌管：未来对窗口重建的任何改动都会自然保持 todos 一致；fx-alpha 第 71 轮的 fixture（测试前置数据）加上 `packages/client/ui-conversation/tests/todo-panel.client.spec.tsx` 固定整条链（行摘要与状态、dock 面板内容、折叠往返）。`todos` 是 `ConversationSnapshot` 的必填字段，所以 spec 里脚本化的 fake 必须带上它。自动化专用的 ACP 桥接刻意不做 todo 呈现；Web 各面渲染同一个事件，只新增一个协议字段，不新增事件类型。这个由 host 提供的字段正是冷加载重建的依据：history 尾页附带 `todos`——全量 log 上当前有效的计划（其后没有更晚 `turn/start` 的最近一次 `todo/write`），独立于分页窗口计算（与 view 配对同一种 backscan 姿势）——因此重开会话时若计划仍然有效且最后一次写入落在窗口之前，计划也照常恢复；该值跨往前翻页保留，之后的任何写入照常覆盖，更晚的 `turn/start` 会清空，而尾页响应不带投影时复位为空。
+持久化 `todo/write` 事件仍是当前计划的来源，而 Host 投影和通用传输／存储路径是客户端读取它的唯一途径。冷打开和重连会为同一个逐会话 `ProjectionValueStore` 播种，实时帧继续推进它，向前加载更早的历史页不会改变它；因此，用户停止会隐藏横条，但不会追加伪造的空写入，也不会删除已记录的工具调用和事件。自动化专用的 ACP 桥接不呈现 todo，而 Web 保留投影驱动的 dock 和独立的逐调用 `todo_write` 行。`packages/todo/tool-todo/tests/projection.spec.ts` 固定正常完成、用户中止和其他中止来源的生命周期；`packages/api/session-controller/tests/projection-store.client.spec.ts` 固定基线／帧排序；`packages/client/ui-conversation/tests/todo-panel.client.spec.tsx` 固定 dock；Web live-interactions 场景固定用户停止后面板消失。

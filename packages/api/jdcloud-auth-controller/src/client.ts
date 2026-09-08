@@ -1,7 +1,7 @@
 /** Minimal JDCloud HTTP client for password login and tenant selection. */
 
 import { createHash } from 'node:crypto'
-import type { JdcloudCorp } from './types.ts'
+import type { JdcloudAuthenticatedRequest, JdcloudCorp } from './types.ts'
 
 const AUTH_ERROR_CODES = new Set([600, 601, 602])
 
@@ -139,6 +139,43 @@ export class JdcloudClient {
       throw new Error('JDCloud tenant-switch response did not confirm the requested tenant')
     }
     return result.data
+  }
+
+  /**
+   * Send one authenticated request to a fixed JDCloud API path.
+   * @param token - Raw JDCloud authorization header value.
+   * @param request - API path, method, and optional JSON body.
+   * @param signal - Request cancellation signal.
+   * @returns JDCloud response data.
+   */
+  async requestAuthenticated<T>(
+    token: string,
+    request: JdcloudAuthenticatedRequest,
+    signal: AbortSignal,
+  ): Promise<T> {
+    const url = this.resolveApiUrl(request.path)
+    const headers: Record<string, string> = { authorization: token }
+    const init: RequestInit = { method: request.method, headers, signal }
+    if (request.method === 'GET') {
+      url.searchParams.set('n', String(Date.now()))
+      init.cache = 'no-store'
+    }
+    if (request.body !== undefined) {
+      headers['content-type'] = 'application/json'
+      init.body = JSON.stringify(request.body)
+    }
+    const result = await this.request<T>(url.href, init)
+    return result.data
+  }
+
+  private resolveApiUrl(path: string): URL {
+    const baseUrl = new URL(this.baseUrl)
+    const url = new URL(`${this.baseUrl}${path}`)
+    const apiPrefix = `${baseUrl.pathname.replace(/\/$/, '')}/api/`
+    if (!path.startsWith('/api/') || url.origin !== baseUrl.origin || !url.pathname.startsWith(apiPrefix)) {
+      throw new TypeError('JDCloud authenticated request path must start with /api/')
+    }
+    return url
   }
 
   private async request<T>(url: string, init: RequestInit): Promise<ActionResult<T>> {

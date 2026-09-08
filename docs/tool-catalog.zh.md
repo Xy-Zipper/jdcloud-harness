@@ -32,6 +32,7 @@
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`、`grep` | `ctx.tools`、`ctx.subprocess`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn 随包提供的 ripgrep 二进制文件（`@vscode/ripgrep`），并作为普通前台调用运行，绝不作为后台任务；无需在宿主机安装 `rg`，也不经过 shell 层。本目录使用 `sampleOverCapGlobResults: true`；部署必须显式选择该行为。结果超过上限时，会通过可选的 ctx.spillStore 后端保存完整的格式化列表；在共置部署中，如果后端公开本地路径，返回的定位信息可供后续读取／搜索。 |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`、`terminal_list`、`terminal_open`、`terminal_read`、`terminal_send`、`terminal_signal` | `ctx.tools`、`ctx.terminals`、`ctx.systemPrompt`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | 这 6 个终端工具需要选择启用，用于补充一次性 bash／文件系统工具。`terminal_send(run_in_background: true)` 会注册到 `ctx.jobs`；schema 不包含 TUI、具名按键序列、BEL、调整尺寸、自动启动和跨 agent 共享。 |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`ctx.systemPrompt`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
+| `@deepseek-ai/dsh-tool-jdcloud-lowcode` | `jdcloud_lowcode_create`、`jdcloud_lowcode_create_table`、`jdcloud_lowcode_delete`、`jdcloud_lowcode_describe`、`jdcloud_lowcode_get`、`jdcloud_lowcode_query`、`jdcloud_lowcode_update` | `ctx.tools`、`ctx.agents`、`ctx.jdcloudAuthController`、`ctx.sessionProjections`、`ctx.systemPrompt`、`an admitted browser prompt for current-Turn capability authority` | `user/message capability snapshot`、`tool/call`、`tool/result`、`authorized JDCloud data mutations` | - | 这七个工具复用由 Host 持有的 JDCloud 认证，并在请求前强制校验当前轮次的菜单、写入授权和管理员权限。schema 采集会挂载不发起操作的认证服务，因为采集期间不会执行任何工具。 |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`、`ctx.lsp`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，因此其模型可见 schema 在更换提供方时保持稳定。运行时要求已注册提供方，例如 `@deepseek-ai/dsh-lsp-stdio`；如果没有提供方，查询会返回结构化 `LSP_UNAVAILABLE` 错误，而不会改变 schema。 |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`、`ctx.workflowEngine`、`ctx.subagents`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents every fresh round)` | `tool/call`、`tool/result`、`workflow and child session events during execution` | - | 固定的前台工作流会在每个 Round 启动一个全新的结构化子级；模型只能选择不可变目标和可选的 Round 上限。 |
@@ -1101,6 +1102,360 @@ glob 和 grep 是无条件可用的发现工具，通过 ctx.subprocess spawn �
 来源：[`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/index.ts)
 
 create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。
+
+<a id="deepseek-aidsh-tool-jdcloud-lowcode"></a>
+
+## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
+
+### `jdcloud_lowcode_create`
+
+创建一条表单记录或发起一个流程。Host 执行要求当前菜单快照授予 addData。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "data": {
+      "type": "object",
+      "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "menu_id",
+    "data"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_create_table`
+
+创建一个 JDCloud 表单，保存其字段，并向明确的授权对象授予 manage-all-data。Host 执行要求当前 userPermission 快照中的 systemAdministrator。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "full_name": {
+      "type": "string",
+      "description": "New JDCloud form name."
+    },
+    "parent_id": {
+      "type": "string",
+      "description": "Parent menu id. Omit for the top level."
+    },
+    "authorization_object_ids": {
+      "type": "array",
+      "description": "Non-empty department, role, or user ids that receive the manage-all-data permission group.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "en_code": {
+            "type": "string",
+            "description": "Unique database field code."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable field label."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "switch",
+              "single_select",
+              "multi_select",
+              "date",
+              "time"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether the generated form requires a value."
+          },
+          "options": {
+            "type": "array",
+            "description": "Required only for single_select and multi_select.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ]
+            }
+          }
+        },
+        "required": [
+          "en_code",
+          "label",
+          "kind"
+        ]
+      }
+    }
+  },
+  "required": [
+    "full_name",
+    "authorization_object_ids",
+    "fields"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_delete`
+
+删除一条 JDCloud 记录。Host 执行要求当前菜单快照授予 deleteData。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_describe`
+
+在查询或写入已授权的 JDCloud 表单或流程前，读取其字段代码和字段类型。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    }
+  },
+  "required": [
+    "menu_id"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_get`
+
+按准确的 _id 读取一条 JDCloud 表单或流程记录。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "association": {
+      "type": "boolean",
+      "description": "Whether JDCloud should include associated records."
+    },
+    "user_info_convert": {
+      "type": "boolean",
+      "description": "Whether JDCloud should expand user ids into user objects."
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_query`
+
+查询一个已授权 JDCloud 表单或流程中的记录。所有传入的过滤器都使用 AND 组合。日期范围使用毫秒时间戳和 range 方法。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "current_page": {
+      "type": "integer",
+      "description": "One-based page number. Defaults to 1."
+    },
+    "page_size": {
+      "type": "integer",
+      "description": "Requested rows, bounded by the plugin maxPageSize."
+    },
+    "association": {
+      "type": "boolean",
+      "description": "Whether JDCloud should include associated records."
+    },
+    "user_info_convert": {
+      "type": "boolean",
+      "description": "Whether JDCloud should expand user ids into user objects."
+    },
+    "sort": {
+      "type": "object",
+      "description": "Field-code map whose values are asc or desc.",
+      "additionalProperties": true
+    },
+    "filters": {
+      "type": "array",
+      "description": "Flat filter list combined with AND.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "en_code": {
+            "type": "string",
+            "description": "JDCloud field code."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "ne",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "like",
+              "in",
+              "nin",
+              "enable",
+              "unEnable",
+              "empty",
+              "unEmpty",
+              "range"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "custom",
+              "field",
+              "systemField"
+            ]
+          },
+          "value": {
+            "description": "Scalar or array expected by the selected filter method."
+          },
+          "jdcloud_key": {
+            "type": "string",
+            "description": "Optional component key returned by field discovery."
+          }
+        },
+        "required": [
+          "en_code",
+          "method",
+          "type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "menu_id"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_update`
+
+更新一条 JDCloud 记录。Host 执行要求 editData，并移除值为空的自动编号字段。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "data": {
+      "type": "object",
+      "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id",
+    "data"
+  ]
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+这七个工具复用由 Host 持有的 JDCloud 认证，并在请求前强制校验当前轮次的菜单、写入授权和管理员权限。schema 采集会挂载不发起操作的认证服务，因为采集期间不会执行任何工具。
 
 <a id="deepseek-aidsh-schedule"></a>
 

@@ -1,5 +1,5 @@
 ---
-description: "安装 JDCloud 认证与登录页的可选 Web profile patch layer。"
+description: "安装 JDCloud 认证、账号控制、低代码对话工具与 Web 品牌的可选 Web profile patch layer。"
 kind: "package-bundle"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`@deepseek-ai/dsh-jdcloud-login` 是面向 Web profile 的可选纯 patch bundle。它把 JDCloud Host 认证 controller、浏览器登录页和侧边栏账号摘要作为一个可部署 layer 安装。
+`@deepseek-ai/dsh-jdcloud-login` 是面向 Web profile 的可选纯 patch bundle。它把 JDCloud Host 认证 controller、浏览器登录页、侧边栏账号摘要、低代码对话工具和 JDCloud Harness Web 品牌作为一个可部署 layer 安装。
 
 ## 目录
 
@@ -35,14 +35,16 @@ JDCLOUD_DEFAULT_BASE_URL=https://example.com
 
 该值只作为初始地址。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
 
+低代码 row 会为每个用户 Prompt 注入仅包含表单与流程菜单项（type 3 和 4）的能力快照。它还提供由 Host 执行时强制校验当前权限的低代码数据工具。
+
 <a id="model-experience"></a>
 ## 模型体验
 
-无，因为 bundle 在 Session 投递前增加浏览器认证策略。
+通过 `@deepseek-ai/dsh-tool-jdcloud-lowcode` 间接影响，该包负责能力快照与低代码工具 schema。
 
 #### KV Cache 影响
 
-无。
+bundle 本身不增加请求前缀；插入的低代码包负责快照与工具 schema 的变化。
 
 ## 已知限制与延期工作
 
@@ -56,4 +58,4 @@ JDCLOUD_DEFAULT_BASE_URL=https://example.com
 
 无。
 
-**运行时不变式：** 不发布伴生入口。Loader 校验两个插入的 package row，各 package 负责自身运行时检查。
+**运行时不变式：** 不发布伴生入口。Loader 校验三个插入的 package row，各 package 负责自身运行时检查。

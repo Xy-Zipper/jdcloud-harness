@@ -213,6 +213,7 @@
     { "path": "./packages/interaction/user-approval" },
     { "path": "./packages/interaction/permission-presets" },
     { "path": "./packages/core/tools" },
+    { "path": "./packages/jdcloud/tool-jdcloud-lowcode" },
     { "path": "./packages/core/agent-tool-presentation" },
     { "path": "./packages/skill/skill" },
     { "path": "./packages/skill/skill-badge" },

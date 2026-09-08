@@ -6,12 +6,15 @@ import type {} from '@deepseek-ai/dsh-api-jdcloud-auth-controller/remote'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { JdcloudAuthStatus } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
 import { AccountSeat, type JdcloudAccountInjected } from './AccountSeat.tsx'
+import { JdcloudBrandMark, JdcloudBrandName } from './Brand.tsx'
 import { LoginPage, type JdcloudLoginInjected } from './LoginPage.tsx'
 import { en, NS, zh } from './locales.ts'
 
 const AUTH_RECORD_KEY = 'jdcloud-auth-controller/login'
+const BRAND_PRIORITY = -10
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -22,6 +25,27 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Services required after the generated JDCloud Remote namespace is mounted. */
 export const uiInject = ['remote', 'remote.jdcloudAuth', 'slots', 'locale']
+
+/** Install JDCloud occupants ahead of generic and official brand fallbacks. */
+function installJdcloudBrand(ctx: ClientContext): () => void {
+  const disposeSidebar = ctx.slots.inject('sidebar.brand.mark', () =>
+    ctx.slots.inject('sidebar.brand.name', function* () {
+      yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: BRAND_PRIORITY }, JdcloudBrandMark)
+      yield ctx.slots.register({
+        name: 'sidebar.brand.name',
+        priority: BRAND_PRIORITY,
+        locale: NS,
+      }, JdcloudBrandName)
+    }))
+  const disposeHero = ctx.slots.inject('conversation.hero.brand.mark', () => ctx.slots.register({
+    name: 'conversation.hero.brand.mark',
+    priority: BRAND_PRIORITY,
+  }, JdcloudBrandMark))
+  return () => {
+    disposeHero()
+    disposeSidebar()
+  }
+}
 
 /**
  * Install the guarded root and react to Host credential-record changes.
@@ -110,6 +134,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-jdcloud-login: dictionaries')
+  ctx.effect(() => installJdcloudBrand(ctx), 'ui-jdcloud-login: JDCloud brand')
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
       if (String(key) === AUTH_RECORD_KEY) void refresh()

@@ -30,6 +30,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 |---|---|
 | [`core/`](core/README.md) | Product API spine: sessions, prompts, tools, agent services, and the concrete loop |
 | [`api/`](api/README.md) | Remote BFF assembly and Typert RPC gateway |
+| [`jdcloud/`](jdcloud/README.md) | JDCloud low-code capability context and Host-enforced data tools |
 | [`typert/`](typert/README.md) | Type graph generation, artifact loading, and runtime registry |
 | [`goal/`](goal/README.md) | Same-session goal persistence and lifecycle |
 | [`schedule/`](schedule/README.md) | Session-local scheduled follow-ups |

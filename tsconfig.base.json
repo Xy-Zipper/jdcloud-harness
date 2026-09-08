@@ -400,6 +400,7 @@
       "@deepseek-ai/dsh-tool-fs": ["./packages/fs/tool-fs/src"],
       "@deepseek-ai/dsh-tool-fs-search": ["./packages/fs/tool-fs-search/src"],
       "@deepseek-ai/dsh-tool-goal": ["./packages/goal/tool-goal/src"],
+      "@deepseek-ai/dsh-tool-jdcloud-lowcode": ["./packages/jdcloud/tool-jdcloud-lowcode/src"],
       "@deepseek-ai/dsh-tool-jobs": ["./packages/jobs/tool-jobs/src"],
       "@deepseek-ai/dsh-tool-lsp": ["./packages/lsp/tool-lsp/src"],
       "@deepseek-ai/dsh-tool-pwsh-persistent": ["./packages/shell/tool-pwsh-persistent/src"],

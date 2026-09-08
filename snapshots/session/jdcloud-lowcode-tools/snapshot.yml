@@ -1,0 +1,8 @@
+version: 1
+scenario: jdcloud-lowcode-tools
+profile: headless
+composition: jdcloud-lowcode
+recording: authored
+header:
+  class: jdcloud-lowcode
+  pin: true

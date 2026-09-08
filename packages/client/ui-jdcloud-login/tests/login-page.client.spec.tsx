@@ -23,6 +23,12 @@ function renderPage(overrides: Partial<JdcloudLoginPageProps> = {}) {
 }
 
 describe('JDCloud login page', () => {
+  it('uses the shared JDCloud mark in the brand panel', () => {
+    const rendered = renderPage()
+    expect(document.querySelector('[data-jdcloud-brand-mark="true"]')).not.toBeNull()
+    expect(rendered.initialize).toHaveBeenCalledOnce()
+  })
+
   it('loads the default service address and submits account/password fields', async () => {
     const { login } = renderPage()
     const service = await screen.findByLabelText<HTMLInputElement>('服务地址')

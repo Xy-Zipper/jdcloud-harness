@@ -217,7 +217,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/api/jdcloud-auth-controller/src/index.ts:28`](../packages/api/jdcloud-auth-controller/src/index.ts)
+来源：[`packages/api/jdcloud-auth-controller/src/index.ts:33`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -2730,6 +2730,24 @@ export interface Config {
 ```
 
 来源：[`packages/goal/tool-goal/src/index.ts:25`](../packages/goal/tool-goal/src/index.ts)
+
+<a id="deepseek-aidsh-tool-jdcloud-lowcode"></a>
+
+## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
+
+需要：`agents` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Deployment-owned JDCloud result limits. */
+export interface Config {
+  /** Maximum rows accepted by one list query. Defaults to 100. */
+  readonly maxPageSize?: number
+  /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
+  readonly maxOutputBytes?: number
+}
+```
+
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:31`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 

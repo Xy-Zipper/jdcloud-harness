@@ -6,5 +6,8 @@
         defaultBaseUrl: !!js process.env.JDCLOUD_DEFAULT_BASE_URL
         requestTimeoutMs: 15000
 
+    - id: tool-jdcloud-lowcode
+      name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
+
     - id: ui-jdcloud-login
       name: '@deepseek-ai/dsh-client-ui-jdcloud-login'

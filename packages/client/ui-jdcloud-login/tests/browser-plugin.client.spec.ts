@@ -4,6 +4,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { LoginPage, type JdcloudLoginInjected } from '../src/client/LoginPage.tsx'
 import { AccountSeat, type JdcloudAccountInjected } from '../src/client/AccountSeat.tsx'
+import { JdcloudBrandMark, JdcloudBrandName } from '../src/client/Brand.tsx'
 import { installJdcloudLoginUi, uiInject } from '../src/client/mount.ts'
 import { apply as applyClient, inject as clientInject } from '../src/client/index.ts'
 import { apply as applyHost } from '../src/index.ts'
@@ -15,7 +16,12 @@ async function bench(authenticated = false) {
   const slots = ctx.get('slots') as SlotRegistry
   slots.register({
     name: 'root',
-    children: { 'sidebar.account': { kind: 'single', scope: 'root' } },
+    children: {
+      'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
+      'sidebar.account': { kind: 'single', scope: 'root' },
+      'sidebar.brand.mark': { kind: 'single', scope: 'root' },
+      'sidebar.brand.name': { kind: 'single', scope: 'root' },
+    },
   } as never, () => null)
   let currentAuthenticated = authenticated
   let currentCorpId = 'corp-current'
@@ -95,6 +101,30 @@ describe('JDCloud login browser plugin', () => {
   it('declares its browser services', () => {
     expect(clientInject).toEqual(['remote'])
     expect(uiInject).toEqual(['remote', 'remote.jdcloudAuth', 'slots', 'locale'])
+  })
+
+  it('shadows the generic brand slots and removes every occupant on teardown', async () => {
+    const b = await bench()
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+
+    const sidebarMark = b.slots.entries('sidebar.brand.mark')
+    const sidebarName = b.slots.entries('sidebar.brand.name')
+    const heroMark = b.slots.entries('conversation.hero.brand.mark')
+    expect(sidebarMark).toHaveLength(1)
+    expect(sidebarMark[0]?.component).toBe(JdcloudBrandMark)
+    expect(sidebarMark[0]?.options.priority).toBe(-10)
+    expect(sidebarName).toHaveLength(1)
+    expect(sidebarName[0]?.component).toBe(JdcloudBrandName)
+    expect(sidebarName[0]?.options.priority).toBe(-10)
+    expect(heroMark).toHaveLength(1)
+    expect(heroMark[0]?.component).toBe(JdcloudBrandMark)
+    expect(heroMark[0]?.options.priority).toBe(-10)
+
+    await fiber.dispose()
+    expect(b.slots.entries('sidebar.brand.mark')).toHaveLength(0)
+    expect(b.slots.entries('sidebar.brand.name')).toHaveLength(0)
+    expect(b.slots.entries('conversation.hero.brand.mark')).toHaveLength(0)
   })
 
   it('mounts and disposes the generated Remote namespace with its UI fiber', async () => {

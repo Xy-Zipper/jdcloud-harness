@@ -4,10 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import JdcloudAuthController, {
+  JdcloudApiError,
   JdcloudClient,
   normalizeJdcloudBaseUrl,
 } from '../src/index.ts'
-import type { JdcloudLoginRequest } from '../src/types.ts'
+import type { JdcloudAuthenticatedRequest, JdcloudLoginRequest } from '../src/index.ts'
 
 const contexts: Context[] = []
 
@@ -255,6 +256,121 @@ describe('JDCloud authentication controller', () => {
     const [tenantUrl, tenantInit] = fetcher.mock.calls[1] as unknown as [string, RequestInit]
     expect(new URL(tenantUrl).pathname).toBe('/api/system/corp/getCorpList')
     expect(tenantInit.headers).toEqual({ authorization: 'bearer token' })
+  })
+
+  it('sends authenticated Host requests without exposing the stored token', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { menuList: ['menu'] } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'created' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'updated' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: true }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+
+    await expect(ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/oauth/currentUser?include=menu', method: 'GET',
+    }, signal)).resolves.toEqual({ menuList: ['menu'] })
+    for (const [method, body, expected] of [
+      ['POST', { name: 'created' }, { id: 'created' }],
+      ['PUT', { name: 'updated' }, { id: 'updated' }],
+      ['DELETE', { id: 'deleted' }, true],
+    ] as const) {
+      await expect(ctx.jdcloudAuthController.requestAuthenticated({
+        path: '/api/visualdev/form/action', method, body,
+      }, signal)).resolves.toEqual(expected)
+    }
+
+    const [getUrl, getInit] = fetcher.mock.calls[2] as unknown as [string, RequestInit]
+    const parsedGetUrl = new URL(getUrl)
+    expect(parsedGetUrl.pathname).toBe('/api/oauth/currentUser')
+    expect(parsedGetUrl.searchParams.get('include')).toBe('menu')
+    expect(parsedGetUrl.searchParams.get('n')).toMatch(/^\d+$/)
+    expect(getInit).toMatchObject({
+      method: 'GET', headers: { authorization: 'bearer token' }, cache: 'no-store',
+    })
+    expect(getInit.body).toBeUndefined()
+    for (const [index, method, body] of [
+      [3, 'POST', { name: 'created' }],
+      [4, 'PUT', { name: 'updated' }],
+      [5, 'DELETE', { id: 'deleted' }],
+    ] as const) {
+      const [, init] = fetcher.mock.calls[index] as unknown as [string, RequestInit]
+      expect(init).toMatchObject({
+        method,
+        headers: { authorization: 'bearer token', 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      expect(init.cache).toBeUndefined()
+    }
+  })
+
+  it('requires a stored login for authenticated Host requests', async () => {
+    const fetcher = vi.fn()
+    const ctx = await boot(fetcher as typeof fetch)
+    await expect(ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/oauth/currentUser', method: 'GET',
+    }, AbortSignal.timeout(1000))).rejects.toMatchObject({
+      code: 'jdcloud/auth-required', details: { reason: 'missing' },
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('rejects authenticated Host requests outside the JDCloud API path', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+    for (const path of ['/oauth/currentUser', 'https://example.com/api/currentUser', '/api/../oauth/currentUser']) {
+      await expect(ctx.jdcloudAuthController.requestAuthenticated({
+        path: path as JdcloudAuthenticatedRequest['path'], method: 'GET',
+      }, signal)).rejects.toThrow('must start with /api/')
+    }
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([600, 601, 602])('deletes an expired login when an authenticated Host request returns code %i', async (code) => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code, msg: 'token expired', data: null }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+    await expect(ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/oauth/currentUser', method: 'GET',
+    }, signal)).rejects.toMatchObject({
+      code: 'jdcloud/auth-required', details: { reason: 'expired' },
+    })
+    expect((await ctx.jdcloudAuthController.status()).authenticated).toBe(false)
+  })
+
+  it('keeps the login and preserves ordinary JDCloud business errors for Host callers', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 409, msg: 'operation denied', data: null }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+    const error = await ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/visualdev/form/action', method: 'POST', body: {},
+    }, signal).catch((reason: unknown) => reason)
+    expect(error).toBeInstanceOf(JdcloudApiError)
+    expect(error).toMatchObject({ code: 409, message: 'operation denied' })
+    expect((await ctx.jdcloudAuthController.status()).authenticated).toBe(true)
   })
 
   it('switches to an available tenant, confirms it, and keeps the login page hidden', async () => {

@@ -22,6 +22,13 @@ export interface JdcloudLoginRequest {
   readonly password: string
 }
 
+/** One Host-only JDCloud API request that reuses the stored login. */
+export interface JdcloudAuthenticatedRequest {
+  readonly path: `/api/${string}`
+  readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  readonly body?: unknown
+}
+
 /** Redacted authentication state returned to the browser. */
 export type JdcloudAuthStatus =
   | {

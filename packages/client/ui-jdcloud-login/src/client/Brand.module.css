@@ -1,0 +1,8 @@
+/* JDCloud wordmark typography inside the sidebar-owned brand row. */
+.name {
+  color: var(--dsw-alias-label-primary);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}

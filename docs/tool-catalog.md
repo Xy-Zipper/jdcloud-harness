@@ -28,6 +28,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
+| `@deepseek-ai/dsh-tool-jdcloud-lowcode` | `jdcloud_lowcode_create`, `jdcloud_lowcode_create_table`, `jdcloud_lowcode_delete`, `jdcloud_lowcode_describe`, `jdcloud_lowcode_get`, `jdcloud_lowcode_query`, `jdcloud_lowcode_update` | `ctx.tools`, `ctx.agents`, `ctx.jdcloudAuthController`, `ctx.sessionProjections`, `ctx.systemPrompt`, `an admitted browser prompt for current-Turn capability authority` | `user/message capability snapshot`, `tool/call`, `tool/result`, `authorized JDCloud data mutations` | - | The seven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, write-grant, and administrator authority before requests. The schema harvest mounts an inert authentication service because no tool executes. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`, `ctx.lsp`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema. |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
@@ -1095,6 +1096,360 @@ Update the exact current goal revision. edit, pause, and resume require a direct
 Source: [`packages/goal/tool-goal/src/index.ts`](../packages/goal/tool-goal/src/index.ts)
 
 create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds.
+
+<a id="deepseek-aidsh-tool-jdcloud-lowcode"></a>
+
+## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
+
+### `jdcloud_lowcode_create`
+
+Create one form record or start one workflow. Host execution requires addData on the current menu snapshot.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "data": {
+      "type": "object",
+      "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "menu_id",
+    "data"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_create_table`
+
+Create a JDCloud form table, save its fields, and grant manage-all-data to explicit authorization objects. Host execution requires systemAdministrator in the current userPermission snapshot.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "full_name": {
+      "type": "string",
+      "description": "New JDCloud form name."
+    },
+    "parent_id": {
+      "type": "string",
+      "description": "Parent menu id. Omit for the top level."
+    },
+    "authorization_object_ids": {
+      "type": "array",
+      "description": "Non-empty department, role, or user ids that receive the manage-all-data permission group.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "en_code": {
+            "type": "string",
+            "description": "Unique database field code."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable field label."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "textarea",
+              "number",
+              "switch",
+              "single_select",
+              "multi_select",
+              "date",
+              "time"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether the generated form requires a value."
+          },
+          "options": {
+            "type": "array",
+            "description": "Required only for single_select and multi_select.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ]
+            }
+          }
+        },
+        "required": [
+          "en_code",
+          "label",
+          "kind"
+        ]
+      }
+    }
+  },
+  "required": [
+    "full_name",
+    "authorization_object_ids",
+    "fields"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_delete`
+
+Delete one JDCloud record. Host execution requires deleteData on the current menu snapshot.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_describe`
+
+Read field codes and field types for one authorized JDCloud form or workflow before querying or writing it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    }
+  },
+  "required": [
+    "menu_id"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_get`
+
+Read one JDCloud form or workflow record by its exact _id.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "association": {
+      "type": "boolean",
+      "description": "Whether JDCloud should include associated records."
+    },
+    "user_info_convert": {
+      "type": "boolean",
+      "description": "Whether JDCloud should expand user ids into user objects."
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_query`
+
+Query rows from one authorized JDCloud form or workflow. All supplied filters are combined with AND. For date ranges use millisecond timestamps and method range.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "current_page": {
+      "type": "integer",
+      "description": "One-based page number. Defaults to 1."
+    },
+    "page_size": {
+      "type": "integer",
+      "description": "Requested rows, bounded by the plugin maxPageSize."
+    },
+    "association": {
+      "type": "boolean",
+      "description": "Whether JDCloud should include associated records."
+    },
+    "user_info_convert": {
+      "type": "boolean",
+      "description": "Whether JDCloud should expand user ids into user objects."
+    },
+    "sort": {
+      "type": "object",
+      "description": "Field-code map whose values are asc or desc.",
+      "additionalProperties": true
+    },
+    "filters": {
+      "type": "array",
+      "description": "Flat filter list combined with AND.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "en_code": {
+            "type": "string",
+            "description": "JDCloud field code."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "eq",
+              "ne",
+              "gt",
+              "gte",
+              "lt",
+              "lte",
+              "like",
+              "in",
+              "nin",
+              "enable",
+              "unEnable",
+              "empty",
+              "unEmpty",
+              "range"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "custom",
+              "field",
+              "systemField"
+            ]
+          },
+          "value": {
+            "description": "Scalar or array expected by the selected filter method."
+          },
+          "jdcloud_key": {
+            "type": "string",
+            "description": "Optional component key returned by field discovery."
+          }
+        },
+        "required": [
+          "en_code",
+          "method",
+          "type"
+        ]
+      }
+    }
+  },
+  "required": [
+    "menu_id"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_update`
+
+Update one JDCloud record. Host execution requires editData and removes empty automatic-number fields.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "menu_id": {
+      "type": "string",
+      "description": "Exact menuId from the current JDCloud capability snapshot."
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Exact JDCloud record _id."
+    },
+    "auth_group_id": {
+      "type": "string",
+      "description": "Optional JDCloud data-permission group id when the target function requires one."
+    },
+    "data": {
+      "type": "object",
+      "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "menu_id",
+    "record_id",
+    "data"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+The seven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, write-grant, and administrator authority before requests. The schema harvest mounts an inert authentication service because no tool executes.
 
 <a id="deepseek-aidsh-schedule"></a>
 

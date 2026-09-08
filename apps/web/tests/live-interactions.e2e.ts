@@ -31,7 +31,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/live-interactions', import.meta.url))
 const FIXTURE = join(SNAPSHOT_DIR, 'session.v2.jsonl')
-// One golden pins the empty mid-turn loading state, one pins the sendable draft
+// One golden pins the active-plan mid-turn loading state, one pins the sendable draft
 // state, and the other four capture what remains after cancel, after a
 // non-retryable failure, after retry recovery, and after retry exhaustion.
 const CANCEL_EXPECTED = join(SNAPSHOT_DIR, 'cancel.expected.md')
@@ -161,6 +161,13 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     await page.locator('[data-streaming="true"]')
       .getByText('partial', { exact: true })
       .waitFor({ timeout: 30_000 })
+    // Seed a visible standing plan so the Stop-specific projection transition is observable.
+    const sessions = scaffold!.ctx.sessions.list()
+    expect(sessions).toHaveLength(1)
+    sessions[0]!.append('todo/write', {
+      todos: [{ content: 'Keep the active plan visible until Stop', status: 'in_progress' }],
+    })
+    await page.locator('[data-testid="todo-panel"]').waitFor({ timeout: 10_000 })
     const loadingSnapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
     await compareOrRefreshGolden(LOADING_EXPECTED, loadingSnapshot, MODE)
 
@@ -181,12 +188,16 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
 
     await page.getByRole('button', { name: 'Stop generating' }).click()
     await settled
-    expect(turnEndReasons(sessionEvents).at(-1)).toBe('aborted')
+    const turnEnd = sessionEvents.findLast(event => event.type === 'turn/end')
+    expect(turnEnd?.type === 'turn/end' ? turnEnd.data.reason : undefined)
+      .toEqual({ kind: 'aborted', reason: { kind: 'user' } })
     // Composer recovered; no streaming node lingers. The host settled first
     // (awaited above), but the abort frame reaches the browser over SSE — the
     // frozen-partial swap is eventually consistent, so poll rather than count.
     await expect.poll(() => page.locator('[data-composer-input]').first().isEnabled(), { timeout: 10_000 }).toBe(true)
     await expect.poll(() => page.locator('[data-streaming="true"]').count(), { timeout: 10_000 }).toBe(0)
+    // A direct user stop hides the plan without erasing its durable todo/write event.
+    await expect.poll(() => page.locator('[data-testid="todo-panel"]').count(), { timeout: 10_000 }).toBe(0)
     // Golden of the aborted end-state: the prompt bubble plus the frozen
     // partial ('partial' is the hang entry's replayed prefix) and no more.
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)

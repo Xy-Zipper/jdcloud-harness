@@ -1,5 +1,5 @@
 ---
-description: "Host 侧 JDCloud 密码认证、持久 Token 所有权与浏览器 Prompt 准入校验。"
+description: "Host 侧 JDCloud 认证、持久 Token 所有权、浏览器 Prompt 准入校验与已认证 API 复用。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-jdcloud-auth-controller` 实现低代码登录流程所需的 JDCloud 调用：密码登录、租户列表校验与租户切换。它在 Host credentials 中拥有 Token，公开生成的 `jdcloudAuth` Remote namespace，并在每个浏览器 Prompt 进入 Session 前检查租户列表。
+`@deepseek-ai/dsh-api-jdcloud-auth-controller` 实现低代码登录流程所需的 JDCloud 调用：密码登录、租户列表校验与租户切换。它在 Host credentials 中拥有 Token，公开生成的 `jdcloudAuth` Remote namespace，让其他 Host 插件在不读取 Token 的情况下复用已认证连接，并在每个浏览器 Prompt 进入 Session 前检查租户列表。
 
 ## 目录
 
@@ -32,13 +32,15 @@ Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 
 
 登录后，浏览器可以读取 `{ authenticated, baseUrl, username, corpId, corpName, corps }`；Token 永不经过 Remote wire。`logout()` 会删除完整 credential record。密码只在登录调用期间存在，本包不会保存密码。
 
+Host 插件可以使用 `requestAuthenticated({ path, method, body? }, signal)` 请求固定的 `/api/...` 路径。controller 会在内部读取当前 credential、添加 authorization header、应用 `requestTimeoutMs`，并只返回成功响应中的 `data`，不会返回 Token。该方法接受 JSON `GET`、`POST`、`PUT` 和 `DELETE` 请求；`GET` 会绕过缓存。业务码 `600`、`601`、`602` 会删除登录并转换为 `jdcloud/auth-required`，其他业务错误保留登录状态。
+
 <a id="configuration"></a>
 ## 配置
 
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
 | `defaultBaseUrl` | 空 | 尚未保存登录时显示的初始服务地址 |
-| `requestTimeoutMs` | `15,000` | 登录、租户列表与租户切换请求的截止时间 |
+| `requestTimeoutMs` | `15,000` | 登录、租户列表、租户切换与 Host 已认证请求的截止时间 |
 
 <a id="model-experience"></a>
 ## 模型体验
@@ -53,7 +55,7 @@ Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- 本包有意不实现密码登录、租户列表校验和租户切换以外的 JDCloud API。
+- `requestAuthenticated()` 仅供 Host 使用并支持 JSON body；它不是浏览器代理或 multipart 上传客户端。
 - 登录接口沿用 JDCloud 上游要求的 MD5 wire 行为；它不是密码存储方案。
 - 保存的登录状态属于该 controller 实例的 Host 全局状态，不按浏览器用户隔离。
 

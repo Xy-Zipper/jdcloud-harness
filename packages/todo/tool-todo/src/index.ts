@@ -110,7 +110,7 @@ function toTodoList(raw: { content: string; status: string }[], allowParallel: b
   return todos
 }
 
-/** Wire payload schema of the `todos` projection (whole list or pre-first-write null). */
+/** Wire payload schema of the `todos` projection (whole list or no standing plan). */
 const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
   zod.array(zod.object({
     content: zod.string(),
@@ -127,10 +127,9 @@ const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
  */
 export function apply(ctx: Context, config: Config): void {
   const allowParallel = config.allowParallelInProgress
-  // Standing-plan fold: latest whole todo/write list, cleared by the next
-  // turn/start (turn/end keeps the finished checklist visible); null before the
-  // first write or after a later turn begins; every other event returns the
-  // same state reference.
+  // Standing-plan fold: latest whole todo/write list, cleared when the user
+  // stops its turn or the next turn starts. Other turn endings keep the
+  // checklist visible; every unrelated event returns the same state reference.
   ctx.sessionProjections.register<'todos', TodoItem[] | null>({
     key: 'todos',
     stateSchema: todosProjectionSchema,
@@ -138,10 +137,13 @@ export function apply(ctx: Context, config: Config): void {
     apply: (state, event) => {
       if (event.type === 'todo/write') return event.data.todos
       if (event.type === 'turn/start') return null
+      if (event.type === 'turn/end'
+        && event.data.reason.kind === 'aborted'
+        && event.data.reason.reason.kind === 'user') return null
       return state
     },
     wire: { viewSchema: todosProjectionSchema, view: state => state },
-    stateVersion: 2,
+    stateVersion: 3,
   })
   ctx.tools.register(defineTool({
     name: 'todo_write',

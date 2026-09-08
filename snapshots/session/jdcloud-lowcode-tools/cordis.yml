@@ -1,0 +1,8 @@
+# Product-shaped JDCloud composition for recording the model-visible low-code
+# guidance and tool schemas without making a JDCloud request.
+- insert:
+    - id: jdcloud-auth-controller
+      name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'
+
+    - id: tool-jdcloud-lowcode
+      name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'

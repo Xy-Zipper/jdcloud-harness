@@ -1,5 +1,5 @@
 ---
-description: "Host JDCloud password authentication, durable token ownership, and browser-prompt admission validation."
+description: "Host JDCloud authentication, durable token ownership, browser-prompt admission validation, and authenticated API reuse."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-jdcloud-auth-controller` implements the JDCloud calls required by the low-code login flow: password login, tenant-list validation, and tenant switching. It owns the token in Host credentials, exposes the generated `jdcloudAuth` Remote namespace, and checks the tenant list before every browser prompt enters a Session.
+`@deepseek-ai/dsh-api-jdcloud-auth-controller` implements the JDCloud calls required by the low-code login flow: password login, tenant-list validation, and tenant switching. It owns the token in Host credentials, exposes the generated `jdcloudAuth` Remote namespace, lets other Host plugins reuse the authenticated connection without reading that token, and checks the tenant list before every browser prompt enters a Session.
 
 ## Table of Contents
 
@@ -32,13 +32,15 @@ Before Session Controller persists attachments or delivers a browser prompt, the
 
 The browser can read `{ authenticated, baseUrl, username, corpId, corpName, corps }` for an authenticated login; the token never crosses the Remote wire. `logout()` deletes the complete credential record. Passwords exist only for the duration of the login call and are never stored by this package.
 
+Host plugins can call `requestAuthenticated({ path, method, body? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests; `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
+
 <a id="configuration"></a>
 ## Configuration
 
 | Field | Default | Meaning |
 |---|---:|---|
 | `defaultBaseUrl` | empty | Initial service address shown before a login is stored |
-| `requestTimeoutMs` | `15,000` | Deadline for login, tenant-list, and tenant-switch requests |
+| `requestTimeoutMs` | `15,000` | Deadline for login, tenant-list, tenant-switch, and Host authenticated requests |
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -51,7 +53,9 @@ None; accepted requests are unchanged, and rejected requests never reach prompt 
 
 ## Known Limitations and Deferred Work
 
-- The package intentionally implements no JDCloud API beyond password login, tenant-list validation, and tenant switching.
+<a id="known-limitations-and-deferred-work"></a>
+
+- `requestAuthenticated()` is Host-only and supports JSON request bodies; it is not a browser proxy or a multipart upload client.
 - The inherited JDCloud login protocol uses MD5 because the upstream endpoint requires that wire behavior; it is not a password-storage scheme.
 - Stored logins are Host-wide for this controller instance rather than browser-user scoped.
 

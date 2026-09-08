@@ -1,4 +1,4 @@
-# Agent Note: Web todo display — snapshot side-effect channel + two render surfaces
+# Agent Note: Web todo display — host projection + two render surfaces
 
 Status: implemented
 
@@ -10,11 +10,11 @@ English | [中文](2026-07-23-web-todo-display.zh.md)
 
 ## Decision
 
-Consume `todo/write` as a Session side effect, not a surface node, and render it on two surfaces matching the split the TUI already draws.
+Fold `todo/write` into a Host session projection, not a conversation node, and render it on two surfaces matching the split the TUI already draws.
 
-### Side-effect channel, converging with window replay
+### Host projection, converging through baselines and frames
 
-`applyEventSideEffects` gains a `todo/write` case (whole list, last write wins) and clears on `turn/start` ([turn-scoped plan lifetime](2026-07-28-todo-plan-clears-on-next-turn.md)). `rebuildDerivedFromWindow` sweeps the window from an empty plan and restores the tail-page seed only when the window never determined the plan (no `todo/write` and no `turn/start`); otherwise the in-window write/`turn/start` fold wins. Every `installWindow` caller is a tail request (`doOpen`, its gap re-pull, `repairGap`; `loadOlder` prepends without reseeding), which the host answers with the projection or omits it when no plan stands — so an absent field is the authoritative empty list and is assigned as such. That distinction matters on rollback: a live write whose host crashed before persisting leaves the log empty, and preserving the prior value instead would strand the rolled-back plan on screen indefinitely. `ConversationSnapshot.todos` is the read surface. This follows the event's own contract ("log-only UI state; never derived history"): surfacing each write as a conversation node would render superseded lists as if they were still standing.
+`dsh-tool-todo` registers the `todos` unit with `ctx.sessionProjections`. Its Host fold treats each `todo/write` as a whole-list replacement, returns `null` on `turn/start` and on a user-aborted `turn/end`, and retains the current reference for every other event ([turn-scoped plan lifetime](2026-07-28-todo-plan-clears-on-next-turn.md), [user-stop correction](../bug-fix/2026-09-08-user-stop-clears-todo-plan.md)). Session Controller carries the finished value in the follow-opening and control-stream baselines and publishes later changes as whole-value `projection` frames. The per-Session `ProjectionValueStore` merges those inputs under its higher-sequence-wins rule and exposes an identity-stable per-key face; the browser performs no todo-specific event fold, and `ConversationSnapshot` carries no projection values. The standard kit binds that face as `useProjection`, and `TodoDock` reads `useProjection('todos')`: a list renders the strip, while `null` or an absent `undefined` value renders nothing. Keeping the standing value outside conversation nodes prevents superseded todo snapshots from appearing as current transcript content.
 
 ### TodoPanel: the durable list as a persistent strip
 
@@ -33,4 +33,4 @@ The dedicated `todo_write` chat row is a plain registrant plugin (`todoToolview`
 
 ## Consequences
 
-Replay correctness is owned by one code path: any future change to window rebuild keeps todos consistent for free, and the fixture (fx-alpha turn 71) plus `packages/client/ui-conversation/tests/todo-panel.client.spec.tsx` pin the full chain (row summary and state, dock panel content, collapse round-trip). `todos` is a required `ConversationSnapshot` field, so scripted fakes in specs must carry it. The automation-only ACP bridge deliberately omits todo presentation; the web surfaces render the same event, adding one wire field and no new event type. That field is how cold-load reconstruction stays host-backed: the tail history page carries `todos` — the full-log standing plan (latest `todo/write` with no later `turn/start`), computed independently of the page window (the same backscan posture the view pairing uses) — so a reopened session restores the plan when it still stands and the last write precedes the window; that value survives an older-page prepend, is overwritten by any later write, clears on a later `turn/start`, and resets to empty when a tail response carries no projection.
+The durable `todo/write` event remains the source of the standing plan, while the Host projection and generic transport/store path are its only Client read path. Cold opening and reconnecting seed the same per-Session `ProjectionValueStore`, live frames advance it, and older-history prepends do not alter it; a user stop therefore hides the strip without appending a synthetic empty write or erasing the recorded tool call and event. The automation-only ACP bridge omits todo presentation, while Web keeps the projected dock and the separate per-call `todo_write` row. `packages/todo/tool-todo/tests/projection.spec.ts` pins completed, user-aborted, and other-abort lifetimes; `packages/api/session-controller/tests/projection-store.client.spec.ts` pins baseline/frame ordering; `packages/client/ui-conversation/tests/todo-panel.client.spec.tsx` pins the dock; and the Web live-interactions scenario pins disappearance after user Stop.

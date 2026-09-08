@@ -22,14 +22,7 @@
 .mark {
   width: 56px;
   height: 56px;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  color: var(--dsw-alias-label-primary-foreground);
-  background: var(--dsw-alias-brand-primary);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -1px;
+  display: inline-flex;
 }
 
 .eyebrow {

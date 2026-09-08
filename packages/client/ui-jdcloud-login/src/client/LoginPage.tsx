@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { JdcloudLoginRequest } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
+import { JdcloudBrandMark } from './Brand.tsx'
 import { NS } from './locales.ts'
 import css from './LoginPage.module.css'
 
@@ -67,7 +68,7 @@ export function LoginPage({ initialize, login, t }: JdcloudLoginPageProps) {
     <main className={css.page}>
       <section className={css.brandPanel} aria-label={t('markLabel')}>
         <div className={css.brandContent}>
-          <div className={css.mark} aria-hidden="true">{t('markLabel')}</div>
+          <div className={css.mark}><JdcloudBrandMark size={56} /></div>
           <p className={css.eyebrow}>{t('eyebrow')}</p>
           <h1 className={css.brandTitle}>{t('description')}</h1>
         </div>

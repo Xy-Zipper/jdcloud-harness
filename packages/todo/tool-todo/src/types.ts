@@ -39,8 +39,9 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
     /**
      * The agent's current whole todo list (the latest `todo/write` snapshot),
-     * or `null` before the first write. Whole-value rule: every `todo/write`
-     * carries the complete replacement list, so the fold is last-wins.
+     * or `null` before the first write, after the user stops its turn, or when
+     * the next turn starts. Whole-value rule: every `todo/write` carries the
+     * complete replacement list, so the fold is last-wins.
      */
     todos: TodoItem[] | null
   }
