@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-08-user-stop-clears-todo-plan.md
-2026-09-08-user-stop-clears-todo-plan.md: 860fec09e3f324c2461362db0ba36da6bf4639cb
-2026-09-08-user-stop-clears-todo-plan.zh.md: 780713aa907a8e83d28b1b69a232292688a09adb
+2026-09-08-user-stop-clears-todo-plan.md: d142d1f19fb0a4eefdcbc3fd4f4195062cc2eace
+2026-09-08-user-stop-clears-todo-plan.zh.md: adfbc350766a4e0711be5cabfc4437709ba9a84e

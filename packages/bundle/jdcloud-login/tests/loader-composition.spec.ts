@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import AgentRegistry, { agentEvents, Inbox, type Agent } from '../../../core/agent/src/index.ts'
+import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
+import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
 import { createUserMessage } from '../../../llm/llm/src/index.ts'
 import { Session, SessionId } from '../../../core/session/src/index.ts'
 import SessionProjectionRegistry from '../../../session/session-projection/src/index.ts'
@@ -115,7 +116,7 @@ function runningAgent(context: Context): Agent {
     id,
     options: {},
     session,
-    inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+    inbox: createInboxStub(),
     status: 'running',
     ctx: context,
     send: () => {},

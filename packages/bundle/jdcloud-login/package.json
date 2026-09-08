@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-jdcloud-login",
   "description": "Optional Web profile layer for JDCloud authentication and account UI",
-  "version": "0.1.3-alpha.1",
+  "version": "0.1.3-alpha.2",
   "publishConfig": {
     "access": "public"
   },
@@ -44,6 +44,7 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
+    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^"
   }
 }

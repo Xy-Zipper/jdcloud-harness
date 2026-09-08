@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry, { agentEvents, Inbox, type Agent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
+import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type {
   JdcloudAuthenticatedRequest,
   JdcloudAuthStatus,
@@ -83,7 +84,7 @@ function makeAgent(ctx: Context, rawId = 'coverage-agent', status: Agent['status
     id,
     options: {},
     session,
-    inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+    inbox: createInboxStub(),
     status,
     ctx,
     send: () => {},
@@ -114,7 +115,7 @@ async function services(options: {
   contexts.push(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   if (options.turnBoundary !== false) ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
-  await ctx.plugin(SystemPrompt, { persona: '' })
+  await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
 

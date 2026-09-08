@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-用户点击 Web 停止后，活跃的 `todo_write` 计划仍保持可见。agent 循环正确记录了 `turn/end { kind: 'aborted', reason: { kind: 'user' } }`，但 `todos` 投影会保留最新列表直至下一次 `turn/start`，因此轮次已经停止后，`in_progress` 任务看起来仍在运行。[按轮次界定的计划生命周期](../feature/2026-07-28-todo-plan-clears-on-next-turn.zh.md)已经决定，普通完成的轮次仍需保留清单供用户阅读回答时查看。
+用户点击 Web 停止后，活跃的 `todo_write` 计划仍保持可见。agent 循环正确记录了 `turn/end { kind: 'aborted', reason: { kind: 'user' } }`，但 `todos` 投影会保留最新列表直至下一次 `turn/start`，因此轮次已经停止后，`in_progress` 任务看起来仍在运行。[按轮次界定的计划生命周期](../../archived/feature/2026-07-28-todo-plan-clears-on-next-turn.md)已经决定，普通完成的轮次仍需保留清单供用户阅读回答时查看。
 
 ## 决策
 

@@ -6,7 +6,7 @@ English | [中文](2026-09-08-user-stop-clears-todo-plan.zh.md)
 
 ## Problem
 
-An active `todo_write` plan remained visible after the user clicked Web Stop. The agent loop correctly recorded `turn/end { kind: 'aborted', reason: { kind: 'user' } }`, but the `todos` projection retained the latest list until another `turn/start`, so `in_progress` tasks appeared to keep running after the turn had stopped. Ordinary completed turns still need to retain their checklist while the user reads the answer, as decided by the [turn-scoped plan lifetime](../feature/2026-07-28-todo-plan-clears-on-next-turn.md).
+An active `todo_write` plan remained visible after the user clicked Web Stop. The agent loop correctly recorded `turn/end { kind: 'aborted', reason: { kind: 'user' } }`, but the `todos` projection retained the latest list until another `turn/start`, so `in_progress` tasks appeared to keep running after the turn had stopped. Ordinary completed turns still need to retain their checklist while the user reads the answer, as decided by the [turn-scoped plan lifetime](../../archived/feature/2026-07-28-todo-plan-clears-on-next-turn.md).
 
 ## Decision
 
