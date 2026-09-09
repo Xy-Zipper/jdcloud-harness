@@ -1103,7 +1103,7 @@ create, edit, pause, and resume require direct-human root authority; complete an
 
 ### `jdcloud_lowcode_create`
 
-Create one form record or start one workflow. Host execution requires addData on the current menu snapshot.
+Create one form record or start one workflow. Host execution requires addData and rejects missing required fields from the live form definition.
 
 ```json
 {

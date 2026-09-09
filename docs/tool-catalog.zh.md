@@ -1109,7 +1109,7 @@ create、edit、pause 和 resume 要求直接来自人类的根权限；complete
 
 ### `jdcloud_lowcode_create`
 
-创建一条表单记录或发起一个流程。Host 执行要求当前菜单快照授予 addData。
+创建一条表单记录或发起一个流程。Host 执行要求 addData，并根据实时表单定义拒绝缺少的必填字段。
 
 ```json
 {

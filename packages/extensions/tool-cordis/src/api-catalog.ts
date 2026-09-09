@@ -1162,6 +1162,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Redacted authenticated state.',
       },
       {
+        signature: '@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Replace the stored login with a transferred token after Host-side validation.',
+        parameters: [{ name: 'request', description: 'Absolute HTTP(S) service address and raw transfer token.' }, { name: 'signal', description: 'Caller cancellation for current-user and tenant validation.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
         signature: '@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>',
         description: 'Select another tenant for the stored JDCloud login.',
         parameters: [{ name: 'corpId', description: 'Tenant identity from the current authenticated status.' }, { name: 'signal', description: 'Caller cancellation for the switch and confirmation requests.' }],
@@ -4433,6 +4439,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'JdcloudLoginRequest',
     declaration: 'export interface JdcloudLoginRequest {\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly password: string;\n}',
+  },
+  {
+    name: 'JdcloudTokenLoginRequest',
+    declaration: 'export interface JdcloudTokenLoginRequest {\n    readonly baseUrl: string;\n    readonly token: string;\n}',
   },
   {
     name: 'JobDoneListener',

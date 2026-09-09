@@ -1,13 +1,16 @@
+// @vitest-environment jsdom
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { LoginPage, type JdcloudLoginInjected } from '../src/client/LoginPage.tsx'
+import { LoginTransferPage, type JdcloudLoginTransferInjected } from '../src/client/LoginTransferPage.tsx'
 import { AccountSeat, type JdcloudAccountInjected } from '../src/client/AccountSeat.tsx'
 import { JdcloudBrandMark, JdcloudBrandName } from '../src/client/Brand.tsx'
 import { installJdcloudLoginUi, uiInject } from '../src/client/mount.ts'
 import { apply as applyClient, inject as clientInject } from '../src/client/index.ts'
-import { apply as applyHost } from '../src/index.ts'
+import { apply as applyHost, inject as hostInject } from '../src/index.ts'
 
 /** Assemble the real slot registry around a controllable JDCloud Remote double. */
 async function bench(authenticated = false) {
@@ -50,6 +53,10 @@ async function bench(authenticated = false) {
       value: authenticatedValue(),
     })
   })
+  const loginWithToken = vi.fn(() => {
+    currentAuthenticated = true
+    return Promise.resolve({ ok: true as const, value: authenticatedValue() })
+  })
   const logout = vi.fn(() => {
     currentAuthenticated = false
     return Promise.resolve({
@@ -64,7 +71,7 @@ async function bench(authenticated = false) {
   })
   let recordListener: ((key: string) => void) | undefined
   const remote = {
-    jdcloudAuth: { status, login, logout, switchCorp },
+    jdcloudAuth: { status, login, loginWithToken, logout, switchCorp },
     $on: vi.fn((_event: string, listener: (key: string) => void) => {
       recordListener = listener
       return () => { recordListener = undefined }
@@ -78,6 +85,7 @@ async function bench(authenticated = false) {
     slots,
     status,
     login,
+    loginWithToken,
     logout,
     switchCorp,
     expire() {
@@ -94,13 +102,137 @@ async function bench(authenticated = false) {
 }
 
 describe('JDCloud login browser plugin', () => {
-  it('keeps the Host Loader entry inert', () => {
-    expect(applyHost).not.toThrow()
+  it('bootstraps a same-site shell navigation without colliding with browser authentication', async () => {
+    const disposeRoute = vi.fn()
+    const register = vi.fn((_route: WebRoute) => disposeRoute)
+    const ctx = new Context()
+    ctx.provide('webServer', { register } as never)
+    const fiber = ctx.plugin({ inject: [...hostInject], apply: applyHost })
+    await fiber.await()
+    const route = register.mock.calls[0]?.[0]
+    const writeHead = vi.fn((_status: number, _headers: Record<string, string>) => {})
+    const end = vi.fn((_body?: string) => {})
+    await route?.handler({ method: 'GET', url: '/login/transfer?token=jwt&baseUrl=https%3A%2F%2Fkindoucloud.com' } as never, {
+      writeHead,
+      end,
+    } as never)
+    expect(writeHead).toHaveBeenCalledOnce()
+    const response = writeHead.mock.calls[0]
+    expect(response?.[0]).toBe(200)
+    expect(response?.[1]).toMatchObject({
+      'cache-control': 'no-store',
+      'content-type': 'text/html; charset=utf-8',
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+    })
+    expect(response?.[1]['content-security-policy']).toMatch(
+      /^default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'nonce-[a-f0-9]{36}'$/u,
+    )
+    expect(end).toHaveBeenCalledWith(expect.stringContaining(
+      'window.location.replace("/#jdcloudTransfer=1&jdcloudToken=jwt&baseUrl=https%3A%2F%2Fkindoucloud.com")',
+    ))
+    const policy = writeHead.mock.calls[0]?.[1]['content-security-policy']
+    const nonce = policy?.match(/script-src 'nonce-([^']+)'$/u)?.[1]
+    expect(end.mock.calls[0]?.[0]).toContain(`<script nonce="${nonce}">`)
+
+    const emptyEnd = vi.fn((_body?: string) => {})
+    await route?.handler({ method: 'GET' } as never, { writeHead: vi.fn(), end: emptyEnd } as never)
+    expect(emptyEnd).toHaveBeenCalledWith(expect.stringContaining(
+      'window.location.replace("/#jdcloudTransfer=1&jdcloudToken=&baseUrl=")',
+    ))
+
+    const rejectedWriteHead = vi.fn((_status: number) => {})
+    const rejectedEnd = vi.fn()
+    await route?.handler({ method: 'POST' } as never, { writeHead: rejectedWriteHead, end: rejectedEnd } as never)
+    expect(rejectedWriteHead).toHaveBeenCalledWith(405)
+    expect(rejectedEnd).toHaveBeenCalledOnce()
+    await fiber.dispose()
+    expect(disposeRoute).toHaveBeenCalledOnce()
   })
 
   it('declares its browser services', () => {
+    expect(hostInject).toEqual(['webServer'])
     expect(clientInject).toEqual(['remote'])
     expect(uiInject).toEqual(['remote', 'remote.jdcloudAuth', 'slots', 'locale'])
+  })
+
+  it('runs a bootstrapped token transfer after scrubbing the address bar', async () => {
+    history.replaceState(null, '', '/#jdcloudTransfer=1&jdcloudToken=transferred-token&baseUrl=https%3A%2F%2Fkindoucloud.com')
+    const b = await bench()
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    expect(location.pathname).toBe('/login/transfer')
+    expect(location.search).toBe('')
+    expect(location.hash).toBe('')
+    const entry = b.slots.entries('root').find(candidate => candidate.component === LoginTransferPage)
+    expect(entry?.options.priority).toBe(-110)
+    const injected = (entry?.inject as (() => JdcloudLoginTransferInjected) | undefined)?.()
+    await expect(injected?.transfer()).resolves.toEqual({ ok: true })
+    expect(b.loginWithToken).toHaveBeenCalledWith({
+      token: 'transferred-token',
+      baseUrl: 'https://kindoucloud.com',
+    })
+    expect(location.pathname).toBe('/')
+    expect(b.slots.entries('root').some(candidate => candidate.component === LoginTransferPage)).toBe(false)
+    expect(b.slots.entries('sidebar.account').some(candidate => candidate.component === AccountSeat)).toBe(true)
+    await expect(injected?.transfer()).resolves.toEqual({ ok: false })
+    await fiber.dispose()
+  })
+
+  it.each([
+    '/login/transfer',
+    '/#jdcloudTransfer=1',
+  ])('forwards missing transfer fields as empty values from %s', async (path) => {
+    history.replaceState(null, '', path)
+    const b = await bench()
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const entry = b.slots.entries('root').find(candidate => candidate.component === LoginTransferPage)
+    const injected = (entry?.inject as (() => JdcloudLoginTransferInjected) | undefined)?.()
+    await injected?.transfer()
+    expect(b.loginWithToken).toHaveBeenCalledWith({ token: '', baseUrl: '' })
+    await fiber.dispose()
+  })
+
+  it('ignores a successful transfer that settles after plugin disposal', async () => {
+    history.replaceState(null, '', '/#jdcloudTransfer=1&jdcloudToken=token&baseUrl=https%3A%2F%2Fkindoucloud.com')
+    const b = await bench()
+    type LoginWithTokenResult = Awaited<ReturnType<typeof b.loginWithToken>>
+    let resolve: ((value: LoginWithTokenResult) => void) | undefined
+    b.loginWithToken.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const entry = b.slots.entries('root').find(candidate => candidate.component === LoginTransferPage)
+    const injected = (entry?.inject as (() => JdcloudLoginTransferInjected) | undefined)?.()
+    const pending = injected?.transfer()
+    await fiber.dispose()
+    injected?.goLogin()
+    resolve?.({ ok: true, value: {
+      authenticated: true,
+      baseUrl: 'https://kindoucloud.com',
+      username: 'user',
+      corpId: 'corp-current',
+      corpName: 'Current Tenant',
+      corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
+    } })
+    await expect(pending).resolves.toEqual({ ok: true })
+    expect(location.pathname).toBe('/login/transfer')
+  })
+
+  it('keeps a failed transfer page until the user chooses account login', async () => {
+    history.replaceState(null, '', '/login/transfer?token=bad&baseUrl=https%3A%2F%2Fkindoucloud.com')
+    const b = await bench()
+    b.loginWithToken.mockResolvedValueOnce({ ok: false, error: { message: 'invalid' } } as never)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const entry = b.slots.entries('root').find(candidate => candidate.component === LoginTransferPage)
+    const injected = (entry?.inject as (() => JdcloudLoginTransferInjected) | undefined)?.()
+    await expect(injected?.transfer()).resolves.toEqual({ ok: false })
+    injected?.goLogin()
+    expect(location.pathname).toBe('/')
+    expect(b.slots.entries('root').some(candidate => candidate.component === LoginTransferPage)).toBe(false)
+    expect(b.slots.entries('root').some(candidate => candidate.component === LoginPage)).toBe(true)
+    await fiber.dispose()
   })
 
   it('shadows the generic brand slots and removes every occupant on teardown', async () => {

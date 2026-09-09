@@ -197,12 +197,17 @@ export function registerLowcodeTools(
 
   ctx.tools.register(defineTool({
     name: 'jdcloud_lowcode_create',
-    description: 'Create one form record or start one workflow. Host execution requires addData on the current menu snapshot.',
+    description: 'Create one form record or start one workflow. Host execution requires addData and rejects missing required fields from the live form definition.',
     parameters: { ...MENU_PARAMETER, ...AUTH_GROUP_PARAMETER, ...DATA_PARAMETER },
     output: TEXT_OUTPUT,
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
       requirePermission(menu, 'addData')
+      const fields = parseFields(await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+        path: `/api/visualdev/base/fields/${encodeURIComponent(menu.menuId)}`,
+        method: 'GET',
+      }, exec.signal))
+      requireCreateFields(args.data, fields)
       const result = menu.type === 4
         ? await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
           path: '/api/workflow/flowTask/submit',
@@ -439,7 +444,7 @@ function requirePermission(menu: LowcodeMenuCapability, permission: LowcodeWrite
 
 interface SafeField {
   readonly enCode: string
-  readonly value: string
+  readonly value?: string
   readonly jdcloudKey: string
   readonly fullName: string
   readonly required: boolean
@@ -452,19 +457,83 @@ function parseFields(value: unknown): SafeField[] {
   return value.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`JDCloud field ${String(index)} is invalid`)
     const enCode = requireText(Reflect.get(entry, 'enCode'), `field ${String(index)} enCode`)
-    const fieldValue = requireText(Reflect.get(entry, 'value'), `field ${JSON.stringify(enCode)} value`)
     const jdcloudKey = requireText(Reflect.get(entry, 'jdcloudKey'), `field ${JSON.stringify(enCode)} jdcloudKey`)
     const fullName = requireText(Reflect.get(entry, 'fullName'), `field ${JSON.stringify(enCode)} fullName`)
     const children = Reflect.get(entry, 'children')
+    const parsedChildren = children === undefined || children === null ? undefined : parseFields(children)
+    const rawValue = Reflect.get(entry, 'value')
+    let fieldValue: string | undefined
+    if (rawValue === undefined || rawValue === null || (typeof rawValue === 'string' && rawValue.trim() === '')) {
+      if (parsedChildren === undefined) fieldValue = requireText(rawValue, `field ${JSON.stringify(enCode)} value`)
+    } else {
+      fieldValue = requireText(rawValue, `field ${JSON.stringify(enCode)} value`)
+    }
     return {
       enCode,
-      value: fieldValue,
+      ...fieldValue === undefined ? {} : { value: fieldValue },
       jdcloudKey,
       fullName,
       required: Reflect.get(entry, 'required') === true,
-      ...children === undefined || children === null ? {} : { children: parseFields(children) },
+      ...parsedChildren === undefined ? {} : { children: parsedChildren },
     }
   })
+}
+
+/** Reject a create call when its live JDCloud field definition still has required values missing. */
+function requireCreateFields(data: Record<string, JsonValue>, fields: readonly SafeField[]): void {
+  const missing = collectMissingRequiredFields(data, fields)
+  if (missing.length === 0) return
+  reject(
+    `JDCloud create data is missing required fields: ${missing.join(', ')}`,
+    'JDCLOUD_LOWCODE_REQUIRED_FIELDS',
+  )
+}
+
+/** Collect readable field labels and codes for empty required values, including each child-table row. */
+function collectMissingRequiredFields(
+  data: Record<string, unknown>,
+  fields: readonly SafeField[],
+  labelPrefix = '',
+  codePrefix = '',
+): string[] {
+  const missing: string[] = []
+  for (const field of fields) {
+    const label = labelPrefix === '' ? field.fullName : `${labelPrefix}.${field.fullName}`
+    const code = codePrefix === '' ? field.enCode : `${codePrefix}.${field.enCode}`
+    const value = data[field.enCode]
+    const children = field.children
+    if (children !== undefined) {
+      if (!Array.isArray(value) || value.length === 0) {
+        if (field.required) missing.push(`${label} (${code})`)
+        continue
+      }
+      value.forEach((row, index) => {
+        const rowLabel = `${label}[${String(index + 1)}]`
+        const rowCode = `${code}[${String(index + 1)}]`
+        if (isRecord(row)) {
+          missing.push(...collectMissingRequiredFields(row, children, rowLabel, rowCode))
+        } else {
+          missing.push(`${rowLabel} (${rowCode})`)
+        }
+      })
+      continue
+    }
+    if (!hasRequiredValue(value, field) && field.required) missing.push(`${label} (${code})`)
+  }
+  return missing
+}
+
+/** Decide whether one external JSON value satisfies the field's required-value semantics. */
+function hasRequiredValue(value: unknown, field: SafeField): boolean {
+  if (value === undefined || value === null) return false
+  if (field.value === 'array') return Array.isArray(value) && value.length > 0
+  if (field.value === 'string') return typeof value === 'string' && value.trim() !== ''
+  if (field.value === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (field.value === 'boolean') return typeof value === 'boolean'
+  if (typeof value === 'string') return value.trim() !== ''
+  if (Array.isArray(value)) return value.length > 0
+  if (isRecord(value)) return Object.keys(value).length > 0
+  return true
 }
 
 /** Remove empty values only for fields identified by JDCloud as automatic bill numbers. */

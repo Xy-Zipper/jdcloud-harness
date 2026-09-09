@@ -355,8 +355,15 @@ describe('prompt refresh and plugin lifecycle', () => {
       'jdcloud_lowcode_delete',
       'jdcloud_lowcode_create_table',
     ])
-    expect((await mounted.ctx.systemPrompt.assemble()).sections.map(section => section.name))
-      .toContain('tool:jdcloud-lowcode')
+    const assembled = await mounted.ctx.systemPrompt.assemble()
+    expect(assembled.sections.map(section => section.name)).toContain('tool:jdcloud-lowcode')
+    const guidance = assembled.sections.find(section => section.name === 'tool:jdcloud-lowcode')?.text ?? ''
+    expect(guidance).toContain('infer every field value that is directly supported')
+    expect(guidance).toContain('not only titles, but also values such as amounts, dates')
+    expect(guidance).toContain('Never invent opaque ids')
+    expect(guidance).toContain('目前还缺少关键信息')
+    expect(guidance).toContain('every described field, including required and optional fields')
+    expect(guidance).toContain('Conversation attachments are evidence, not JDCloud file uploads')
     await mounted.browserPrompt()
 
     await mounted.fiber.dispose()
@@ -440,6 +447,43 @@ describe('Host-authorized tool execution', () => {
     expect(mounted.requests).toEqual([])
   })
 
+  it('rejects incomplete create data before the modifying request', async () => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['addData']),
+      response: request => request.path.startsWith('/api/visualdev/base/fields/')
+        ? [
+          { enCode: 'title', value: 'string', jdcloudKey: 'comInput', fullName: '报账标题', required: true },
+          { enCode: 'applicant', value: 'array', jdcloudKey: 'userSelect', fullName: '报账人', required: true },
+          { enCode: 'department', value: 'array', jdcloudKey: 'depSelect', fullName: '所属部门', required: true },
+          { enCode: 'attachments', value: 'array', jdcloudKey: 'uploadFz', fullName: '附件', required: false },
+          {
+            enCode: 'details', jdcloudKey: 'table', fullName: '费用明细', required: true,
+            children: [
+              { enCode: 'amount', value: 'number', jdcloudKey: 'numInput', fullName: '金额', required: true },
+            ],
+          },
+        ]
+        : { ok: true },
+    })
+    await mounted.browserPrompt()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_create', {
+      menu_id: 'form-clock',
+      data: { title: '客户拜访交通费', details: [{}] },
+    })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_REQUIRED_FIELDS')
+    expect(resultText(result)).toContain('报账人 (applicant)')
+    expect(resultText(result)).toContain('所属部门 (department)')
+    expect(resultText(result)).toContain('费用明细[1].金额 (details[1].amount)')
+    expect(resultText(result)).not.toContain('附件')
+    expect(mounted.requests).toEqual([{
+      path: '/api/visualdev/base/fields/form-clock',
+      method: 'GET',
+    }])
+  })
+
   it('translates permitted form, workflow, update, and delete operations to exact JDCloud payloads', async () => {
     const mounted = await mountLowcode({
       currentUser: currentUser(['addData', 'editData', 'deleteData']),
@@ -476,6 +520,10 @@ describe('Host-authorized tool execution', () => {
 
     expect(mounted.requests).toEqual([
       {
+        path: '/api/visualdev/base/fields/form-clock',
+        method: 'GET',
+      },
+      {
         path: '/api/visualdev/form/create',
         method: 'POST',
         body: {
@@ -483,6 +531,10 @@ describe('Host-authorized tool execution', () => {
           data: '{"title":"补卡"}',
           authGroupId: 'group-1',
         },
+      },
+      {
+        path: '/api/visualdev/base/fields/flow-leave',
+        method: 'GET',
       },
       {
         path: '/api/workflow/flowTask/submit',

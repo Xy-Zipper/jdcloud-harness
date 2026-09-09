@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-jdcloud-auth-controller` implements the JDCloud calls required by the low-code login flow: password login, tenant-list validation, and tenant switching. It owns the token in Host credentials, exposes the generated `jdcloudAuth` Remote namespace, lets other Host plugins reuse the authenticated connection without reading that token, and checks the tenant list before every browser prompt enters a Session.
+`@deepseek-ai/dsh-api-jdcloud-auth-controller` implements the JDCloud calls required by the low-code login flow: password and transferred-token login, tenant-list validation, and tenant switching. It owns the token in Host credentials, exposes the generated `jdcloudAuth` Remote namespace, lets other Host plugins reuse the authenticated connection without reading that token, and checks the tenant list before every browser prompt enters a Session.
 
 ## Table of Contents
 
@@ -25,6 +25,8 @@ English | [中文](README.zh.md)
 Mount the controller beside API Gateway, Session Controller, and a writable credentials provider. The optional [`dsh-jdcloud-login`](../../bundle/jdcloud-login/README.md) bundle installs the controller and its browser page together.
 
 `login()` sends `POST /api/oauth/login` with the original `client_id=admin`, `client_secret=123456`, `scope=all`, and `grant_type=password` query values. Its JSON body contains only the trimmed account and an MD5 password. It does not send a tenant id. After receiving a token, the controller calls `GET /api/system/corp/getCorpList`, combines `corpList` and `joinCorpList`, resolves the current tenant named by `data.corpId`, and stores the normalized service address, token, account, current tenant, and available tenants together.
+
+`loginWithToken()` first deletes any stored login, normalizes the supplied absolute HTTP(S) service address, and validates the supplied token through `GET /api/oauth/currentUser` followed by `GET /api/system/corp/getCorpList`. The two responses must name the same current tenant. A successful transfer stores the account label, tenant list, and token on the Host; invalid or failed transfer information leaves the controller logged out. The caller controls the destination, so the Host sends the Token and validation requests to any syntactically valid HTTP(S) address.
 
 `switchCorp()` accepts only a tenant returned in authenticated status, calls `GET /api/system/corp/switchCorp/{corpId}` with the stored token, accepts the confirmed tenant id from either `data: corpId` or `data: { corpId }`, and then reads the tenant list again. The controller keeps the stored token because JDCloud refreshes its tenant context server-side. A successful switch returns authenticated status for the confirmed tenant; ordinary failures preserve the current login, while codes `600`, `601`, and `602` delete it as expired.
 
@@ -56,6 +58,7 @@ None; accepted requests are unchanged, and rejected requests never reach prompt 
 <a id="known-limitations-and-deferred-work"></a>
 
 - `requestAuthenticated()` is Host-only and supports JSON request bodies; it is not a browser proxy or a multipart upload client.
+- A transferred service address is unrestricted after HTTP(S) URL validation, so a link can direct the Host to disclose its supplied Token to an arbitrary server and request private-network addresses.
 - The inherited JDCloud login protocol uses MD5 because the upstream endpoint requires that wire behavior; it is not a password-storage scheme.
 - Stored logins are Host-wide for this controller instance rather than browser-user scoped.
 

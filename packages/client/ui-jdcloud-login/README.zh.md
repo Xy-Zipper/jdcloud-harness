@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-client-ui-jdcloud-login` 在 Host 没有已保存登录时提供 JDCloud 登录页，在已登录时提供账号摘要，并在 Web 外壳中呈现 JDCloud Harness 品牌。它自行挂载生成的 JDCloud Remote contribution，因此通用 API Remote assembly 不需要依赖这个可选集成。
+`@deepseek-ai/dsh-client-ui-jdcloud-login` 在 Host 没有已保存登录时提供 JDCloud 账号密码登录页和 Token 中转登录页，在已登录时提供账号摘要，并在 Web 外壳中呈现 JDCloud Harness 品牌。它自行挂载生成的 JDCloud Remote contribution，因此通用 API Remote assembly 不需要依赖这个可选集成。
 
 ## 目录
 
@@ -24,6 +24,8 @@ kind: "package-reference"
 通过 [`dsh-jdcloud-login`](../../bundle/jdcloud-login/README.zh.md) bundle 安装。本页面要求填写服务地址、账号和密码。初始服务地址来自 Host controller 的脱敏状态，bundle 可以通过 `JDCLOUD_DEFAULT_BASE_URL` 提供默认值。
 
 页面以 priority `-100` 占用 `root`。登录成功后，该 contribution 被移除，已经挂载的应用重新显示，不替换 Session 状态。当 Host 因 `600`、`601` 或 `602` 校验响应删除 JDCloud credential record 时，转发的 `credentials/record-updated` 事件会恢复登录页。被拒绝的对话草稿仍留在 Client 状态中，重新登录后不会自动提交。
+
+`GET /login/transfer?token=...&baseUrl=...` 会返回一个禁止缓存的跳板文档，再把内部参数放入 URL fragment，并发起同站导航进入已认证的 Web 外壳。这个额外文档让其他站点通过 `window.open()` 打开页面时，浏览器能够在下一次导航中携带已有的 `SameSite=Strict` Harness cookie；fragment 同时确保 JDCloud Token 不进入根路径 HTTP 请求和子资源 Referer。从未交换过 `dsh web` 打印的启动 URL 的浏览器仍需先执行一次该操作。Client 随即把地址栏替换为 `/login/transfer`。priority 为 `-110` 的 root contribution 只调用一次 `loginWithToken()`；成功后显示应用，失败后显示本地化恢复页。选择恢复操作会关闭中转页并显示账号密码登录。原始 Token 校验后只归 Host 所有，不写入浏览器存储。
 
 登录后，本包会占用 `sidebar.account`。展开侧边栏时显示 Host 返回的账号和当前租户，折叠轨道只显示账号图标。账号菜单列出全部自有与加入租户，高亮当前租户，并通过 `GET /api/system/corp/switchCorp/{corpId}` 切换到其他租户而不显示登录页。租户行在 240 像素高的区域内滚动，“退出登录”保持固定。切换失败时保留当前租户，并在菜单中显示错误。选择“退出登录”会删除 Host credential 并恢复登录页。
 
@@ -44,7 +46,7 @@ kind: "package-reference"
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- 页面只支持服务地址加账号密码登录。
+- 中转链接控制接收其 Token 的 HTTP(S) 服务地址；Host controller 不校验目的地址白名单。
 - 不会自动重试因认证校验被拒绝的 Prompt。
 
 <a id="dev-note"></a>

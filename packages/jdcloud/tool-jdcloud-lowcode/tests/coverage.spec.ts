@@ -323,21 +323,29 @@ describe('plugin configuration and prompt branches', () => {
 
 describe('schemas, presenters, describe, and exact reads', () => {
   it('executes describe/get and exposes every pure concurrency and presentation callback', async () => {
-    const fields = [{
-      enCode: 'group',
-      value: 'group',
-      jdcloudKey: 'row',
-      fullName: 'Group',
-      required: true,
-      children: [{
-        enCode: 'billNo',
-        value: 'billNo',
-        jdcloudKey: 'billRule',
-        fullName: 'Bill number',
-        children: null,
-      }],
-      privateValue: 'must not render',
-    }]
+    const fields = [
+      {
+        enCode: 'group',
+        jdcloudKey: 'table',
+        fullName: 'Group',
+        required: true,
+        children: [{
+          enCode: 'billNo',
+          value: 'billNo',
+          jdcloudKey: 'billRule',
+          fullName: 'Bill number',
+          children: null,
+        }],
+        privateValue: 'must not render',
+      },
+      {
+        enCode: 'attachments',
+        value: 'array',
+        jdcloudKey: 'uploadFz',
+        fullName: 'Attachments',
+        required: false,
+      },
+    ]
     const mounted = await toolHarness({
       response: request => request.path.includes('/fields/') ? fields : { row: 'record-1' },
     })
@@ -384,6 +392,7 @@ describe('schemas, presenters, describe, and exact reads', () => {
     const described = await mounted.call('jdcloud_lowcode_describe', { menu_id: 'form-1' })
     expect(described.isError).toBe(false)
     expect(resultText(described)).toContain('"required":true')
+    expect(resultText(described)).toContain('"fullName":"Attachments","required":false')
     expect(resultText(described)).toContain('"children"')
     expect(resultText(described)).not.toContain('privateValue')
 
@@ -425,7 +434,7 @@ describe('schemas, presenters, describe, and exact reads', () => {
     ['non-object field', [null], 'field 0 is invalid'],
     ['missing code', [{ value: 'v', jdcloudKey: 'k', fullName: 'n' }], 'field 0 enCode'],
     ['blank code', [{ enCode: ' ', value: 'v', jdcloudKey: 'k', fullName: 'n' }], 'field 0 enCode'],
-    ['missing value', [{ enCode: 'c', jdcloudKey: 'k', fullName: 'n' }], 'value'],
+    ['missing leaf value', [{ enCode: 'c', jdcloudKey: 'k', fullName: 'n' }], 'value'],
     ['missing component key', [{ enCode: 'c', value: 'v', fullName: 'n' }], 'jdcloudKey'],
     ['missing name', [{ enCode: 'c', value: 'v', jdcloudKey: 'k' }], 'fullName'],
     ['invalid children', [{ enCode: 'c', value: 'v', jdcloudKey: 'k', fullName: 'n', children: {} }], 'field response is invalid'],
@@ -535,6 +544,88 @@ describe('query validation, defaults, and bounded rendering', () => {
 })
 
 describe('write-tool failures and table partial completion', () => {
+  it('validates every supported required-value kind before creating a record', async () => {
+    const fields = [
+      { enCode: 'missing', value: 'string', jdcloudKey: 'comInput', fullName: 'Missing', required: true },
+      { enCode: 'nullValue', value: 'string', jdcloudKey: 'comInput', fullName: 'Null', required: true },
+      { enCode: 'title', value: 'string', jdcloudKey: 'comInput', fullName: 'Title', required: true },
+      { enCode: 'amount', value: 'number', jdcloudKey: 'numInput', fullName: 'Amount', required: true },
+      { enCode: 'approved', value: 'boolean', jdcloudKey: 'switch', fullName: 'Approved', required: true },
+      { enCode: 'selection', value: 'array', jdcloudKey: 'userSelect', fullName: 'Selection', required: true },
+      { enCode: 'customText', value: 'custom', jdcloudKey: 'custom', fullName: 'Custom text', required: true },
+      { enCode: 'customList', value: 'custom', jdcloudKey: 'custom', fullName: 'Custom list', required: true },
+      { enCode: 'customObject', value: 'custom', jdcloudKey: 'custom', fullName: 'Custom object', required: true },
+      { enCode: 'customScalar', value: 'custom', jdcloudKey: 'custom', fullName: 'Custom scalar', required: true },
+      {
+        enCode: 'missingDetails', jdcloudKey: 'table', fullName: 'Missing details', required: true,
+        children: [{ enCode: 'line', value: 'string', jdcloudKey: 'comInput', fullName: 'Line', required: true }],
+      },
+      {
+        enCode: 'emptyDetails', jdcloudKey: 'table', fullName: 'Empty details', required: true,
+        children: [{ enCode: 'line', value: 'string', jdcloudKey: 'comInput', fullName: 'Line', required: true }],
+      },
+      {
+        enCode: 'optionalDetails', jdcloudKey: 'table', fullName: 'Optional details', required: false,
+        children: [{ enCode: 'line', value: 'string', jdcloudKey: 'comInput', fullName: 'Line', required: true }],
+      },
+      {
+        enCode: 'details', jdcloudKey: 'table', fullName: 'Details', required: true,
+        children: [{ enCode: 'line', value: 'string', jdcloudKey: 'comInput', fullName: 'Line', required: true }],
+      },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/') ? fields : { ok: true },
+    })
+
+    const invalid = await mounted.call('jdcloud_lowcode_create', {
+      menu_id: 'form-1',
+      data: {
+        nullValue: null,
+        title: ' ',
+        amount: '1',
+        approved: 'true',
+        selection: [],
+        customText: ' ',
+        customList: [],
+        customObject: {},
+        customScalar: 1,
+        emptyDetails: [],
+        details: ['invalid row'],
+      },
+    })
+
+    expect(errorCode(invalid)).toBe('JDCLOUD_LOWCODE_REQUIRED_FIELDS')
+    expect(resultText(invalid)).toContain('Details[1] (details[1])')
+    expect(mounted.requests.map(request => request.path))
+      .toEqual(['/api/visualdev/base/fields/form-1'])
+
+    const valid = await mounted.call('jdcloud_lowcode_create', {
+      menu_id: 'form-1',
+      data: {
+        missing: 'provided',
+        nullValue: 'provided',
+        title: 'Expense',
+        amount: 1,
+        approved: false,
+        selection: [{ id: 'user-1' }],
+        customText: 'provided',
+        customList: ['provided'],
+        customObject: { id: 'object-1' },
+        customScalar: 1,
+        missingDetails: [{ line: 'provided' }],
+        emptyDetails: [{ line: 'provided' }],
+        details: [{ line: 'provided' }],
+      },
+    })
+
+    expect(valid.isError).toBe(false)
+    expect(mounted.requests.map(request => request.path)).toEqual([
+      '/api/visualdev/base/fields/form-1',
+      '/api/visualdev/base/fields/form-1',
+      '/api/visualdev/form/create',
+    ])
+  })
+
   it('rejects an update containing only empty automatic-number fields', async () => {
     const mounted = await toolHarness({
       response: request => request.path.includes('/fields/')

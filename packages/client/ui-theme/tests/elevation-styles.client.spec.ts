@@ -144,6 +144,7 @@ describe('neutral solid borders are hairlines', () => {
    */
   const RING_TRACKS = new Set([
     'boot-page.module.css .spinner',
+    'LoginTransferPage.module.css .spinner',
     'TrajectoryTable.module.css .historyLoadingSpinner',
   ])
 

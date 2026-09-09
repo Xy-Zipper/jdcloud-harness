@@ -1425,6 +1425,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     declaredBy: 'the runtime itself (built in; always present)',
     occupants: [
       'client-ui-jdcloud-login LoginPage',
+      'client-ui-jdcloud-login LoginTransferPage',
       'client-ui-layout AppFrame',
     ],
     replaceRisk: 'shadows-shipped-ui',

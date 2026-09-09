@@ -11,10 +11,35 @@ import type { JdcloudAuthStatus } from '@deepseek-ai/dsh-api-jdcloud-auth-contro
 import { AccountSeat, type JdcloudAccountInjected } from './AccountSeat.tsx'
 import { JdcloudBrandMark, JdcloudBrandName } from './Brand.tsx'
 import { LoginPage, type JdcloudLoginInjected } from './LoginPage.tsx'
+import { LoginTransferPage, type JdcloudLoginTransferInjected } from './LoginTransferPage.tsx'
 import { en, NS, zh } from './locales.ts'
 
 const AUTH_RECORD_KEY = 'jdcloud-auth-controller/login'
 const BRAND_PRIORITY = -10
+const TRANSFER_PRIORITY = -110
+const TRANSFER_PATH = '/login/transfer'
+
+interface LoginTransferCredentials {
+  readonly token: string
+  readonly baseUrl: string
+}
+
+/** Read the direct route query or Host-bootstrap fragment once at plugin activation. */
+function readTransferCredentials(): LoginTransferCredentials | undefined {
+  const query = new URLSearchParams(window.location.search)
+  if (window.location.pathname === TRANSFER_PATH) {
+    return {
+      token: query.get('token')?.trim() ?? '',
+      baseUrl: query.get('baseUrl')?.trim() ?? '',
+    }
+  }
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  if (window.location.pathname !== '/' || fragment.get('jdcloudTransfer') !== '1') return undefined
+  return {
+    token: fragment.get('jdcloudToken')?.trim() ?? '',
+    baseUrl: fragment.get('baseUrl')?.trim() ?? '',
+  }
+}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -54,6 +79,7 @@ function installJdcloudBrand(ctx: ClientContext): () => void {
 export function installJdcloudLoginUi(ctx: ClientContext): void {
   let active = true
   let disposeLogin: (() => void) | undefined
+  let disposeTransfer: (() => void) | undefined
   let disposeAccount: (() => void) | undefined
 
   const hideLogin = (): void => {
@@ -64,6 +90,11 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   const hideAccount = (): void => {
     disposeAccount?.()
     disposeAccount = undefined
+  }
+
+  const hideTransfer = (): void => {
+    disposeTransfer?.()
+    disposeTransfer = undefined
   }
 
   const showAccount = (status: Extract<JdcloudAuthStatus, { readonly authenticated: true }>): void => {
@@ -94,6 +125,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   const applyStatus = (status: JdcloudAuthStatus): void => {
     if (status.authenticated) {
       hideLogin()
+      hideTransfer()
       showAccount(status)
       return
     }
@@ -125,8 +157,38 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
     }, LoginPage)
   }
 
+  const showTransfer = (credentials: LoginTransferCredentials): void => {
+    let oneShotCredentials: LoginTransferCredentials | undefined = credentials
+    const injected: JdcloudLoginTransferInjected = {
+      transfer: async () => {
+        const request = oneShotCredentials
+        oneShotCredentials = undefined
+        if (request === undefined) return { ok: false }
+        const result = await ctx.remote.jdcloudAuth.loginWithToken(request)
+        if (!result.ok) return { ok: false }
+        if (active) {
+          window.history.replaceState(null, '', '/')
+          applyStatus(result.value)
+        }
+        return { ok: true }
+      },
+      goLogin: () => {
+        if (!active) return
+        window.history.replaceState(null, '', '/')
+        hideTransfer()
+        showLogin()
+      },
+    }
+    disposeTransfer = ctx.slots.register({
+      name: 'root',
+      priority: TRANSFER_PRIORITY,
+      locale: NS,
+      inject: () => injected,
+    }, LoginTransferPage)
+  }
+
   const refresh = async (): Promise<void> => {
-    if (!active) return
+    if (!active || disposeTransfer !== undefined) return
     const result = await ctx.remote.jdcloudAuth.status()
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- disposal may run while the Remote call is pending.
     if (!active || !result.ok) return
@@ -139,11 +201,19 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
       if (String(key) === AUTH_RECORD_KEY) void refresh()
     })
-    showLogin()
+    const transfer = readTransferCredentials()
+    if (transfer === undefined) {
+      showLogin()
+    } else {
+      // Scrub the token before the Host validates it or the page loads subresources.
+      window.history.replaceState(null, '', TRANSFER_PATH)
+      showTransfer(transfer)
+    }
     return () => {
       active = false
       offRecord()
       hideLogin()
+      hideTransfer()
       hideAccount()
     }
   }, 'ui-jdcloud-login: authentication gate')

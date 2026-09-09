@@ -22,6 +22,12 @@ export interface JdcloudLoginRequest {
   readonly password: string
 }
 
+/** Token-transfer login request received from the JDCloud entry page. */
+export interface JdcloudTokenLoginRequest {
+  readonly baseUrl: string
+  readonly token: string
+}
+
 /** One Host-only JDCloud API request that reuses the stored login. */
 export interface JdcloudAuthenticatedRequest {
   readonly path: `/api/${string}`

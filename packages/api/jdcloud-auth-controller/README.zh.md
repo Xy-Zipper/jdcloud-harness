@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-jdcloud-auth-controller` 实现低代码登录流程所需的 JDCloud 调用：密码登录、租户列表校验与租户切换。它在 Host credentials 中拥有 Token，公开生成的 `jdcloudAuth` Remote namespace，让其他 Host 插件在不读取 Token 的情况下复用已认证连接，并在每个浏览器 Prompt 进入 Session 前检查租户列表。
+`@deepseek-ai/dsh-api-jdcloud-auth-controller` 实现低代码登录流程所需的 JDCloud 调用：密码登录、Token 中转登录、租户列表校验与租户切换。它在 Host credentials 中拥有 Token，公开生成的 `jdcloudAuth` Remote namespace，让其他 Host 插件在不读取 Token 的情况下复用已认证连接，并在每个浏览器 Prompt 进入 Session 前检查租户列表。
 
 ## 目录
 
@@ -25,6 +25,8 @@ kind: "package-reference"
 将 controller 与 API Gateway、Session Controller 和可写 credentials provider 一起挂载。可选的 [`dsh-jdcloud-login`](../../bundle/jdcloud-login/README.zh.md) bundle 会同时安装 controller 与浏览器登录页。
 
 `login()` 使用原接口的 `client_id=admin`、`client_secret=123456`、`scope=all` 和 `grant_type=password` query 参数调用 `POST /api/oauth/login`。JSON body 只包含去除首尾空白的账号和 MD5 密码，不发送租户 id。收到 Token 后，controller 会调用 `GET /api/system/corp/getCorpList`，合并 `corpList` 与 `joinCorpList`，解析 `data.corpId` 指定的当前租户，并一起保存规范化服务地址、Token、账号、当前租户和可用租户列表。
+
+`loginWithToken()` 会先删除已保存登录，规范化传入的绝对 HTTP(S) 服务地址，并依次通过 `GET /api/oauth/currentUser` 与 `GET /api/system/corp/getCorpList` 校验传入 Token。两个响应必须指向同一当前租户。中转成功后，Host 保存账号显示名、租户列表与 Token；无效或失败的中转信息会让 controller 保持未登录状态。调用方控制请求目的地，因此 Host 会把 Token 和校验请求发送到任意语法合法的 HTTP(S) 地址。
 
 `switchCorp()` 只接受认证状态中返回的租户，使用已保存的 Token 调用 `GET /api/system/corp/switchCorp/{corpId}`，支持从 `data: corpId` 或 `data: { corpId }` 读取后端确认的租户 id，随后再次读取租户列表。JDCloud 会在服务端刷新 Token 对应的租户上下文，因此 controller 保留已保存的 Token。切换成功会返回已确认租户的认证状态；普通失败保留当前登录，业务码 `600`、`601`、`602` 则删除过期登录。
 
@@ -56,6 +58,7 @@ Host 插件可以使用 `requestAuthenticated({ path, method, body? }, signal)` 
 <a id="known-limitations-and-deferred-work"></a>
 
 - `requestAuthenticated()` 仅供 Host 使用并支持 JSON body；它不是浏览器代理或 multipart 上传客户端。
+- 中转服务地址在通过 HTTP(S) URL 校验后不受限制，因此链接可以让 Host 向任意服务器披露其携带的 Token，并请求私有网络地址。
 - 登录接口沿用 JDCloud 上游要求的 MD5 wire 行为；它不是密码存储方案。
 - 保存的登录状态属于该 controller 实例的 Host 全局状态，不按浏览器用户隔离。
 

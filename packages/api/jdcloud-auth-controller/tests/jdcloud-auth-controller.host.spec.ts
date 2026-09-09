@@ -36,7 +36,10 @@ function corpData(
   }
 }
 
-async function boot(fetcher: typeof fetch, config: { defaultBaseUrl?: string; requestTimeoutMs?: number } = {
+async function boot(fetcher: typeof fetch, config: {
+  defaultBaseUrl?: string
+  requestTimeoutMs?: number
+} = {
   defaultBaseUrl: 'https://kindoucloud.com',
 }) {
   vi.stubGlobal('fetch', fetcher)
@@ -93,6 +96,33 @@ describe('minimal JDCloud HTTP client', () => {
       code: 200, msg: 'ok', data,
     }))))
     await expect(client.loginPassword('user', 'secret', AbortSignal.timeout(1000))).rejects.toThrow(message)
+  })
+
+  it.each([
+    [{ userInfo: { corpId: 'corp-a', userName: ' account ' } }, { username: 'account', corpId: 'corp-a' }],
+    [{ userInfo: { corpId: 'corp-a', realName: 'Real Name' } }, { username: 'Real Name', corpId: 'corp-a' }],
+    [{ userInfo: { corpId: 'corp-a', id: 'user-id' } }, { username: 'user-id', corpId: 'corp-a' }],
+  ])('reads the transferred-token identity from currentUser', async (data, expected) => {
+    const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data })))
+    const client = new JdcloudClient('https://kindoucloud.com', fetcher)
+    await expect(client.getCurrentUser('transferred-token', AbortSignal.timeout(1000))).resolves.toEqual(expected)
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new URL(url).pathname).toBe('/api/oauth/currentUser')
+    expect(init).toMatchObject({ method: 'GET', headers: { authorization: 'transferred-token' }, cache: 'no-store' })
+  })
+
+  it.each([
+    null,
+    {},
+    { userInfo: null },
+    { userInfo: {} },
+    { userInfo: { corpId: '' } },
+    { userInfo: { corpId: 'corp-a' } },
+  ])('rejects an unusable currentUser identity %j', async (data) => {
+    const client = new JdcloudClient('https://kindoucloud.com', vi.fn(() => Promise.resolve(json({
+      code: 200, msg: 'ok', data,
+    }))))
+    await expect(client.getCurrentUser('token', AbortSignal.timeout(1000))).rejects.toThrow('current-user response')
   })
 
   it('returns all owned and joined tenants with stable duplicate removal', async () => {
@@ -262,6 +292,97 @@ describe('JDCloud authentication controller', () => {
     const [tenantUrl, tenantInit] = fetcher.mock.calls[1] as unknown as [string, RequestInit]
     expect(new URL(tenantUrl).pathname).toBe('/api/system/corp/getCorpList')
     expect(tenantInit.headers).toEqual({ authorization: 'bearer token' })
+  })
+
+  it('replaces the stored login with a transferred token', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({
+        code: 200,
+        msg: 'ok',
+        data: { userInfo: { userName: 'transfer-user', corpId: 'corp-beta' } },
+      }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-beta', 'Beta Tenant') }))
+    const ctx = await boot(fetcher as typeof fetch)
+    await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+      kind: 'grant',
+      payload: {
+        version: 3,
+        baseUrl: 'https://kindoucloud.com',
+        token: 'old-token',
+        username: 'old-user',
+        corpId: 'old-corp',
+        corpName: 'Old Tenant',
+        corps: [{ corpId: 'old-corp', corpName: 'Old Tenant' }],
+      },
+    }))
+    await expect(ctx.jdcloudAuthController.loginWithToken({
+      baseUrl: 'https://kindoucloud.com/',
+      token: ' transferred-token ',
+    }, AbortSignal.timeout(1000))).resolves.toEqual({
+      authenticated: true,
+      baseUrl: 'https://kindoucloud.com',
+      username: 'transfer-user',
+      corpId: 'corp-beta',
+      corpName: 'Beta Tenant',
+      corps: [{ corpId: 'corp-beta', corpName: 'Beta Tenant' }],
+    })
+    expect(await ctx.credentials.readRecord(credentialKey('jdcloud-auth-controller', 'login'))).toMatchObject({
+      kind: 'grant',
+      payload: { token: 'transferred-token', username: 'transfer-user', corpId: 'corp-beta' },
+    })
+    expect(fetcher.mock.calls.map(call => new URL(String(call[0])).pathname)).toEqual([
+      '/api/oauth/currentUser',
+      '/api/system/corp/getCorpList',
+    ])
+  })
+
+  it('accepts a transfer address when the default differs', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({
+        code: 200, msg: 'ok', data: { userInfo: { realName: 'Transferred User', corpId: 'corp-a' } },
+      }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-a', 'Tenant A') }))
+    const ctx = await boot(fetcher as typeof fetch, { defaultBaseUrl: 'https://kindoucloud.com' })
+    await expect(ctx.jdcloudAuthController.loginWithToken({
+      baseUrl: 'https://transfer.kindoucloud.com', token: 'token',
+    }, AbortSignal.timeout(1000))).resolves.toMatchObject({ username: 'Transferred User', corpId: 'corp-a' })
+  })
+
+  it.each([
+    { baseUrl: 'relative', token: 'token' },
+    { baseUrl: 'https://kindoucloud.com', token: ' ' },
+  ])('clears the previous login and rejects invalid transfer information %#', async (request) => {
+    const fetcher = vi.fn()
+    const ctx = await boot(fetcher as typeof fetch)
+    await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+      kind: 'grant',
+      payload: {
+        version: 3,
+        baseUrl: 'https://kindoucloud.com',
+        token: 'old-token',
+        username: 'old-user',
+        corpId: 'old-corp',
+        corpName: 'Old Tenant',
+        corps: [{ corpId: 'old-corp', corpName: 'Old Tenant' }],
+      },
+    }))
+    await expect(ctx.jdcloudAuthController.loginWithToken(request, AbortSignal.timeout(1000)))
+      .rejects.toMatchObject({ code: 'gateway/bad-request' })
+    expect(await ctx.credentials.readRecord(credentialKey('jdcloud-auth-controller', 'login'))).toBeUndefined()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('rejects a transferred token whose currentUser and tenant list disagree', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({
+        code: 200, msg: 'ok', data: { userInfo: { userName: 'user', corpId: 'corp-a' } },
+      }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-b', 'Tenant B') }))
+    const ctx = await boot(fetcher as typeof fetch)
+    await expect(ctx.jdcloudAuthController.loginWithToken({
+      baseUrl: 'https://kindoucloud.com', token: 'token',
+    }, AbortSignal.timeout(1000))).rejects.toMatchObject({ code: 'jdcloud/auth-failed' })
+    expect((await ctx.jdcloudAuthController.status()).authenticated).toBe(false)
   })
 
   it('sends authenticated Host requests without exposing the stored token', async () => {

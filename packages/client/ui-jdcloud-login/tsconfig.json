@@ -16,6 +16,7 @@
     { "path": "../ui-primitives" },
     { "path": "../ui-renderer" },
     { "path": "../ui-sidebar" },
-    { "path": "../ui-slots" }
+    { "path": "../ui-slots" },
+    { "path": "../../host/webserver" }
   ]
 }

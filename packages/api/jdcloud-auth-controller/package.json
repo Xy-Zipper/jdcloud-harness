@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-api-jdcloud-auth-controller",
-  "description": "Host-side JDCloud password login, tenant selection, token storage, and prompt admission validation",
+  "description": "Host-side JDCloud password and transfer login, tenant selection, token storage, and prompt admission validation",
   "version": "0.1.3-alpha.2",
   "publishConfig": {
     "access": "public"

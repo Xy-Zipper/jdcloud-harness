@@ -33,7 +33,7 @@ dsh plugin --profile web add @deepseek-ai/dsh-jdcloud-login
 JDCLOUD_DEFAULT_BASE_URL=https://example.com
 ```
 
-该值只作为初始地址。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
+`JDCLOUD_DEFAULT_BASE_URL` 是账号密码登录的初始地址。Token 中转链接可以传入任意语法合法的绝对 HTTP(S) 服务地址；Host 不使用白名单，并会把传入的 Token 发送到该目的地。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
 
 低代码 row 会为每个用户 Prompt 注入仅包含表单与流程菜单项（type 3 和 4）的能力快照。它还提供由 Host 执行时强制校验当前权限的低代码数据工具。
 

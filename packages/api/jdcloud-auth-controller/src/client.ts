@@ -21,6 +21,14 @@ export interface JdcloudCorpState {
   readonly corps: readonly JdcloudCorp[]
 }
 
+/** Account and tenant identity returned by `/api/oauth/currentUser`. */
+export interface JdcloudCurrentUserIdentity {
+  /** Account label shown in the Harness sidebar. */
+  readonly username: string
+  /** Current tenant selected by the transferred token. */
+  readonly corpId: string
+}
+
 /** JDCloud business response failure. */
 export class JdcloudApiError extends Error {
   /** @param code - JDCloud response code. @param message - backend message. */
@@ -116,6 +124,23 @@ export class JdcloudClient {
       signal,
     })
     return readCorpState(result.data)
+  }
+
+  /**
+   * Validate a transferred token and read its account and current tenant.
+   * @param token - Raw JDCloud authorization header value.
+   * @param signal - Request cancellation signal.
+   * @returns Account label and current tenant identity.
+   */
+  async getCurrentUser(token: string, signal: AbortSignal): Promise<JdcloudCurrentUserIdentity> {
+    const query = new URLSearchParams({ n: String(Date.now()) })
+    const result = await this.request<unknown>(`${this.baseUrl}/api/oauth/currentUser?${query}`, {
+      method: 'GET',
+      headers: { authorization: token },
+      cache: 'no-store',
+      signal,
+    })
+    return readCurrentUserIdentity(result.data)
   }
 
   /**
@@ -239,4 +264,27 @@ function readCorpState(value: unknown): JdcloudCorpState {
     throw new Error('JDCloud tenant-list response has no name for the current tenant')
   }
   return { corpId, corpName: current.corpName, corps }
+}
+
+/** Read the minimum identity retained from the external current-user response. */
+function readCurrentUserIdentity(value: unknown): JdcloudCurrentUserIdentity {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('JDCloud current-user response is invalid')
+  }
+  const userInfo: unknown = Reflect.get(value, 'userInfo')
+  if (typeof userInfo !== 'object' || userInfo === null || Array.isArray(userInfo)) {
+    throw new Error('JDCloud current-user response has no user profile')
+  }
+  const corpId: unknown = Reflect.get(userInfo, 'corpId')
+  if (typeof corpId !== 'string' || corpId.trim() === '') {
+    throw new Error('JDCloud current-user response has no current tenant')
+  }
+  const labels = [
+    Reflect.get(userInfo, 'userName'),
+    Reflect.get(userInfo, 'realName'),
+    Reflect.get(userInfo, 'id'),
+  ]
+  const username = labels.find((label): label is string => typeof label === 'string' && label.trim() !== '')
+  if (username === undefined) throw new Error('JDCloud current-user response has no account name')
+  return { username: username.trim(), corpId: corpId.trim() }
 }

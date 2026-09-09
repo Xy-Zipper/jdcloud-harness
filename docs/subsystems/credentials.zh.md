@@ -275,6 +275,14 @@ Store credentials, expose login commands, and validate each browser prompt.
 @Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
 
 /**
+ * Replace the stored login with a transferred token after Host-side validation.
+ * @param request - Absolute HTTP(S) service address and raw transfer token.
+ * @param signal - Caller cancellation for current-user and tenant validation.
+ * @returns Redacted authenticated state.
+ */
+@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
  * Select another tenant for the stored JDCloud login.
  * @param corpId - Tenant identity from the current authenticated status.
  * @param signal - Caller cancellation for the switch and confirmation requests.

@@ -12,6 +12,7 @@ import type {
   JdcloudAuthStatus,
   JdcloudCorp,
   JdcloudLoginRequest,
+  JdcloudTokenLoginRequest,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -117,27 +118,42 @@ export class JdcloudAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.requestError('login', error)
     }
-    const record: GrantRecord = {
-      kind: 'grant',
-      payload: {
-        version: 3,
-        baseUrl,
-        token,
-        username: request.username.trim(),
-        corpId: corp.corpId,
-        corpName: corp.corpName,
-        corps: corp.corps,
-      } satisfies AuthPayload,
+    return this.commitLogin(baseUrl, token, request.username.trim(), corp)
+  }
+
+  /**
+   * Replace the stored login with a transferred token after Host-side validation.
+   * @param request - Absolute HTTP(S) service address and raw transfer token.
+   * @param signal - Caller cancellation for current-user and tenant validation.
+   * @returns Redacted authenticated state.
+   */
+  @Remote
+  async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus> {
+    await this.ctx.credentials.deleteRecord(AUTH_KEY)
+    const token = request.token.trim()
+    let baseUrl: string
+    try {
+      baseUrl = normalizeJdcloudBaseUrl(request.baseUrl)
+    } catch (error) {
+      throw new RemoteError('gateway/bad-request', (error as Error).message, {})
     }
-    await this.ctx.credentials.modifyRecord(AUTH_KEY, () => Promise.resolve(record))
-    return {
-      authenticated: true,
-      baseUrl,
-      username: request.username.trim(),
-      corpId: corp.corpId,
-      corpName: corp.corpName,
-      corps: corp.corps,
+    if (token === '') {
+      throw new RemoteError('gateway/bad-request', 'JDCloud transfer login information is invalid', {})
     }
+    const operationSignal = this.operationSignal(signal)
+    const client = new JdcloudClient(baseUrl, this.fetcher)
+    let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
+    let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
+    try {
+      currentUser = await client.getCurrentUser(token, operationSignal)
+      corp = await client.getCorpList(token, operationSignal)
+      if (currentUser.corpId !== corp.corpId) {
+        throw new Error('JDCloud transfer token returned inconsistent current tenants')
+      }
+    } catch (error) {
+      throw this.requestError('login', error)
+    }
+    return this.commitLogin(baseUrl, token, currentUser.username, corp)
   }
 
   /**
@@ -267,6 +283,26 @@ export class JdcloudAuthController extends TypertRemoteService {
 
   private operationSignal(callerSignal: AbortSignal): AbortSignal {
     return AbortSignal.any([callerSignal, AbortSignal.timeout(this.requestTimeoutMs)])
+  }
+
+  /** Commit one fully validated login and return its browser-safe status. */
+  private async commitLogin(
+    baseUrl: string,
+    token: string,
+    username: string,
+    corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>,
+  ): Promise<Extract<JdcloudAuthStatus, { readonly authenticated: true }>> {
+    const payload: AuthPayload = {
+      version: 3,
+      baseUrl,
+      token,
+      username,
+      corpId: corp.corpId,
+      corpName: corp.corpName,
+      corps: corp.corps,
+    }
+    await this.ctx.credentials.modifyRecord(AUTH_KEY, () => Promise.resolve(authRecord(payload)))
+    return authenticatedStatus(payload)
   }
 
   private requestError(operation: 'login' | 'switch' | 'validate', error: unknown): RemoteError {

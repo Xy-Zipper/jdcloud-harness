@@ -80,6 +80,8 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
 
   ctx = new Context()
   ctx.baseUrl = pathToFileURL(directory).href + '/'
+  // The optional UI Host half owns `/login/transfer`; this composition needs only its route registry contract.
+  ctx.provide('webServer', { register: () => () => {} } as never)
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
@@ -147,8 +149,14 @@ describe('JDCloud login through a real Loader composition', () => {
       'jdcloud_lowcode_delete',
       'jdcloud_lowcode_create_table',
     ])
-    expect((await context.systemPrompt.assemble()).sections.map(section => section.name))
-      .toContain('tool:jdcloud-lowcode')
+    const assembled = await context.systemPrompt.assemble()
+    expect(assembled.sections.map(section => section.name)).toContain('tool:jdcloud-lowcode')
+    const lowcodeGuidance = assembled.sections.find(section => section.name === 'tool:jdcloud-lowcode')?.text ?? ''
+    expect(lowcodeGuidance).toContain('infer every field value that is directly supported')
+    expect(lowcodeGuidance).toContain('not only titles, but also values such as amounts, dates')
+    expect(lowcodeGuidance).toContain('Never invent opaque ids')
+    expect(lowcodeGuidance).toContain('目前还缺少关键信息')
+    expect(lowcodeGuidance).toContain('every described field, including required and optional fields')
     await expect(context.jdcloudAuthController.status()).resolves.toEqual({
       authenticated: false,
       baseUrl: 'https://kindoucloud.com',

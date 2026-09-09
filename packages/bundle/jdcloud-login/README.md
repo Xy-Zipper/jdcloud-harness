@@ -33,7 +33,7 @@ Set the optional initial service address in the process environment or root `.en
 JDCLOUD_DEFAULT_BASE_URL=https://example.com
 ```
 
-The value is only an initial address. A successful login stores its normalized service address, Token, account, current tenant, and available tenants in the Host credentials provider. The Web Client shows the account and tenant in the sidebar; its account menu marks the current tenant, switches among all available tenants without returning to login, and provides Sign out.
+`JDCLOUD_DEFAULT_BASE_URL` is the initial account/password login address. A token-transfer link may supply any syntactically valid absolute HTTP(S) service address; the Host sends the supplied Token to that destination without an allowlist. A successful login stores its normalized service address, Token, account, current tenant, and available tenants in the Host credentials provider. The Web Client shows the account and tenant in the sidebar; its account menu marks the current tenant, switches among all available tenants without returning to login, and provides Sign out.
 
 For each user prompt, the low-code row injects a capability snapshot limited to form and workflow menu entries (types 3 and 4). It also provides low-code data tools whose Host execution enforces the current permissions.
 

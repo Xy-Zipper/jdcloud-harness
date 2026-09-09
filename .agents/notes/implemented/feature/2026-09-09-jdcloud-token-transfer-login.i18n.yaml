@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-09-jdcloud-token-transfer-login.md
+2026-09-09-jdcloud-token-transfer-login.md: 757e1d4685706caa6ce0c4878afbbb1f7f834bc7
+2026-09-09-jdcloud-token-transfer-login.zh.md: 85d5e1f22beb41a133e620c607fe8c039f1ddc0c
