@@ -26,7 +26,7 @@
 - status: Deep diving...
 - region "To-dos":
   - button "To-dos 1 in progress"
-- textbox "Message or run a task... / commands, @ files or sessions"
+- textbox "Message or run a task, / commands, @ files or sessions"
 - button "Commands":
   - img
 - button "Add attachment":

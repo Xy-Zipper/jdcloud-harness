@@ -26,7 +26,7 @@
 - status: Deep diving...
 - region "To-dos":
   - button "To-dos 1 in progress"
-- textbox "Message or run a task... / commands, @ files or sessions":
+- textbox "Message or run a task, / commands, @ files or sessions":
   - paragraph: Queue this follow-up while the current turn is running.
 - button "Commands":
   - img
@@ -36,4 +36,4 @@
 - button "Select model, current DeepSeek-V4-Flash":
   - text: DeepSeek-V4-Flash
   - img
-- button "Send message"
+- button "Queue message"
