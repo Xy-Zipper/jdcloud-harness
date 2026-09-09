@@ -81,6 +81,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   let disposeLogin: (() => void) | undefined
   let disposeTransfer: (() => void) | undefined
   let disposeAccount: (() => void) | undefined
+  const isActive = (): boolean => active
 
   const hideLogin = (): void => {
     disposeLogin?.()
@@ -188,10 +189,9 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }
 
   const refresh = async (): Promise<void> => {
-    if (!active || disposeTransfer !== undefined) return
+    if (!isActive() || disposeTransfer !== undefined) return
     const result = await ctx.remote.jdcloudAuth.status()
-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- disposal may run while the Remote call is pending.
-    if (!active || !result.ok) return
+    if (!isActive() || !result.ok) return
     applyStatus(result.value)
   }
 
