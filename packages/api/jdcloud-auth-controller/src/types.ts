@@ -3,6 +3,7 @@
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'jdcloud/auth-required': { readonly reason: 'missing' | 'expired' }
+    'jdcloud/administrator-required': { readonly capability: 'model-selection' }
     'jdcloud/auth-failed': { readonly code: number | null }
     'jdcloud/switch-failed': { readonly code: number | null }
     'jdcloud/validation-failed': { readonly code: number | null }
@@ -35,6 +36,33 @@ export interface JdcloudAuthenticatedRequest {
   readonly body?: unknown
 }
 
+/** JDCloud low-code menu kinds exposed by the write-action picker. */
+export type JdcloudLowcodeMenuType = 3 | 4
+
+/** JDCloud data mutations the Host authorizes for one low-code menu. */
+export type JdcloudLowcodeWritePermission = 'addData' | 'editData' | 'deleteData'
+
+/** One form or workflow with at least one Host-confirmed data mutation grant. */
+export interface JdcloudWritableMenu {
+  readonly menuId: string
+  readonly fullName: string
+  readonly path: string
+  readonly type: JdcloudLowcodeMenuType
+  readonly agentPermissions: readonly JdcloudLowcodeWritePermission[]
+}
+
+/** Current-tenant writable menus returned to the authenticated browser. */
+export interface JdcloudWritableMenuState {
+  readonly corpId: string
+  readonly menus: readonly JdcloudWritableMenu[]
+}
+
+/** Host projection of the current tenant's low-code authorization facts. */
+export interface JdcloudLowcodeCapabilityState {
+  readonly systemAdministrator: boolean
+  readonly menus: readonly JdcloudWritableMenu[]
+}
+
 /** Redacted authentication state returned to the browser. */
 export type JdcloudAuthStatus =
   | {
@@ -48,4 +76,5 @@ export type JdcloudAuthStatus =
     readonly corpId: string
     readonly corpName: string
     readonly corps: readonly JdcloudCorp[]
+    readonly systemAdministrator: boolean
   }

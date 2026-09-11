@@ -36,6 +36,7 @@ const AUTHENTICATED: Extract<JdcloudAuthStatus, { readonly authenticated: true }
   corpId: 'corp-1',
   corpName: 'Tenant One',
   corps: [{ corpId: 'corp-1', corpName: 'Tenant One' }],
+  systemAdministrator: true,
 }
 
 const SNAPSHOT: LowcodeCapabilitySnapshot = {
@@ -43,6 +44,11 @@ const SNAPSHOT: LowcodeCapabilitySnapshot = {
   corpId: 'corp-1',
   corpName: 'Tenant One',
   systemAdministrator: true,
+  currentMember: {
+    department: [],
+    role: [],
+    user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
+  },
   menus: [
     {
       menuId: 'form-1',
@@ -64,7 +70,7 @@ const SNAPSHOT: LowcodeCapabilitySnapshot = {
 /** Current-user data sufficient for the browser-prompt listener. */
 function currentUser(): Record<string, unknown> {
   return {
-    userInfo: { id: 'user-1' },
+    userInfo: { id: 'user-1', departmentId: [], roleId: [] },
     userPermission: { systemAdministrator: true },
     menuList: [{
       id: 'form-1',

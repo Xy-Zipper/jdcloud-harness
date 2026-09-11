@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { CommandUiContract } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { JdcloudAuthStatus } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
 import { AccountSeat, type JdcloudAccountInjected } from './AccountSeat.tsx'
 import { JdcloudBrandMark, JdcloudBrandName } from './Brand.tsx'
@@ -18,6 +19,7 @@ const AUTH_RECORD_KEY = 'jdcloud-auth-controller/login'
 const BRAND_PRIORITY = -10
 const TRANSFER_PRIORITY = -110
 const TRANSFER_PATH = '/login/transfer'
+const ADMIN_CONTROL_PRIORITY = -100
 
 interface LoginTransferCredentials {
   readonly token: string
@@ -49,7 +51,30 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required after the generated JDCloud Remote namespace is mounted. */
-export const uiInject = ['remote', 'remote.jdcloudAuth', 'slots', 'locale']
+export const uiInject = ['remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi']
+
+/** Null occupant that shadows one administrator-only single slot. */
+function HiddenAdministratorControl(): null {
+  return null
+}
+
+/** Install the three administrator-only slot shadows as one lifecycle. */
+function installAdministratorControlShadows(ctx: ClientContext): () => void {
+  const disposers = [
+    ctx.slots.inject('sidebar.settings', () => ctx.slots.register({
+      name: 'sidebar.settings', priority: ADMIN_CONTROL_PRIORITY,
+    }, HiddenAdministratorControl)),
+    ctx.slots.inject('conversation.input.model', () => ctx.slots.register({
+      name: 'conversation.input.model', priority: ADMIN_CONTROL_PRIORITY,
+    }, HiddenAdministratorControl)),
+    ctx.slots.inject('conversation.hero.agentPreset', () => ctx.slots.register({
+      name: 'conversation.hero.agentPreset', priority: ADMIN_CONTROL_PRIORITY,
+    }, HiddenAdministratorControl)),
+  ]
+  return () => {
+    for (const dispose of disposers.reverse()) dispose()
+  }
+}
 
 /** Install JDCloud occupants ahead of generic and official brand fallbacks. */
 function installJdcloudBrand(ctx: ClientContext): () => void {
@@ -81,7 +106,20 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   let disposeLogin: (() => void) | undefined
   let disposeTransfer: (() => void) | undefined
   let disposeAccount: (() => void) | undefined
+  let disposeAdministratorShadows: (() => void) | undefined
+  let systemAdministrator = false
   const isActive = (): boolean => active
+
+  /** Apply the current tenant's administrator-only client controls. */
+  const applyAdministratorAccess = (allowed: boolean): void => {
+    systemAdministrator = allowed
+    if (allowed) {
+      disposeAdministratorShadows?.()
+      disposeAdministratorShadows = undefined
+      return
+    }
+    disposeAdministratorShadows ??= installAdministratorControlShadows(ctx)
+  }
 
   const hideLogin = (): void => {
     disposeLogin?.()
@@ -124,12 +162,15 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }
 
   const applyStatus = (status: JdcloudAuthStatus): void => {
+    if (!active) return
     if (status.authenticated) {
+      applyAdministratorAccess(status.systemAdministrator)
       hideLogin()
       hideTransfer()
       showAccount(status)
       return
     }
+    applyAdministratorAccess(false)
     hideAccount()
     showLogin()
   }
@@ -198,6 +239,10 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-jdcloud-login: dictionaries')
   ctx.effect(() => installJdcloudBrand(ctx), 'ui-jdcloud-login: JDCloud brand')
   ctx.effect(() => {
+    const commandUi = ctx.get('commandUi') as CommandUiContract
+    return commandUi.registerAvailabilityFilter(name => name !== 'model' || systemAdministrator)
+  }, 'ui-jdcloud-login: administrator command policy')
+  ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
       if (String(key) === AUTH_RECORD_KEY) void refresh()
     })
@@ -215,6 +260,8 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       hideLogin()
       hideTransfer()
       hideAccount()
+      disposeAdministratorShadows?.()
+      disposeAdministratorShadows = undefined
     }
   }, 'ui-jdcloud-login: authentication gate')
 }

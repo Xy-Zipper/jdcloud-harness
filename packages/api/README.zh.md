@@ -28,7 +28,7 @@ kind: "package-group"
 |---|---|---|
 | [`remotes/`](remotes/README.zh.md) | 决定 Client 可以消费哪些 Host 能力与事件。 | — |
 | [`gateway/`](gateway/README.zh.md) | 承载带类型的单次调用、多路复用 stream 与转发的 Host 事件。 | `ctx.typertGateway` / `ctx.remote` |
-| [`jdcloud-auth-controller/`](jdcloud-auth-controller/README.zh.md) | 拥有可选 JDCloud 密码登录、Host Token 存储与浏览器 Prompt 校验。 | `ctx.jdcloudAuthController` / `ctx.remote.jdcloudAuth` |
+| [`jdcloud-auth-controller/`](jdcloud-auth-controller/README.zh.md) | 拥有可选 JDCloud 登录、Host Token 与管理员状态，以及 Prompt 和模型选择准入。 | `ctx.jdcloudAuthController` / `ctx.remote.jdcloudAuth` |
 | [`session-controller/`](session-controller/README.zh.md) | 拥有 Session 命令、历史 stream、实时控制状态与 Agent/Session 身份策略。 | `ctx.sessionController` / `ctx.remote.session` |
 | [`settings-controller/`](settings-controller/README.zh.md) | 拥有 settings 域各 seam 之上的配置界面读写。 | `ctx.settingsController`、`ctx.credentialsController` / `ctx.remote.settings`、`ctx.remote.credentials` |
 | [`workspace-controller/`](workspace-controller/README.zh.md) | 拥有 Workspace 变更与完整 Client Workspace 投影。 | `ctx.workspaceController` / `ctx.remote.workspace` |

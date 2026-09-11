@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import type { CommandAvailabilityFilter } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { LoginPage, type JdcloudLoginInjected } from '../src/client/LoginPage.tsx'
 import { LoginTransferPage, type JdcloudLoginTransferInjected } from '../src/client/LoginTransferPage.tsx'
@@ -13,7 +14,7 @@ import { apply as applyClient, inject as clientInject } from '../src/client/inde
 import { apply as applyHost, inject as hostInject } from '../src/index.ts'
 
 /** Assemble the real slot registry around a controllable JDCloud Remote double. */
-async function bench(authenticated = false) {
+async function bench(authenticated = false, administrator = true) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const slots = ctx.get('slots') as SlotRegistry
@@ -21,14 +22,18 @@ async function bench(authenticated = false) {
     name: 'root',
     children: {
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
+      'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
+      'conversation.input.model': { kind: 'single', scope: 'session' },
       'sidebar.account': { kind: 'single', scope: 'root' },
       'sidebar.brand.mark': { kind: 'single', scope: 'root' },
       'sidebar.brand.name': { kind: 'single', scope: 'root' },
+      'sidebar.settings': { kind: 'single', scope: 'root' },
     },
   } as never, () => null)
   let currentAuthenticated = authenticated
   let currentCorpId = 'corp-current'
   let currentCorpName = 'Current Tenant'
+  let currentAdministrator = administrator
   const authenticatedValue = () => ({
     authenticated: true as const,
     baseUrl: 'https://kindoucloud.com',
@@ -39,6 +44,7 @@ async function bench(authenticated = false) {
       { corpId: 'corp-current', corpName: 'Current Tenant' },
       { corpId: 'corp-next', corpName: 'Next Tenant' },
     ],
+    systemAdministrator: currentAdministrator,
   })
   const status = vi.fn(() => Promise.resolve({
     ok: true as const,
@@ -80,6 +86,13 @@ async function bench(authenticated = false) {
   ctx.provide('remote', remote as never)
   ctx.provide('remote.jdcloudAuth', remote.jdcloudAuth as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
+  const commandFilters = new Set<CommandAvailabilityFilter>()
+  ctx.provide('commandUi', {
+    registerAvailabilityFilter(filter: CommandAvailabilityFilter) {
+      commandFilters.add(filter)
+      return () => { commandFilters.delete(filter) }
+    },
+  } as never)
   return {
     ctx,
     slots,
@@ -88,6 +101,12 @@ async function bench(authenticated = false) {
     loginWithToken,
     logout,
     switchCorp,
+    setAdministrator(value: boolean) {
+      currentAdministrator = value
+    },
+    commandAvailable(name: string) {
+      return [...commandFilters].every(filter => filter(name, { sessionId: 'session-test' as never }))
+    },
     expire() {
       currentAuthenticated = false
       recordListener?.('jdcloud-auth-controller/login')
@@ -153,7 +172,49 @@ describe('JDCloud login browser plugin', () => {
   it('declares its browser services', () => {
     expect(hostInject).toEqual(['webServer'])
     expect(clientInject).toEqual(['remote'])
-    expect(uiInject).toEqual(['remote', 'remote.jdcloudAuth', 'slots', 'locale'])
+    expect(uiInject).toEqual(['remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi'])
+  })
+
+  it('hides administrator controls and /model for an ordinary tenant', async () => {
+    const b = await bench(true, false)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const loginEntry = b.slots.entries('root').find(candidate => candidate.component === LoginPage)
+    await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
+
+    for (const name of [
+      'sidebar.settings', 'conversation.input.model', 'conversation.hero.agentPreset',
+    ] as const) {
+      expect(b.slots.entries(name)[0]?.options.priority).toBe(-100)
+    }
+    expect(b.commandAvailable('model')).toBe(false)
+    expect(b.commandAvailable('plan')).toBe(true)
+    await fiber.dispose()
+    expect(b.commandAvailable('model')).toBe(true)
+  })
+
+  it('updates administrator controls when tenant permissions change', async () => {
+    const b = await bench(true, false)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const loginEntry = b.slots.entries('root').find(candidate => candidate.component === LoginPage)
+    await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
+    const accountEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
+    const account = (accountEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.()
+
+    b.setAdministrator(true)
+    await account?.switchCorp('corp-next')
+    expect(b.slots.entries('sidebar.settings')).toHaveLength(0)
+    expect(b.slots.entries('conversation.input.model')).toHaveLength(0)
+    expect(b.slots.entries('conversation.hero.agentPreset')).toHaveLength(0)
+    expect(b.commandAvailable('model')).toBe(true)
+
+    b.setAdministrator(false)
+    const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
+    await ((updatedEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.().switchCorp('corp-current'))
+    expect(b.slots.entries('sidebar.settings')[0]?.options.priority).toBe(-100)
+    expect(b.commandAvailable('model')).toBe(false)
+    await fiber.dispose()
   })
 
   it('runs a bootstrapped token transfer after scrubbing the address bar', async () => {
@@ -214,6 +275,7 @@ describe('JDCloud login browser plugin', () => {
       corpId: 'corp-current',
       corpName: 'Current Tenant',
       corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
+      systemAdministrator: false,
     } })
     await expect(pending).resolves.toEqual({ ok: true })
     expect(location.pathname).toBe('/login/transfer')
@@ -352,6 +414,7 @@ describe('JDCloud login browser plugin', () => {
         { corpId: 'corp-current', corpName: 'Current Tenant' },
         { corpId: 'corp-next', corpName: 'Next Tenant' },
       ],
+      systemAdministrator: true,
     })
     await expect(accountInjected?.logout()).resolves.toEqual({ ok: true })
     expect(b.logout).toHaveBeenCalledOnce()
@@ -485,6 +548,7 @@ describe('JDCloud login browser plugin', () => {
           { corpId: 'corp-current', corpName: 'Current Tenant' },
           { corpId: 'corp-next', corpName: 'Next Tenant' },
         ],
+        systemAdministrator: false,
       },
     })
     await expect(pending).resolves.toEqual({ ok: true })
@@ -507,6 +571,7 @@ describe('JDCloud login browser plugin', () => {
           { corpId: 'corp-current', corpName: 'Current Tenant' },
           { corpId: 'corp-next', corpName: 'Next Tenant' },
         ],
+        systemAdministrator: false,
       },
     })
     b.emitRecord('jdcloud-auth-controller/login')

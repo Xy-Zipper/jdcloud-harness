@@ -23,7 +23,9 @@ import type {
   CandidateRequest, ClientSessionContext, CommandClaim, PickOutcome, InputTriggerCandidate, InputTriggerPick,
   SubmitAttachment, SubmitEnvelope, SubmitOutcome,
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
-import type { CommandContribution, CommandDecoration, CommandUiContract } from './contract.ts'
+import type {
+  CommandAvailabilityFilter, CommandContribution, CommandDecoration, CommandUiContract,
+} from './contract.ts'
 import type { CommandDescriptor } from './directory.ts'
 import { CommandDirectory } from './directory.ts'
 import { en, type CommandKey } from './locales.ts'
@@ -56,6 +58,7 @@ function submittedCommandName(line: string): string {
 interface LiveState {
   readonly contributions: Map<string, CommandContribution>
   readonly decorations: Map<string, CommandDecoration>
+  readonly availabilityFilters: Set<CommandAvailabilityFilter>
   readonly popups: Map<SessionId, PopupSelectController<ClientSessionContext>>
 }
 
@@ -74,7 +77,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands']
 
   private readonly directory: CommandDirectory
-  private readonly live: LiveState = { contributions: new Map(), decorations: new Map(), popups: new Map() }
+  private readonly live: LiveState = {
+    contributions: new Map(), decorations: new Map(), availabilityFilters: new Set(), popups: new Map(),
+  }
   /** `command`-namespace translator (composer refusal notices). */
   private readonly t: TranslateNS<'command'>
 
@@ -149,6 +154,19 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   }
 
   /**
+   * Register one reversible policy over every command invocation path.
+   * @param filter - fresh per-session availability decision for one command name.
+   * @returns the disposer removing the policy.
+   */
+  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void {
+    const dispose = this.ctx.effect(() => {
+      this.live.availabilityFilters.add(filter)
+      return () => { this.live.availabilityFilters.delete(filter) }
+    }, 'command.registerAvailabilityFilter()')
+    return () => { void dispose() }
+  }
+
+  /**
    * Resolve the per-session popup controller (lazy; dies with the session
    * scope). The controller's consume callback dispatches the scoped
    * consume-token event back to this session; focusComposer reaches the
@@ -202,6 +220,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const rows: InputTriggerCandidate[] = []
     const seen = new Set<string>()
     for (const c of list) {
+      if (!this.isAvailable(c.name, session)) continue
       seen.add(c.name)
       rows.push({
         name: c.name,
@@ -210,7 +229,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
       })
     }
     for (const contribution of this.live.contributions.values()) {
-      if (!contribution.available(session)) continue
+      if (!this.isAvailable(contribution.name, session) || !contribution.available(session)) continue
       if (seen.has(contribution.name)) {
         throw new Error(`ui-commands: contribution /${contribution.name} collides with a host command`)
       }
@@ -231,6 +250,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   /** Decision table, menu column: contribution/decorated-host → popup or action; host input → claim; host bare → detached execute. */
   private dispatch(pick: InputTriggerPick): PickOutcome {
     const name = pick.candidate.name
+    if (!this.isAvailable(name, pick.session)) return undefined
     const contribution = this.live.contributions.get(name)
     if (contribution !== undefined && contribution.available(pick.session)) {
       this.invoke(name, contribution.ui, pick.session, { via: 'menu', span: pick.span })
@@ -258,6 +278,7 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   private matchSpace(session: ClientSessionContext, token: string): PickOutcome {
     if (!token.startsWith('/')) return undefined
     const name = token.slice(1)
+    if (!this.isAvailable(name, session)) return undefined
     if (this.live.contributions.has(name)) return undefined // popup and action kinds never claim on space
     const desc = this.directory.resolve(session.sessionId, name)
     if (desc === undefined || desc.input === undefined) return undefined
@@ -290,6 +311,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const bare = ws === -1
     const name = token.slice(1)
     if (name === '') return undefined
+    if (!this.isAvailable(name, session)) {
+      throw new Error(this.t('notice.commandUnavailable', { command: name }))
+    }
     const refuseAttachments = (): never => {
       throw new Error(this.t('notice.attachmentsUnsupported', { command: name }))
     }
@@ -342,6 +366,11 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const actx = this.scopeFor(session.sessionId)
     if (actx === undefined) return
     this.popupFor(actx).open(name, ui, session, segment)
+  }
+
+  /** Apply every live cross-command policy before command-specific availability. */
+  private isAvailable(name: string, session: ClientSessionContext): boolean {
+    return [...this.live.availabilityFilters].every(filter => filter(name, session))
   }
 
   /** Build the leadingInput claim: token `/name ` + the command.execute submit transaction. */

@@ -70,6 +70,7 @@
     { "path": "./packages/test-support/client-runtime" },
     { "path": "./packages/client/ui-layout" },
     { "path": "./packages/client/ui-jdcloud-login" },
+    { "path": "./packages/client/ui-jdcloud-lowcode-actions" },
     { "path": "./packages/client/ui-sidebar" },
     { "path": "./packages/client/ui-brand-official" },
     { "path": "./packages/client/ui-approval" },

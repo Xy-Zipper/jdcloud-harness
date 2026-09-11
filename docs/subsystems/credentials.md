@@ -267,6 +267,13 @@ Store credentials, expose login commands, and validate each browser prompt.
 @Remote async status(): Promise<JdcloudAuthStatus>
 
 /**
+ * Read the current tenant's forms and workflows carrying a supported data-write permission.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns Browser-safe menu identities, labels, paths, types, and write permissions.
+ */
+@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>
+
+/**
  * Authenticate, validate the resulting token, and commit it to Host credentials.
  * @param request - Service address and password credentials.
  * @param signal - Caller cancellation for login and validation requests.

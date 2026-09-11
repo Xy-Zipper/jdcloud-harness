@@ -41,7 +41,8 @@ The kernel packages boot and serve the page; the UI feature packages present it.
 | [`ui-primitives/`](ui-primitives/README.md) | Provides shared React controls, icons, and content renderers | — |
 | [`ui-attachment/`](ui-attachment/README.md) | Registers composer and message-image attachment presentation | — |
 | [`ui-layout/`](ui-layout/README.md) | Arranges the main application regions | — |
-| [`ui-jdcloud-login/`](ui-jdcloud-login/README.md) | Adds JDCloud login, account controls, and JDCloud Harness Web branding | — |
+| [`ui-jdcloud-login/`](ui-jdcloud-login/README.md) | Adds JDCloud login, account and administrator controls, and JDCloud Harness Web branding | — |
+| [`ui-jdcloud-lowcode-actions/`](ui-jdcloud-lowcode-actions/README.md) | Selects one writable JDCloud form or workflow for a new conversation | — |
 | [`ui-sidebar/`](ui-sidebar/README.md) | Presents workspace and session navigation | — |
 | [`resources/`](resources/README.md) | Unified resource model: protocol providers behind the `useResource` session standard hook | `ctx.resources` |
 | [`ui-sidebar-files/`](ui-sidebar-files/README.md) | Right-Sidebar workspace file tree tab type | — |
@@ -54,7 +55,7 @@ The kernel packages boot and serve the page; the UI feature packages present it.
 | [`ui-workflow-run/`](ui-workflow-run/README.md) | Replays durable workflow runs as nested chat disclosures | — |
 | [`ui-goal/`](ui-goal/README.md) | Presents and manages the current goal | — |
 | [`ui-trajectory/`](ui-trajectory/README.md) | Presents alternate views of agent activity | — |
-| [`ui-commands/`](ui-commands/README.md) | Provides session-aware command discovery and dispatch | — |
+| [`ui-commands/`](ui-commands/README.md) | Provides session-aware command discovery, availability filtering, and dispatch | — |
 | [`ui-input-trigger/`](ui-input-trigger/README.md) | Coordinates inline command and reference suggestions | — |
 | [`ui-skill/`](ui-skill/README.md) | Adds skill references to inline suggestions | — |
 | [`ui-reference/`](ui-reference/README.md) | Unified Web `@file` / `@session` reference source | — |

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-07-jdcloud-browser-prompt-admission.md
-2026-09-07-jdcloud-browser-prompt-admission.md: 40ca7ba11b73c90280a29c3dd22611286e2ec4da
-2026-09-07-jdcloud-browser-prompt-admission.zh.md: 5bd005f181552c95e49dec6e2d8494a9066e126b
+2026-09-07-jdcloud-browser-prompt-admission.md: cd003179e5db5a70cebd6365b624be4863726751
+2026-09-07-jdcloud-browser-prompt-admission.zh.md: 3cefa88f42a009b69c49bfce1a805d431153434c

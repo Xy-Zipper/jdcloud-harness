@@ -1037,6 +1037,25 @@ Types: [SessionId](core.md)
 
 Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
 
+<a id="api-sessionmodel-selection-admission--waterfall"></a>
+
+#### `api-session/model-selection-admission` — waterfall
+
+Admit one browser model selection before validation or Session mutation. Listeners call `next()` after their policy accepts the request; rejection preserves the Session and deployment default model selections.
+
+```ts cordis-catalog
+/**
+ * Admit one browser model selection before validation or Session mutation.
+ * Listeners call `next()` after their policy accepts the request; rejection
+ * preserves the Session and deployment default model selections.
+ * @param request - Session identity and requested model selection.
+ * @mode waterfall
+ */
+'api-session/model-selection-admission'( request: SessionSelectModelRequest, next: () => Promise<void>, ): Promise<void>
+```
+
+Source: [`packages/api/session-controller/src/types.ts`](../../packages/api/session-controller/src/types.ts)
+
 <a id="api-sessionprompt-admission--waterfall"></a>
 
 #### `api-session/prompt-admission` — waterfall

@@ -132,6 +132,11 @@ export class SessionCommandController {
    */
   async selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
     const agent = await this.resolveAgent(request.sessionId)
+    await this.ctx.waterfall(
+      'api-session/model-selection-admission',
+      request,
+      () => Promise.resolve(),
+    )
     return this.agents.serializeImageAdmission(agent, async () => {
       try {
         const resolved = await this.ctx.llm.resolveCallConfig({

@@ -1,0 +1,70 @@
+name: jdcloud-harness
+
+services:
+  jdcloud-harness:
+    # The image is built from this private repository by the accompanying Dockerfile.
+    image: jdcloud-harness:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    working_dir: /workspace
+    command:
+      - node
+      - /app/apps/cli/lib/bin.js
+      - web
+      # Load the private JDCloud login and low-code features without an npm registry.
+      - --patch
+      - /app/packages/bundle/jdcloud-login/cordis.patch.yml
+      - --no-open
+      # The API trust fence must accept the public domain or IP seen by browsers.
+      - --trusted-host
+      - ${JDCLOUD_HARNESS_TRUSTED_HOST:?Set JDCLOUD_HARNESS_TRUSTED_HOST to the public domain or IP, including a non-default port}
+    environment:
+      # Every browser user connected to this service shares settings.yaml below this directory.
+      DSH_HOME: /var/lib/jdcloud-harness
+      # settings.yaml refers to this server-side environment variable and never exposes its value to browsers.
+      GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Hong_Kong}
+    volumes:
+      # Persist the shared model configuration, profiles, sessions, and attachments.
+      - jdcloud_harness_data:/var/lib/jdcloud-harness
+      # Keep files generated during conversations outside the immutable application image.
+      - jdcloud_harness_workspace:/workspace
+    ports:
+      # Caddy listens on 8080 inside this service's shared network namespace.
+      - ${JDCLOUD_HARNESS_PORT:-3080}:8080
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - --input-type=module
+        - --eval
+        - "const response = await fetch('http://127.0.0.1:3080/'); if (!response.ok) process.exit(1)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    stop_grace_period: 30s
+
+  proxy:
+    # Harness remains loopback-only; this sidecar is the only network-facing process.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: service:jdcloud-harness
+    depends_on:
+      jdcloud-harness:
+        condition: service_healthy
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - :8080
+      - --to
+      - 127.0.0.1:3080
+
+volumes:
+  jdcloud_harness_data:
+  jdcloud_harness_workspace:

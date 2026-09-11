@@ -217,7 +217,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/api/jdcloud-auth-controller/src/index.ts:34`](../packages/api/jdcloud-auth-controller/src/index.ts)
+来源：[`packages/api/jdcloud-auth-controller/src/index.ts:55`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -3503,6 +3503,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jdcloud-login` — 需要 `webServer`（[`packages/client/ui-jdcloud-login/src/index.ts`](../packages/client/ui-jdcloud-login/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions`（[`packages/client/ui-jdcloud-lowcode-actions/src/index.ts`](../packages/client/ui-jdcloud-lowcode-actions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-layout`（[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-message-feedback`（[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）

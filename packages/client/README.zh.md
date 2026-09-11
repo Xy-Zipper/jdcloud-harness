@@ -41,7 +41,8 @@ kind: "package-group"
 | [`ui-primitives/`](ui-primitives/README.zh.md) | 提供共享 React 控件、图标与内容渲染器 | — |
 | [`ui-attachment/`](ui-attachment/README.zh.md) | 注册输入框与消息图片的附件呈现 | — |
 | [`ui-layout/`](ui-layout/README.zh.md) | 排列应用的主要区域 | — |
-| [`ui-jdcloud-login/`](ui-jdcloud-login/README.zh.md) | 添加 JDCloud 登录、账号控制与 JDCloud Harness Web 品牌 | — |
+| [`ui-jdcloud-login/`](ui-jdcloud-login/README.zh.md) | 添加 JDCloud 登录、账号与管理员控制及 JDCloud Harness Web 品牌 | — |
+| [`ui-jdcloud-lowcode-actions/`](ui-jdcloud-lowcode-actions/README.zh.md) | 为新对话选择一个可写 JDCloud 表单或流程 | — |
 | [`ui-sidebar/`](ui-sidebar/README.zh.md) | 展示工作区与会话导航 | — |
 | [`resources/`](resources/README.zh.md) | 统一资源模型：`useResource` 会话标准 hook 背后的协议提供者 | `ctx.resources` |
 | [`ui-sidebar-files/`](ui-sidebar-files/README.zh.md) | 右侧 Sidebar 的工作区文件树 tab 类型 | — |
@@ -54,7 +55,7 @@ kind: "package-group"
 | [`ui-workflow-run/`](ui-workflow-run/README.zh.md) | 把持久工作流运行回放为嵌套对话折叠项 | — |
 | [`ui-goal/`](ui-goal/README.zh.md) | 展示与管理当前目标 | — |
 | [`ui-trajectory/`](ui-trajectory/README.zh.md) | 提供 agent（智能体）活动的其他视图 | — |
-| [`ui-commands/`](ui-commands/README.zh.md) | 提供会话感知的命令发现与分发 | — |
+| [`ui-commands/`](ui-commands/README.zh.md) | 提供会话感知的命令发现、可用性过滤与分发 | — |
 | [`ui-input-trigger/`](ui-input-trigger/README.zh.md) | 协调内联命令与引用建议 | — |
 | [`ui-skill/`](ui-skill/README.zh.md) | 向内联建议添加 skill（技能）引用 | — |
 | [`ui-reference/`](ui-reference/README.zh.md) | 统一的 Web `@file` / `@session` 引用 source | — |

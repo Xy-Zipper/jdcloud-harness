@@ -1156,6 +1156,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Current redacted authentication state.',
       },
       {
+        signature: '@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>',
+        description: 'Read the current tenant\'s forms and workflows carrying a supported data-write permission.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'Browser-safe menu identities, labels, paths, types, and write permissions.',
+      },
+      {
         signature: '@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
         description: 'Authenticate, validate the resulting token, and commit it to Host credentials.',
         parameters: [{ name: 'request', description: 'Service address and password credentials.' }, { name: 'signal', description: 'Caller cancellation for login and validation requests.' }],
@@ -3212,6 +3218,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'message', description: 'user-safe failure chain.' }],
   },
   {
+    name: 'api-session/model-selection-admission',
+    mode: 'waterfall',
+    signature: '\'api-session/model-selection-admission\'( request: SessionSelectModelRequest, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one browser model selection before validation or Session mutation.',
+    description: 'Admit one browser model selection before validation or Session mutation. Listeners call `next()` after their policy accepts the request; rejection preserves the Session and deployment default model selections.',
+    parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }],
+  },
+  {
     name: 'api-session/prompt-admission',
     mode: 'waterfall',
     signature: '\'api-session/prompt-admission\'( request: { readonly sessionId: SessionId; readonly signal: AbortSignal }, next: () => Promise<void>, ): Promise<void>',
@@ -4477,7 +4491,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'JdcloudAuthStatus',
-    declaration: 'export type JdcloudAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly corpId: string;\n    readonly corpName: string;\n    readonly corps: readonly JdcloudCorp[];\n};',
+    declaration: 'export type JdcloudAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly corpId: string;\n    readonly corpName: string;\n    readonly corps: readonly JdcloudCorp[];\n    readonly systemAdministrator: boolean;\n};',
   },
   {
     name: 'JdcloudCorp',
@@ -4488,8 +4502,24 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface JdcloudLoginRequest {\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly password: string;\n}',
   },
   {
+    name: 'JdcloudLowcodeMenuType',
+    declaration: 'export type JdcloudLowcodeMenuType = 3 | 4;',
+  },
+  {
+    name: 'JdcloudLowcodeWritePermission',
+    declaration: 'export type JdcloudLowcodeWritePermission = \'addData\' | \'editData\' | \'deleteData\';',
+  },
+  {
     name: 'JdcloudTokenLoginRequest',
     declaration: 'export interface JdcloudTokenLoginRequest {\n    readonly baseUrl: string;\n    readonly token: string;\n}',
+  },
+  {
+    name: 'JdcloudWritableMenu',
+    declaration: 'export interface JdcloudWritableMenu {\n    readonly menuId: string;\n    readonly fullName: string;\n    readonly path: string;\n    readonly type: JdcloudLowcodeMenuType;\n    readonly agentPermissions: readonly JdcloudLowcodeWritePermission[];\n}',
+  },
+  {
+    name: 'JdcloudWritableMenuState',
+    declaration: 'export interface JdcloudWritableMenuState {\n    readonly corpId: string;\n    readonly menus: readonly JdcloudWritableMenu[];\n}',
   },
   {
     name: 'JobDoneListener',

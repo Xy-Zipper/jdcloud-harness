@@ -44,6 +44,17 @@ declare module '@deepseek-ai/dsh-session/types' {
 declare module '@deepseek-ai/cordis' {
   interface Events {
     /**
+     * Admit one browser model selection before validation or Session mutation.
+     * Listeners call `next()` after their policy accepts the request; rejection
+     * preserves the Session and deployment default model selections.
+     * @param request - Session identity and requested model selection.
+     * @mode waterfall
+     */
+    'api-session/model-selection-admission'(
+      request: SessionSelectModelRequest,
+      next: () => Promise<void>,
+    ): Promise<void>
+    /**
      * Admit one browser prompt before attachment persistence or Agent inbox delivery.
      * Listeners call `next()` after their policy accepts the request; rejection leaves
      * the submitted content outside the Session and Agent lifecycle.

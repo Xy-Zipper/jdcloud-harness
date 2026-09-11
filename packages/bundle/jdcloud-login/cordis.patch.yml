@@ -11,3 +11,6 @@
 
     - id: ui-jdcloud-login
       name: '@deepseek-ai/dsh-client-ui-jdcloud-login'
+
+    - id: ui-jdcloud-lowcode-actions
+      name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'

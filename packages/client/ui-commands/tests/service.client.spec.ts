@@ -198,6 +198,24 @@ describe('registration', () => {
 })
 
 describe('candidates', () => {
+  it('applies reversible availability filters to Host and Client command paths', async () => {
+    const { command, source } = await bench()
+    command.register(themeContribution())
+    const dispose = command.registerAvailabilityFilter(
+      name => name !== 'plan' && name !== 'goal' && name !== 'theme',
+    )
+
+    await expect(source.candidates(proj('s1'), req(''))).resolves.toEqual([])
+    expect(menuPick(source, 'plan', proj('s1'))).toBeUndefined()
+    expect(source.matchSpace?.(proj('s1'), '/goal')).toBeUndefined()
+    await expect(source.matchEnter?.(proj('s1'), '/theme', new AbortController().signal, { attachments: 0 }))
+      .rejects.toThrow('command:notice.commandUnavailable{"command":"theme"}')
+
+    dispose()
+    expect((await source.candidates(proj('s1'), req(''))).map(candidate => candidate.name))
+      .toEqual(['plan', 'goal', 'theme'])
+  })
+
   it('does not fetch Agent-bound commands for an addressed child', async () => {
     const b = await bench({ addressed: sid('child') })
     await expect(b.warm(proj('child'))).resolves.toBeUndefined()

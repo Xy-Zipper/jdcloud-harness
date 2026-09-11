@@ -158,6 +158,28 @@ function currentSelection(ctx: Context, sessionId: SessionId) {
 }
 
 describe('Web session model selection', () => {
+  it('runs model-selection admission before validation or Session mutation', async () => {
+    const { ctx, sessionId } = await harness()
+    const remote = createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+    ctx.on('api-session/model-selection-admission', () => {
+      throw new RemoteError('gateway/internal', 'model selection refused', {})
+    })
+
+    await expect(remote.selectModel(request({
+      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    }))).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'gateway/internal', message: 'model selection refused' },
+    })
+    expect(currentSelection(ctx, sessionId)).toEqual({
+      provider: 'deepseek-official', model: 'deepseek-chat',
+    })
+    await ctx.fiber.dispose()
+  })
+
   it('runs prompt admission before attachment persistence and inbox delivery', async () => {
     const { ctx, agent, sessionId } = await harness()
     const followup = vi.fn()

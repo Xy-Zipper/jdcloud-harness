@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  parseCurrentMemberLookup,
+  parseCurrentMemberNames,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
 } from '../src/current-user.ts'
@@ -7,7 +9,7 @@ import {
 /** Build the unwrapped `/api/oauth/currentUser` data used by parser cases. */
 function currentUser(menuList: readonly unknown[], userPermission?: unknown): Record<string, unknown> {
   return {
-    userInfo: { id: 'user-1' },
+    userInfo: { id: 'user-1', departmentId: [], roleId: [] },
     menuList,
     ...(userPermission === undefined ? {} : { userPermission }),
   }
@@ -127,6 +129,136 @@ describe('current-user wire validation coverage', () => {
 
 })
 
+describe('current-member wire validation coverage', () => {
+  it('batches unique current-user ids and restores each member kind in current-user order', () => {
+    const lookup = parseCurrentMemberLookup({
+      userInfo: {
+        id: ' user-1 ',
+        departmentId: ['department-2', 'department-1', 'department-2'],
+        roleId: ['role-1'],
+      },
+    })
+
+    expect(lookup).toEqual({
+      ids: ['user-1', 'department-2', 'department-1', 'role-1'],
+      userId: 'user-1',
+      departmentIds: ['department-2', 'department-1'],
+      roleIds: ['role-1'],
+    })
+    expect(parseCurrentMemberNames(lookup, {
+      department: [
+        { id: 'department-1', fullName: '研发一部' },
+        { id: 'department-extra', fullName: '未请求部门' },
+        { id: 'department-2', fullName: '研发二部' },
+      ],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+      user: [
+        { id: 'user-extra', fullName: '其他用户', phone: '' },
+        { id: 'user-1', fullName: '测试用户', phone: '13800000000' },
+      ],
+    })).toEqual({
+      department: [
+        { id: 'department-2', fullName: '研发二部' },
+        { id: 'department-1', fullName: '研发一部' },
+      ],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+      user: [{ id: 'user-1', fullName: '测试用户', phone: '13800000000' }],
+    })
+  })
+
+  it('rejects malformed current-user member ids', () => {
+    expect(() => parseCurrentMemberLookup(undefined)).toThrow('current-user response is invalid')
+    expect(() => parseCurrentMemberLookup({ userInfo: null })).toThrow('current-user profile is invalid')
+    expect(() => parseCurrentMemberLookup({
+      userInfo: { id: '', departmentId: [], roleId: [] },
+    })).toThrow('current-user id is invalid')
+    expect(() => parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: null, roleId: [] },
+    })).toThrow('department ids are invalid')
+    expect(() => parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: [1], roleId: [] },
+    })).toThrow('department ids is invalid')
+    expect(() => parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: [], roleId: 'role-1' },
+    })).toThrow('role ids are invalid')
+  })
+
+  it('rejects malformed member-name collections and entries', () => {
+    const lookup = parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: ['department-1'], roleId: ['role-1'] },
+    })
+    const valid = {
+      department: [{ id: 'department-1', fullName: '研发部' }],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+      user: [{ id: 'user-1', fullName: '测试用户', phone: '' }],
+    }
+
+    expect(() => parseCurrentMemberNames(lookup, null)).toThrow('member-name response is invalid')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, department: null }))
+      .toThrow('department list is invalid')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, role: null }))
+      .toThrow('role list is invalid')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, user: null }))
+      .toThrow('user list is invalid')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, department: [null] }))
+      .toThrow('member-name department is invalid')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      department: [{ id: '', fullName: '研发部' }],
+    })).toThrow('member-name department id is invalid')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      department: [
+        { id: 'department-1', fullName: '研发部' },
+        { id: 'department-1', fullName: '重复部门' },
+      ],
+    })).toThrow('repeats department "department-1"')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      role: [{ id: 'role-1', fullName: '' }],
+    })).toThrow('member-name role "role-1" name is invalid')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, user: [null] }))
+      .toThrow('member-name user is invalid')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      user: [{ id: '', fullName: '测试用户', phone: '' }],
+    })).toThrow('member-name user id is invalid')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      user: [
+        { id: 'user-1', fullName: '测试用户', phone: '' },
+        { id: 'user-1', fullName: '重复用户', phone: '' },
+      ],
+    })).toThrow('repeats user "user-1"')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      user: [{ id: 'user-1', fullName: '', phone: '' }],
+    })).toThrow('member-name user "user-1" name is invalid')
+    expect(() => parseCurrentMemberNames(lookup, {
+      ...valid,
+      user: [{ id: 'user-1', fullName: '测试用户', phone: null }],
+    })).toThrow('member-name user "user-1" phone is invalid')
+  })
+
+  it('rejects a member-name response that omits a current-user selection', () => {
+    const lookup = parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: ['department-1'], roleId: ['role-1'] },
+    })
+    const valid = {
+      department: [{ id: 'department-1', fullName: '研发部' }],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+      user: [{ id: 'user-1', fullName: '测试用户', phone: '' }],
+    }
+
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, department: [] }))
+      .toThrow('has no department for "department-1"')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, role: [] }))
+      .toThrow('has no role for "role-1"')
+    expect(() => parseCurrentMemberNames(lookup, { ...valid, user: [] }))
+      .toThrow('has no user for "user-1"')
+  })
+})
+
 describe('current-user model snapshot coverage', () => {
   it('renders form and workflow menu types without retaining the turn', () => {
     const text = renderCapabilitySnapshot({
@@ -134,6 +266,11 @@ describe('current-user model snapshot coverage', () => {
       corpId: 'corp-1',
       corpName: 'Tenant',
       systemAdministrator: true,
+      currentMember: {
+        department: [],
+        role: [],
+        user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
+      },
       menus: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 3, agentPermissions: ['addData'],
@@ -147,6 +284,11 @@ describe('current-user model snapshot coverage', () => {
     expect(JSON.parse(text.slice(text.indexOf('\n') + 1))).toEqual({
       tenant: { id: 'corp-1', name: 'Tenant' },
       systemAdministrator: true,
+      currentMember: {
+        department: [],
+        role: [],
+        user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
+      },
       functions: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 'form', agentPermissions: ['addData'],

@@ -29,6 +29,8 @@ The page occupies `root` at priority `-100`. A successful login removes that con
 
 While authenticated, the package occupies `sidebar.account`. The expanded sidebar shows the account and current tenant returned by the Host; the collapsed rail shows only the account icon. The account menu lists all available owned and joined tenants, highlights the current tenant, and switches to another tenant through `GET /api/system/corp/switchCorp/{corpId}` without showing the login page. Tenant rows scroll within a 240-pixel region while Sign out stays pinned. A failed switch preserves the current tenant and reports the error in the menu. Selecting Sign out deletes the Host credential and restores the login page.
 
+The authenticated status also carries `systemAdministrator`. A non-administrator shadows `sidebar.settings`, `conversation.input.model`, and `conversation.hero.agentPreset` at priority `-100`, and registers a `commandUi` availability filter that hides and refuses `/model`. Switching tenants reapplies the policy immediately. An administrator sees the underlying controls. A new ordinary-user Session therefore omits client-selected model and preset values and uses the Host `agentDefaultModel` selection; an existing Session keeps its durable model history.
+
 The package also fills `sidebar.brand.mark`, `sidebar.brand.name`, and `conversation.hero.brand.mark` at priority `-10`. The blue-to-cyan hexagonal J mark keeps the size requested by each host, and the login page reuses the same artwork. Lower priority wins for these single slots, so the JDCloud occupants replace generic or official brand entries while this plugin is active and reveal them again on teardown.
 
 The password stays in component-local state, is cleared after success, and never enters a shared store. All product copy is owned by the `jdcloud.login` locale namespace.
@@ -52,4 +54,4 @@ None.
 
 None.
 
-**Runtime invariant:** No companion is published. The generated Remote mount, root login contribution, sidebar account contribution, and brand occupants share one plugin lifecycle and are removed together.
+**Runtime invariant:** No companion is published. The generated Remote mount, root login contribution, sidebar account contribution, administrator-control shadows, command filter, and brand occupants share one plugin lifecycle and are removed together.

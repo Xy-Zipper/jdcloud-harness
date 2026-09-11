@@ -13,6 +13,7 @@
     { "path": "../../api/remotes/tsconfig.client.json" },
     { "path": "../locale" },
     { "path": "../ui-conversation" },
+    { "path": "../ui-commands" },
     { "path": "../ui-primitives" },
     { "path": "../ui-renderer" },
     { "path": "../ui-sidebar" },

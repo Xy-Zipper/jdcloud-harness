@@ -149,7 +149,7 @@ New behavior attaches to a documented extension point. Changing the loop itself 
 | Add filesystem access or policy | register a `ctx.fs` provider or listen to `fs/*` events |
 | Confine spawned processes | use a `ctx.sandbox` backend; consumers wrap argv before spawning |
 | Intercept a request, tool, or turn | use its `agent/*` or `tools/*` event; `agent/turn-stopping` stops a turn |
-| Reject a Web prompt before Session or inbox mutation | listen to `api-session/prompt-admission`; call `next()` to admit it |
+| Reject a Web prompt or model selection | listen to `api-session/prompt-admission` or `api-session/model-selection-admission`; call `next()` |
 | Add model-facing context | call `agent.inject()`; it lands in the next admitted request |
 | Add UI or editor integration | drive `ctx.agents` and render from `session/event` |
 | Add a Web Client Chat node | register a `ConversationNodeDefinition` + keyed renderer |

@@ -21,6 +21,7 @@ const status: JdcloudAuthenticatedStatus = {
     { corpId: 'corp-next', corpName: 'Next Tenant' },
     { corpId: 'corp-joined', corpName: 'Joined Tenant' },
   ],
+  systemAdministrator: false,
 }
 
 const t: JdcloudAccountSeatProps['t'] = (key, params) => {

@@ -8,6 +8,8 @@ import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import {
+  parseCurrentMemberLookup,
+  parseCurrentMemberNames,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
 } from './current-user.ts'
@@ -45,7 +47,8 @@ const SYSTEM_PROMPT =
   'Use the JDCloud low-code tools only when the user asks to inspect or change JDCloud low-code data or tables. '
   + 'A plugin-sourced capability snapshot identifies the current tenant and the only form/workflow menu ids available for this browser prompt. '
   + 'Never invent a menu_id: select it from that snapshot, and call jdcloud_lowcode_describe when field codes are not already known. '
-  + 'For create requests, infer every field value that is directly supported by facts in the user message or its attachments—not only titles, but also values such as amounts, dates, purposes, descriptions, and nested detail fields. Mark each inferred value in the confirmation instead of asking for information that the evidence already supplies. Never invent opaque ids, person or department selections, or attachment upload values that the available evidence does not determine. '
+  + 'For create requests, infer every field value that is directly supported by facts in the user message or its attachments—not only titles, but also values such as amounts, dates, purposes, descriptions, and nested detail fields. Mark each inferred value in the confirmation instead of asking for information that the evidence already supplies. '
+  + 'The snapshot currentMember contains Host-resolved current-user, department, and role selections. When a field semantically refers to the current applicant, requester, submitter, reimbursement claimant, employee, or their department or role, use those exact selections before treating those fields as missing, and never infer identity from unrelated records. Never invent opaque ids, other person or department selections, or attachment upload values that the available evidence does not determine. '
   + 'If required information is missing, ask naturally in the user language; in Chinese prefer “目前还缺少关键信息” over rigid or legalistic wording. '
   + 'Before create, show one confirmation table containing every described field, including required and optional fields, nested fields, applicant and department fields, and empty attachment fields. Show an unprovided optional value as not provided, and call create only after the user confirms the complete table. '
   + 'Conversation attachments are evidence, not JDCloud file uploads; never claim that a JDCloud attachment field is populated without an uploaded field value. '
@@ -74,21 +77,31 @@ export function apply(ctx: Context, config: Config): void {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted || !decision.messages.some(isBrowserPrompt)) return decision
     snapshots.delete(agent)
-    const currentUser = parseCurrentUserCapabilities(
-      await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
-        path: '/api/oauth/currentUser',
-        method: 'GET',
-      }, signal),
-    )
+    const currentUserData = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+      path: '/api/oauth/currentUser',
+      method: 'GET',
+    }, signal)
+    const currentUser = parseCurrentUserCapabilities(currentUserData)
+    const memberLookup = parseCurrentMemberLookup(currentUserData)
     signal.throwIfAborted()
     const status = await ctx.jdcloudAuthController.status()
     if (!status.authenticated) {
       throw new HarnessError('JDCloud login is required', 'JDCLOUD_LOWCODE_AUTH_REQUIRED')
     }
+    const currentMember = parseCurrentMemberNames(
+      memberLookup,
+      await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+        path: '/api/system/permission/users/getMemberName',
+        method: 'POST',
+        body: memberLookup.ids,
+      }, signal),
+    )
+    signal.throwIfAborted()
     const snapshot: LowcodeCapabilitySnapshot = {
       turn,
       corpId: status.corpId,
       corpName: status.corpName,
+      currentMember,
       ...currentUser,
     }
     const text = renderCapabilitySnapshot(snapshot)

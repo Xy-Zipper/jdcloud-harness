@@ -1,0 +1,83 @@
+.panel {
+  /* Keep the hero composer from shrinking the function row; two card rows
+     remain available before the panel starts scrolling. */
+  flex: none;
+  width: min(100%, var(--dsh-chat-user-width, 904px));
+  max-height: 216px;
+  margin: 4px auto 12px;
+  padding: 2px 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.card {
+  display: grid;
+  flex: 1 1 260px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  max-width: 288px;
+  min-height: 96px;
+  padding: 16px 18px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.card:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-border-l3);
+  transform: translateY(-1px);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--dsw-alias-link);
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-radius: 8px;
+}
+
+.content {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}

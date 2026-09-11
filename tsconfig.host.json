@@ -11,6 +11,8 @@
     "apps/web/tests/scaffold.ts",
     "apps/web/tests/scaffold-generation.spec.ts",
     "apps/web/tests/default-model.e2e.ts",
+    "apps/web/tests/jdcloud-ordinary-user.e2e.ts",
+    "apps/web/tests/jdcloud-current-member.e2e.ts",
     "apps/web/tests/github-ready-review.e2e.ts",
     "apps/web/tests/streaming-fence-highlight.e2e.ts",
     "apps/web/tests/declared-reasoning.e2e.ts",

@@ -190,6 +190,8 @@
       "@deepseek-ai/dsh-client-test-runtime": ["./packages/test-support/client-runtime/src"],
       "@deepseek-ai/dsh-client-ui-jdcloud-login": ["./packages/client/ui-jdcloud-login/src"],
       "@deepseek-ai/dsh-client-ui-jdcloud-login/client": ["./packages/client/ui-jdcloud-login/src/client/index.ts"],
+      "@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions": ["./packages/client/ui-jdcloud-lowcode-actions/src"],
+      "@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions/client": ["./packages/client/ui-jdcloud-lowcode-actions/src/client/index.ts"],
       "@deepseek-ai/dsh-client-ui-layout": ["./packages/client/ui-layout/src"],
       "@deepseek-ai/dsh-client-ui-sidebar": ["./packages/client/ui-sidebar/src"],
       "@deepseek-ai/dsh-client-ui-brand-official": ["./packages/client/ui-brand-official/src"],

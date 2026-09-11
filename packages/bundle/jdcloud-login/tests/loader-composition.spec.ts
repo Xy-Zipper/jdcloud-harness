@@ -54,10 +54,16 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
     import.meta.dirname,
     '../../../client/ui-jdcloud-login/src/index.ts',
   )).href
+  const lowcodeActionsUiEntry = pathToFileURL(join(
+    import.meta.dirname,
+    '../../../client/ui-jdcloud-lowcode-actions/src/index.ts',
+  )).href
   const lowcodeModule = await import(lowcodeEntry) as Record<string, unknown>
   const loginUiModule = await import(loginUiEntry) as Record<string, unknown>
+  const lowcodeActionsUiModule = await import(lowcodeActionsUiEntry) as Record<string, unknown>
   expect('default' in lowcodeModule).toBe(false)
   expect('default' in loginUiModule).toBe(false)
+  expect('default' in lowcodeActionsUiModule).toBe(false)
 
   directory = await mkdtemp(join(tmpdir(), 'dsh-jdcloud-login-loader-'))
   const configPath = join(directory, 'cordis.yml')
@@ -75,6 +81,7 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
     '    requestTimeoutMs: 15000',
     "- name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'",
     "- name: '@deepseek-ai/dsh-client-ui-jdcloud-login'",
+    "- name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'",
     '',
   ].join('\n'))
 
@@ -93,6 +100,7 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
     ['@deepseek-ai/dsh-api-jdcloud-auth-controller', JdcloudAuthController],
     ['@deepseek-ai/dsh-tool-jdcloud-lowcode', lowcodeModule],
     ['@deepseek-ai/dsh-client-ui-jdcloud-login', loginUiModule],
+    ['@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions', lowcodeActionsUiModule],
   ])
   ctx.loader.internal = {
     version: 'v2',
@@ -155,6 +163,7 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(lowcodeGuidance).toContain('infer every field value that is directly supported')
     expect(lowcodeGuidance).toContain('not only titles, but also values such as amounts, dates')
     expect(lowcodeGuidance).toContain('Never invent opaque ids')
+    expect(lowcodeGuidance).toContain('currentMember')
     expect(lowcodeGuidance).toContain('目前还缺少关键信息')
     expect(lowcodeGuidance).toContain('every described field, including required and optional fields')
     await expect(context.jdcloudAuthController.status()).resolves.toEqual({
@@ -175,12 +184,23 @@ describe('JDCloud login through a real Loader composition', () => {
           return Promise.resolve(json(corpData()))
         case '/api/oauth/currentUser':
           return Promise.resolve(json({
-            userInfo: { id: 'user-1' },
+            userInfo: {
+              id: 'user-1',
+              corpId: 'corp-current',
+              departmentId: ['department-1'],
+              roleId: [],
+            },
             userPermission: { systemAdministrator: false },
             menuList: [
               { id: 'form-1', parentId: '-1', fullName: '打卡记录', type: 3 },
               { id: 'board-1', parentId: '-1', fullName: '打卡看板', type: 6 },
             ],
+          }))
+        case '/api/system/permission/users/getMemberName':
+          return Promise.resolve(json({
+            department: [{ id: 'department-1', fullName: '研发部' }],
+            role: [],
+            user: [{ id: 'user-1', fullName: '测试用户', phone: '13800000000' }],
           }))
         default:
           throw new Error(`unexpected JDCloud request: ${url.pathname}`)
@@ -216,6 +236,8 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(requestPaths).toEqual([
       '/api/system/corp/getCorpList',
       '/api/oauth/currentUser',
+      '/api/oauth/currentUser',
+      '/api/system/permission/users/getMemberName',
     ])
     expect(decision).toMatchObject({
       kind: 'enter',
@@ -225,6 +247,8 @@ describe('JDCloud login through a real Loader composition', () => {
       ],
     })
     expect(JSON.stringify(decision)).toContain('form-1')
+    expect(JSON.stringify(decision)).toContain('测试用户')
+    expect(JSON.stringify(decision)).toContain('研发部')
     expect(JSON.stringify(decision)).not.toContain('board-1')
   })
 })

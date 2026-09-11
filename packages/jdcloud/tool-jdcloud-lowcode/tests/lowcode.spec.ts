@@ -52,7 +52,12 @@ function currentUser(
   systemAdministrator = false,
 ): Record<string, unknown> {
   return {
-    userInfo: { id: 'user-secret', account: 'private-account' },
+    userInfo: {
+      id: 'user-secret',
+      account: 'private-account',
+      departmentId: ['department-1'],
+      roleId: ['role-1'],
+    },
     userPermission: { systemAdministrator, departmentRead: true },
     menuList: [
       {
@@ -109,6 +114,7 @@ function createRunningAgent(ctx: Context): Agent {
 /** Mount the plugin with real registries and a deterministic Host-only auth service. */
 async function mountLowcode(options: {
   readonly currentUser?: Record<string, unknown>
+  readonly memberNames?: unknown
   readonly response?: (request: RecordedRequest) => unknown
 } = {}): Promise<MountedLowcode> {
   const ctx = new Context()
@@ -124,6 +130,13 @@ async function mountLowcode(options: {
   const requestAuthenticated = vi.fn(async (request: RecordedRequest): Promise<unknown> => {
     requests.push(request)
     if (request.path === '/api/oauth/currentUser') return current
+    if (request.path === '/api/system/permission/users/getMemberName') {
+      return options.memberNames ?? {
+        department: [{ id: 'department-1', fullName: '研发部' }],
+        role: [{ id: 'role-1', fullName: '开发人员' }],
+        user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
+      }
+    }
     if (request.path.startsWith('/api/visualdev/base/fields/')) {
       return options.response?.(request) ?? []
     }
@@ -139,6 +152,7 @@ async function mountLowcode(options: {
     corpId: 'corp-1',
     corpName: '测试租户',
     corps: [{ corpId: 'corp-1', corpName: '测试租户' }],
+    systemAdministrator: false,
   }))
   ctx.provide('jdcloudAuthController', { requestAuthenticated, status } as never)
   const fiber = await ctx.plugin(LowcodePlugin, { maxPageSize: 50, maxOutputBytes: 8_192 })
@@ -246,6 +260,11 @@ describe('current-user capability parsing', () => {
       corpId: 'corp-1',
       corpName: '测试租户',
       systemAdministrator: false,
+      currentMember: {
+        department: [{ id: 'department-1', fullName: '研发部' }],
+        role: [{ id: 'role-1', fullName: '开发人员' }],
+        user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
+      },
       menus: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -259,6 +278,11 @@ describe('current-user capability parsing', () => {
     expect(JSON.parse(text.slice(text.indexOf('\n') + 1))).toEqual({
       tenant: { id: 'corp-1', name: '测试租户' },
       systemAdministrator: false,
+      currentMember: {
+        department: [{ id: 'department-1', fullName: '研发部' }],
+        role: [{ id: 'role-1', fullName: '开发人员' }],
+        user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
+      },
       functions: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -268,7 +292,7 @@ describe('current-user capability parsing', () => {
       }],
     })
     expect(text).not.toContain('turn')
-    expect(text).not.toContain('user-secret')
+    expect(text).not.toContain('private-account')
   })
 })
 
@@ -329,7 +353,14 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode()
     const entered = await mounted.browserPrompt()
 
-    expect(mounted.requests).toEqual([{ path: '/api/oauth/currentUser', method: 'GET' }])
+    expect(mounted.requests).toEqual([
+      { path: '/api/oauth/currentUser', method: 'GET' },
+      {
+        path: '/api/system/permission/users/getMemberName',
+        method: 'POST',
+        body: ['user-secret', 'department-1', 'role-1'],
+      },
+    ])
     expect(entered).toHaveLength(2)
     expect(entered[1]?.source).toMatchObject({
       kind: 'plugin',
@@ -338,10 +369,12 @@ describe('prompt refresh and plugin lifecycle', () => {
     })
     expect(JSON.stringify(entered[1])).toContain('form-clock')
     expect(JSON.stringify(entered[1])).not.toContain('board-overview')
+    expect(JSON.stringify(entered[1])).toContain('测试用户')
+    expect(JSON.stringify(entered[1])).toContain('研发部')
     expect(JSON.stringify(entered[1])).not.toContain('private-account')
 
     expect(await mounted.continuation()).toEqual([])
-    expect(mounted.requestAuthenticated).toHaveBeenCalledTimes(1)
+    expect(mounted.requestAuthenticated).toHaveBeenCalledTimes(2)
   })
 
   it('disposes its tools, prompt section, and browser-prompt listener with the plugin fiber', async () => {
@@ -361,6 +394,9 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(guidance).toContain('infer every field value that is directly supported')
     expect(guidance).toContain('not only titles, but also values such as amounts, dates')
     expect(guidance).toContain('Never invent opaque ids')
+    expect(guidance).toContain('currentMember')
+    expect(guidance).toContain('reimbursement claimant')
+    expect(guidance).toContain('before treating those fields as missing')
     expect(guidance).toContain('目前还缺少关键信息')
     expect(guidance).toContain('every described field, including required and optional fields')
     expect(guidance).toContain('Conversation attachments are evidence, not JDCloud file uploads')
@@ -681,6 +717,7 @@ describe('Host-authorized tool execution', () => {
         corpId: 'corp-2',
         corpName: '另一个租户',
         corps: [{ corpId: 'corp-2', corpName: '另一个租户' }],
+        systemAdministrator: false,
       },
       'JDCLOUD_LOWCODE_TENANT_CHANGED',
     ],

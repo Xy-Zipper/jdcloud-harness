@@ -1,18 +1,45 @@
 /** Parse and render the minimum JDCloud current-user capability snapshot. */
 
+import { readJdcloudLowcodeCapabilities } from '@deepseek-ai/dsh-api-jdcloud-auth-controller'
+import type {
+  JdcloudLowcodeMenuType,
+  JdcloudLowcodeWritePermission,
+  JdcloudWritableMenu,
+} from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
+
 /** JDCloud menu kinds available to the low-code tools. */
-export type LowcodeMenuType = 3 | 4
+export type LowcodeMenuType = JdcloudLowcodeMenuType
 
 /** JDCloud write permissions enforced by the Host tools. */
-export type LowcodeWritePermission = 'addData' | 'editData' | 'deleteData'
+export type LowcodeWritePermission = JdcloudLowcodeWritePermission
 
 /** One form or workflow available in the current tenant. */
-export interface LowcodeMenuCapability {
-  readonly menuId: string
+export type LowcodeMenuCapability = JdcloudWritableMenu
+
+/** One JDCloud department or role selection resolved for the current account. */
+export interface LowcodeNamedMember {
+  readonly id: string
   readonly fullName: string
-  readonly path: string
-  readonly type: LowcodeMenuType
-  readonly agentPermissions: readonly LowcodeWritePermission[]
+}
+
+/** The JDCloud user selection resolved for the current account. */
+export interface LowcodeUserMember extends LowcodeNamedMember {
+  readonly phone: string
+}
+
+/** Exact selection values available for fields that refer to the current account. */
+export interface LowcodeCurrentMember {
+  readonly department: readonly LowcodeNamedMember[]
+  readonly role: readonly LowcodeNamedMember[]
+  readonly user: readonly LowcodeUserMember[]
+}
+
+/** IDs sent in one `/getMemberName` request for the current account. */
+export interface LowcodeCurrentMemberLookup {
+  readonly ids: readonly string[]
+  readonly userId: string
+  readonly departmentIds: readonly string[]
+  readonly roleIds: readonly string[]
 }
 
 /** Host-only capabilities fetched for one open agent turn. */
@@ -21,18 +48,9 @@ export interface LowcodeCapabilitySnapshot {
   readonly corpId: string
   readonly corpName: string
   readonly systemAdministrator: boolean
+  readonly currentMember: LowcodeCurrentMember
   readonly menus: readonly LowcodeMenuCapability[]
 }
-
-interface ParsedMenuNode {
-  readonly id: string
-  readonly parentId: string | undefined
-  readonly fullName: string
-  readonly type: number
-  readonly permissions: readonly LowcodeWritePermission[]
-}
-
-const WRITE_PERMISSIONS = new Set<LowcodeWritePermission>(['addData', 'editData', 'deleteData'])
 
 /**
  * Parse `/api/oauth/currentUser` data without retaining personal profile fields.
@@ -43,32 +61,52 @@ export function parseCurrentUserCapabilities(value: unknown): Pick<
   LowcodeCapabilitySnapshot,
   'systemAdministrator' | 'menus'
 > {
-  const root = requireRecord(value, 'JDCloud current-user response')
-  requireRecord(Reflect.get(root, 'userInfo'), 'JDCloud current-user profile')
-  const menuList = Reflect.get(root, 'menuList')
-  if (!Array.isArray(menuList)) throw new Error('JDCloud current-user response has no menu list')
-
-  const userPermission = Reflect.get(root, 'userPermission')
-  const systemAdministrator = isRecord(userPermission)
-    && Reflect.get(userPermission, 'systemAdministrator') === true
-  const nodes = collectMenuNodes(menuList)
-  const byId = new Map(nodes.map(node => [node.id, node]))
-  const menus = nodes
-    .filter((node): node is ParsedMenuNode & { readonly type: LowcodeMenuType } => (
-      node.type === 3 || node.type === 4
-    ))
-    .map(node => ({
-      menuId: node.id,
-      fullName: node.fullName,
-      path: resolveMenuPath(node, byId),
-      type: node.type,
-      agentPermissions: node.permissions,
-    }))
-  return { systemAdministrator, menus }
+  const parsed = readJdcloudLowcodeCapabilities(value)
+  return { systemAdministrator: parsed.systemAdministrator, menus: parsed.menus }
 }
 
 /**
- * Render only tenant identity and the filtered menu authorization facts for the model.
+ * Read the current account's user, department, and role IDs for one batched name lookup.
+ * @param value - Unwrapped JDCloud current-user response data.
+ * @returns IDs grouped by member kind and deduplicated request order.
+ */
+export function parseCurrentMemberLookup(value: unknown): LowcodeCurrentMemberLookup {
+  const root = requireRecord(value, 'JDCloud current-user response')
+  const userInfo = requireRecord(Reflect.get(root, 'userInfo'), 'JDCloud current-user profile')
+  const userId = requireNonEmptyString(Reflect.get(userInfo, 'id'), 'JDCloud current-user id')
+  const departmentIds = requireIdList(Reflect.get(userInfo, 'departmentId'), 'JDCloud current-user department ids')
+  const roleIds = requireIdList(Reflect.get(userInfo, 'roleId'), 'JDCloud current-user role ids')
+  return {
+    ids: [...new Set([userId, ...departmentIds, ...roleIds])],
+    userId,
+    departmentIds,
+    roleIds,
+  }
+}
+
+/**
+ * Select only the requested current-account members from `/getMemberName` data.
+ * @param lookup - Current-user IDs that were sent to JDCloud.
+ * @param value - Unwrapped member-name response data.
+ * @returns Exact user, department, and role field selections in current-user order.
+ */
+export function parseCurrentMemberNames(
+  lookup: LowcodeCurrentMemberLookup,
+  value: unknown,
+): LowcodeCurrentMember {
+  const root = requireRecord(value, 'JDCloud member-name response')
+  const departments = readNamedMembers(Reflect.get(root, 'department'), 'department')
+  const roles = readNamedMembers(Reflect.get(root, 'role'), 'role')
+  const users = readUserMembers(Reflect.get(root, 'user'))
+  return {
+    department: lookup.departmentIds.map(id => requireResolvedMember(departments, id, 'department')),
+    role: lookup.roleIds.map(id => requireResolvedMember(roles, id, 'role')),
+    user: [requireResolvedMember(users, lookup.userId, 'user')],
+  }
+}
+
+/**
+ * Render tenant identity, current member selections, and filtered menu authorization facts for the model.
  * @param snapshot - Host-attested capabilities for the current turn.
  * @returns Model-visible untrusted-data snapshot text.
  */
@@ -76,6 +114,7 @@ export function renderCapabilitySnapshot(snapshot: LowcodeCapabilitySnapshot): s
   const value = {
     tenant: { id: snapshot.corpId, name: snapshot.corpName },
     systemAdministrator: snapshot.systemAdministrator,
+    currentMember: snapshot.currentMember,
     functions: snapshot.menus.map(menu => ({
       menuId: menu.menuId,
       fullName: menu.fullName,
@@ -89,89 +128,77 @@ export function renderCapabilitySnapshot(snapshot: LowcodeCapabilitySnapshot): s
     + JSON.stringify(value)
 }
 
-/** Flatten the menu tree and reject duplicate or malformed menu identities. */
-function collectMenuNodes(menuList: readonly unknown[]): ParsedMenuNode[] {
-  const result: ParsedMenuNode[] = []
-  const seen = new Set<string>()
-  const pending = menuList.toReversed()
-    .map(value => ({ value, nestedParentId: undefined as string | undefined }))
-  while (pending.length > 0) {
-    const entry = pending.pop() as (typeof pending)[number]
-    const menu = requireRecord(entry.value, 'JDCloud current-user menu item')
-    const id = requireNonEmptyString(Reflect.get(menu, 'id'), 'JDCloud menu id')
-    if (seen.has(id)) throw new Error(`JDCloud current-user response repeats menu ${JSON.stringify(id)}`)
-    seen.add(id)
-    const fullName = requireNonEmptyString(Reflect.get(menu, 'fullName'), `JDCloud menu ${JSON.stringify(id)} name`)
-    const type = Reflect.get(menu, 'type')
-    if (typeof type !== 'number' || !Number.isInteger(type)) {
-      throw new Error(`JDCloud menu ${JSON.stringify(id)} has an invalid type`)
-    }
-    const parentValue = Reflect.get(menu, 'parentId')
-    const parentId = parentValue === undefined || parentValue === null || parentValue === ''
-      ? entry.nestedParentId
-      : requireNonEmptyString(parentValue, `JDCloud menu ${JSON.stringify(id)} parent id`)
-    result.push({
+/** Parse one external array of member IDs and preserve its first occurrence order. */
+function requireIdList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} are invalid`)
+  return [...new Set(value.map(id => requireNonEmptyString(id, label)))]
+}
+
+/** Parse one external department or role result list into unique id-indexed values. */
+function readNamedMembers(value: unknown, kind: 'department' | 'role'): Map<string, LowcodeNamedMember> {
+  if (!Array.isArray(value)) throw new Error(`JDCloud member-name ${kind} list is invalid`)
+  const result = new Map<string, LowcodeNamedMember>()
+  for (const entry of value) {
+    const member = requireRecord(entry, `JDCloud member-name ${kind}`)
+    const id = requireNonEmptyString(Reflect.get(member, 'id'), `JDCloud member-name ${kind} id`)
+    if (result.has(id)) throw new Error(`JDCloud member-name response repeats ${kind} ${JSON.stringify(id)}`)
+    result.set(id, {
       id,
-      parentId,
-      fullName,
-      type,
-      permissions: readWritePermissions(Reflect.get(menu, 'agentPermissions')),
+      fullName: requireNonEmptyString(
+        Reflect.get(member, 'fullName'),
+        `JDCloud member-name ${kind} ${JSON.stringify(id)} name`,
+      ),
     })
-    const children = Reflect.get(menu, 'children')
-    if (children !== undefined && children !== null) {
-      if (!Array.isArray(children)) {
-        throw new Error(`JDCloud menu ${JSON.stringify(id)} has an invalid child list`)
-      }
-      for (const child of children.toReversed()) pending.push({ value: child, nestedParentId: id })
-    }
   }
   return result
 }
 
-/** Resolve a stable human-readable menu path while rejecting parent cycles. */
-function resolveMenuPath(node: ParsedMenuNode, byId: ReadonlyMap<string, ParsedMenuNode>): string {
-  const names = [node.fullName]
-  const visited = new Set([node.id])
-  let parentId = node.parentId
-  while (parentId !== undefined && parentId !== '-1') {
-    if (visited.has(parentId)) {
-      throw new Error(`JDCloud current-user response contains a menu-parent cycle at ${JSON.stringify(parentId)}`)
-    }
-    visited.add(parentId)
-    const parent = byId.get(parentId)
-    if (parent === undefined) break
-    names.unshift(parent.fullName)
-    parentId = parent.parentId
+/** Parse the external user result list into unique id-indexed field selections. */
+function readUserMembers(value: unknown): Map<string, LowcodeUserMember> {
+  if (!Array.isArray(value)) throw new Error('JDCloud member-name user list is invalid')
+  const result = new Map<string, LowcodeUserMember>()
+  for (const entry of value) {
+    const member = requireRecord(entry, 'JDCloud member-name user')
+    const id = requireNonEmptyString(Reflect.get(member, 'id'), 'JDCloud member-name user id')
+    if (result.has(id)) throw new Error(`JDCloud member-name response repeats user ${JSON.stringify(id)}`)
+    result.set(id, {
+      id,
+      fullName: requireNonEmptyString(
+        Reflect.get(member, 'fullName'),
+        `JDCloud member-name user ${JSON.stringify(id)} name`,
+      ),
+      phone: requireString(Reflect.get(member, 'phone'), `JDCloud member-name user ${JSON.stringify(id)} phone`),
+    })
   }
-  return names.join(' / ')
+  return result
 }
 
-/** Keep only the three write grants understood by this plugin. */
-function readWritePermissions(value: unknown): LowcodeWritePermission[] {
-  if (value === undefined) return []
-  if (!Array.isArray(value)) throw new Error('JDCloud menu agentPermissions must be an array')
-  const permissions: LowcodeWritePermission[] = []
-  for (const permission of value) {
-    if (typeof permission === 'string' && WRITE_PERMISSIONS.has(permission as LowcodeWritePermission)) {
-      permissions.push(permission as LowcodeWritePermission)
-    }
+/** Require the member-name response to resolve one current-user ID. */
+function requireResolvedMember<T>(members: ReadonlyMap<string, T>, id: string, kind: string): T {
+  const member = members.get(id)
+  if (member === undefined) {
+    throw new Error(`JDCloud member-name response has no ${kind} for ${JSON.stringify(id)}`)
   }
-  return [...new Set(permissions)]
+  return member
 }
 
 /** Require one external JSON object. */
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!isRecord(value)) throw new Error(`${label} is invalid`)
-  return value
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${label} is invalid`)
+  }
+  return value as Record<string, unknown>
 }
 
-/** Whether a wire value is a plain JSON object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Require one non-empty external string. */
+/** Require one trimmed non-empty external string. */
 function requireNonEmptyString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} is invalid`)
+  const text = requireString(value, label).trim()
+  if (text === '') throw new Error(`${label} is invalid`)
+  return text
+}
+
+/** Require one external string while allowing an empty optional display value. */
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') throw new Error(`${label} is invalid`)
   return value
 }

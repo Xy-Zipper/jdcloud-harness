@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-07-jdcloud-low-code-conversation-tools.md
-2026-09-07-jdcloud-low-code-conversation-tools.md: ad506c9ae5a2b9ea129e71c7e44a22d69e9f7670
-2026-09-07-jdcloud-low-code-conversation-tools.zh.md: 801de46397c2b6128d9500bd02ef339bf0a71f42
+2026-09-07-jdcloud-low-code-conversation-tools.md: ecbc26d889ed05f6c7227253c81ffef388c9efc9
+2026-09-07-jdcloud-low-code-conversation-tools.zh.md: 437d996e46919ebcec0c9780f4be92dba7f10b1e

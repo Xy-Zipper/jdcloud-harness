@@ -7,6 +7,7 @@ import JdcloudAuthController, {
   JdcloudApiError,
   JdcloudClient,
   normalizeJdcloudBaseUrl,
+  readJdcloudWritableMenus,
 } from '../src/index.ts'
 import type { JdcloudAuthenticatedRequest, JdcloudLoginRequest } from '../src/index.ts'
 
@@ -36,6 +37,17 @@ function corpData(
   }
 }
 
+function currentUserData(
+  corpId = 'corp-current',
+  systemAdministrator = false,
+  username = 'user',
+) {
+  return {
+    userInfo: { userName: username, corpId },
+    userPermission: { systemAdministrator },
+  }
+}
+
 async function boot(fetcher: typeof fetch, config: {
   defaultBaseUrl?: string
   requestTimeoutMs?: number
@@ -51,6 +63,57 @@ async function boot(fetcher: typeof fetch, config: {
 }
 
 describe('minimal JDCloud HTTP client', () => {
+  it('projects only type 3/4 menus with a supported data-write permission', () => {
+    expect(readJdcloudWritableMenus({
+      userInfo: { corpId: 'corp-current' },
+      menuList: [{
+        id: 'app',
+        parentId: '-1',
+        fullName: '人事管理',
+        type: 1,
+        children: [
+          {
+            id: 'leave',
+            fullName: '请假申请',
+            type: 4,
+            agentPermissions: ['addData', 'queryData', 'addData'],
+          },
+          {
+            id: 'attendance',
+            fullName: '打卡记录',
+            type: 3,
+            agentPermissions: ['editData'],
+          },
+          { id: 'read-only', fullName: '只读表单', type: 3 },
+          { id: 'board', fullName: '数据看板', type: 6, agentPermissions: ['deleteData'] },
+        ],
+      }],
+    })).toEqual({
+      corpId: 'corp-current',
+      menus: [
+        {
+          menuId: 'leave',
+          fullName: '请假申请',
+          path: '人事管理 / 请假申请',
+          type: 4,
+          agentPermissions: ['addData'],
+        },
+        {
+          menuId: 'attendance',
+          fullName: '打卡记录',
+          path: '人事管理 / 打卡记录',
+          type: 3,
+          agentPermissions: ['editData'],
+        },
+      ],
+    })
+  })
+
+  it('requires a current tenant for the browser writable-menu projection', () => {
+    expect(() => readJdcloudWritableMenus({ userInfo: {}, menuList: [] }))
+      .toThrow('JDCloud current-user response current tenant is invalid')
+  })
+
   it.each([
     ['not a url', 'absolute HTTP or HTTPS URL'],
     ['ftp://kindoucloud.com', 'must use HTTP or HTTPS'],
@@ -99,9 +162,9 @@ describe('minimal JDCloud HTTP client', () => {
   })
 
   it.each([
-    [{ userInfo: { corpId: 'corp-a', userName: ' account ' } }, { username: 'account', corpId: 'corp-a' }],
-    [{ userInfo: { corpId: 'corp-a', realName: 'Real Name' } }, { username: 'Real Name', corpId: 'corp-a' }],
-    [{ userInfo: { corpId: 'corp-a', id: 'user-id' } }, { username: 'user-id', corpId: 'corp-a' }],
+    [{ userInfo: { corpId: 'corp-a', userName: ' account ' } }, { username: 'account', corpId: 'corp-a', systemAdministrator: false }],
+    [{ userInfo: { corpId: 'corp-a', realName: 'Real Name' } }, { username: 'Real Name', corpId: 'corp-a', systemAdministrator: false }],
+    [{ userInfo: { corpId: 'corp-a', id: 'user-id' }, userPermission: { systemAdministrator: true } }, { username: 'user-id', corpId: 'corp-a', systemAdministrator: true }],
   ])('reads the transferred-token identity from currentUser', async (data, expected) => {
     const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data })))
     const client = new JdcloudClient('https://kindoucloud.com', fetcher)
@@ -235,6 +298,36 @@ describe('JDCloud authentication controller', () => {
     expect(await controller.status()).toEqual({ authenticated: false, baseUrl: '' })
   })
 
+  it('upgrades a version-3 stored login with the current tenant permission', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', true) }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const key = credentialKey('jdcloud-auth-controller', 'login')
+    await ctx.credentials.modifyRecord(key, () => Promise.resolve({
+      kind: 'grant',
+      payload: {
+        version: 3,
+        baseUrl: 'https://kindoucloud.com',
+        token: 'legacy-token',
+        username: 'legacy-user',
+        corpId: 'corp-current',
+        corpName: 'Current Tenant',
+        corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
+      },
+    }))
+
+    await expect(ctx.jdcloudAuthController.status()).resolves.toMatchObject({
+      authenticated: true,
+      username: 'legacy-user',
+      systemAdministrator: true,
+    })
+    await expect(ctx.credentials.readRecord(key)).resolves.toMatchObject({
+      kind: 'grant',
+      payload: { version: 4, systemAdministrator: true },
+    })
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it.each([
     [{ baseUrl: 'https://kindoucloud.com', username: ' ', password: 'secret' }],
     [{ baseUrl: 'https://kindoucloud.com', username: 'user', password: '' }],
@@ -255,6 +348,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-beta', 'Beta Tenant') }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-beta', true) }))
     const ctx = await boot(fetcher as typeof fetch)
     expect(await ctx.jdcloudAuthController.status()).toEqual({ authenticated: false, baseUrl: 'https://kindoucloud.com' })
     await expect(ctx.jdcloudAuthController.login({
@@ -267,6 +361,7 @@ describe('JDCloud authentication controller', () => {
         corpId: 'corp-beta',
         corpName: 'Beta Tenant',
         corps: [{ corpId: 'corp-beta', corpName: 'Beta Tenant' }],
+        systemAdministrator: true,
       })
     expect(await ctx.jdcloudAuthController.status())
       .toEqual({
@@ -276,17 +371,19 @@ describe('JDCloud authentication controller', () => {
         corpId: 'corp-beta',
         corpName: 'Beta Tenant',
         corps: [{ corpId: 'corp-beta', corpName: 'Beta Tenant' }],
+        systemAdministrator: true,
       })
     expect(await ctx.credentials.readRecord(credentialKey('jdcloud-auth-controller', 'login'))).toEqual({
       kind: 'grant',
       payload: {
-        version: 3,
+        version: 4,
         baseUrl: 'https://beta.kindoucloud.com',
         token: 'bearer token',
         username: 'user',
         corpId: 'corp-beta',
         corpName: 'Beta Tenant',
         corps: [{ corpId: 'corp-beta', corpName: 'Beta Tenant' }],
+        systemAdministrator: true,
       },
     })
     const [tenantUrl, tenantInit] = fetcher.mock.calls[1] as unknown as [string, RequestInit]
@@ -296,12 +393,12 @@ describe('JDCloud authentication controller', () => {
 
   it('replaces the stored login with a transferred token', async () => {
     const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-beta', 'Beta Tenant') }))
       .mockResolvedValueOnce(json({
         code: 200,
         msg: 'ok',
-        data: { userInfo: { userName: 'transfer-user', corpId: 'corp-beta' } },
+        data: currentUserData('corp-beta', true, 'transfer-user'),
       }))
-      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-beta', 'Beta Tenant') }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
       kind: 'grant',
@@ -325,23 +422,27 @@ describe('JDCloud authentication controller', () => {
       corpId: 'corp-beta',
       corpName: 'Beta Tenant',
       corps: [{ corpId: 'corp-beta', corpName: 'Beta Tenant' }],
+      systemAdministrator: true,
     })
     expect(await ctx.credentials.readRecord(credentialKey('jdcloud-auth-controller', 'login'))).toMatchObject({
       kind: 'grant',
       payload: { token: 'transferred-token', username: 'transfer-user', corpId: 'corp-beta' },
     })
     expect(fetcher.mock.calls.map(call => new URL(String(call[0])).pathname)).toEqual([
-      '/api/oauth/currentUser',
       '/api/system/corp/getCorpList',
+      '/api/oauth/currentUser',
     ])
   })
 
   it('accepts a transfer address when the default differs', async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({
-        code: 200, msg: 'ok', data: { userInfo: { realName: 'Transferred User', corpId: 'corp-a' } },
-      }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-a', 'Tenant A') }))
+      .mockResolvedValueOnce(json({
+        code: 200, msg: 'ok', data: {
+          userInfo: { realName: 'Transferred User', corpId: 'corp-a' },
+          userPermission: { systemAdministrator: false },
+        },
+      }))
     const ctx = await boot(fetcher as typeof fetch, { defaultBaseUrl: 'https://kindoucloud.com' })
     await expect(ctx.jdcloudAuthController.loginWithToken({
       baseUrl: 'https://transfer.kindoucloud.com', token: 'token',
@@ -374,10 +475,10 @@ describe('JDCloud authentication controller', () => {
 
   it('rejects a transferred token whose currentUser and tenant list disagree', async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({
-        code: 200, msg: 'ok', data: { userInfo: { userName: 'user', corpId: 'corp-a' } },
-      }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-b', 'Tenant B') }))
+      .mockResolvedValueOnce(json({
+        code: 200, msg: 'ok', data: currentUserData('corp-a'),
+      }))
     const ctx = await boot(fetcher as typeof fetch)
     await expect(ctx.jdcloudAuthController.loginWithToken({
       baseUrl: 'https://kindoucloud.com', token: 'token',
@@ -389,6 +490,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { menuList: ['menu'] } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'created' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'updated' } }))
@@ -412,7 +514,7 @@ describe('JDCloud authentication controller', () => {
       }, signal)).resolves.toEqual(expected)
     }
 
-    const [getUrl, getInit] = fetcher.mock.calls[2] as unknown as [string, RequestInit]
+    const [getUrl, getInit] = fetcher.mock.calls[3] as unknown as [string, RequestInit]
     const parsedGetUrl = new URL(getUrl)
     expect(parsedGetUrl.pathname).toBe('/api/oauth/currentUser')
     expect(parsedGetUrl.searchParams.get('include')).toBe('menu')
@@ -422,9 +524,9 @@ describe('JDCloud authentication controller', () => {
     })
     expect(getInit.body).toBeUndefined()
     for (const [index, method, body] of [
-      [3, 'POST', { name: 'created' }],
-      [4, 'PUT', { name: 'updated' }],
-      [5, 'DELETE', { id: 'deleted' }],
+      [4, 'POST', { name: 'created' }],
+      [5, 'PUT', { name: 'updated' }],
+      [6, 'DELETE', { id: 'deleted' }],
     ] as const) {
       const [, init] = fetcher.mock.calls[index] as unknown as [string, RequestInit]
       expect(init).toMatchObject({
@@ -434,6 +536,54 @@ describe('JDCloud authentication controller', () => {
       })
       expect(init.cache).toBeUndefined()
     }
+  })
+
+  it('returns a browser-safe writable-menu list through the authenticated Remote method', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
+      .mockResolvedValueOnce(json({
+        code: 200,
+        msg: 'ok',
+        data: {
+          userInfo: { corpId: 'corp-current' },
+          menuList: [
+            {
+              id: 'leave',
+              parentId: '-1',
+              fullName: '请假申请',
+              type: 4,
+              agentPermissions: ['addData'],
+            },
+            {
+              id: 'read-only',
+              parentId: '-1',
+              fullName: '只读表单',
+              type: 3,
+            },
+          ],
+        },
+      }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+
+    await expect(ctx.jdcloudAuthController.writableMenus(signal)).resolves.toEqual({
+      corpId: 'corp-current',
+      menus: [{
+        menuId: 'leave',
+        fullName: '请假申请',
+        path: '请假申请',
+        type: 4,
+        agentPermissions: ['addData'],
+      }],
+    })
+    const [url, init] = fetcher.mock.calls[3] as unknown as [string, RequestInit]
+    expect(new URL(url).pathname).toBe('/api/oauth/currentUser')
+    expect(init).toMatchObject({ headers: { authorization: 'bearer token' }, cache: 'no-store' })
   })
 
   it('requires a stored login for authenticated Host requests', async () => {
@@ -451,6 +601,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
     const ctx = await boot(fetcher as typeof fetch)
     const signal = AbortSignal.timeout(1000)
     await ctx.jdcloudAuthController.login({
@@ -461,13 +612,14 @@ describe('JDCloud authentication controller', () => {
         path: path as JdcloudAuthenticatedRequest['path'], method: 'GET',
       }, signal)).rejects.toThrow('must start with /api/')
     }
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it.each([600, 601, 602])('deletes an expired login when an authenticated Host request returns code %i', async (code) => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockResolvedValueOnce(json({ code, msg: 'token expired', data: null }))
     const ctx = await boot(fetcher as typeof fetch)
     const signal = AbortSignal.timeout(1000)
@@ -486,6 +638,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockResolvedValueOnce(json({ code: 409, msg: 'operation denied', data: null }))
     const ctx = await boot(fetcher as typeof fetch)
     const signal = AbortSignal.timeout(1000)
@@ -507,12 +660,14 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code: 200, msg: '切换成功', data: { corpId: next.corpId } }))
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData(next.corpId, next.corpName, false, [
           { corpId: 'corp-current', corpName: 'Current Tenant' },
         ]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(next.corpId, true) }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
       baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
@@ -525,8 +680,9 @@ describe('JDCloud authentication controller', () => {
       corpId: next.corpId,
       corpName: next.corpName,
       corps: [next, { corpId: 'corp-current', corpName: 'Current Tenant' }],
+      systemAdministrator: true,
     })
-    const [switchUrl, switchInit] = fetcher.mock.calls[2] as unknown as [string, RequestInit]
+    const [switchUrl, switchInit] = fetcher.mock.calls[3] as unknown as [string, RequestInit]
     expect(new URL(switchUrl).pathname).toBe('/api/system/corp/switchCorp/corp-next')
     expect(switchInit.headers).toEqual({ authorization: 'bearer token' })
     expect((await ctx.jdcloudAuthController.status()).authenticated).toBe(true)
@@ -536,6 +692,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
       baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
@@ -544,7 +701,7 @@ describe('JDCloud authentication controller', () => {
       .resolves.toMatchObject({ authenticated: true, corpId: 'corp-current' })
     await expect(ctx.jdcloudAuthController.switchCorp('unknown', AbortSignal.timeout(1000)))
       .rejects.toMatchObject({ code: 'gateway/bad-request' })
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it('requires a stored login before switching tenants', async () => {
@@ -560,6 +717,7 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code, msg: 'token expired', data: null }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
@@ -577,6 +735,7 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code: 500, msg: 'switch failed', data: null }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
@@ -596,6 +755,7 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: next.corpId }))
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
@@ -618,14 +778,16 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: next.corpId }))
       .mockReturnValueOnce(confirmation)
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(next.corpId) }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
       baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
     }, AbortSignal.timeout(1000))
     const pending = ctx.jdcloudAuthController.switchCorp(next.corpId, AbortSignal.timeout(1000))
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(4) })
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(5) })
     await ctx.credentials.deleteRecord(credentialKey('jdcloud-auth-controller', 'login'))
     resolveConfirmation?.(json({ code: 200, msg: 'ok', data: corpData(next.corpId, next.corpName) }))
     await expect(pending).rejects.toMatchObject({ code: 'jdcloud/switch-failed' })
@@ -641,24 +803,27 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: next.corpId }))
       .mockReturnValueOnce(confirmation)
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(next.corpId) }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
       baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
     }, AbortSignal.timeout(1000))
     const pending = ctx.jdcloudAuthController.switchCorp(next.corpId, AbortSignal.timeout(1000))
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(4) })
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(5) })
     await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
       kind: 'grant',
       payload: {
-        version: 3,
+        version: 4,
         baseUrl: 'https://kindoucloud.com',
         token: 'another token',
         username: 'other-user',
         corpId: 'other-corp',
         corpName: 'Other Tenant',
         corps: [{ corpId: 'other-corp', corpName: 'Other Tenant' }],
+        systemAdministrator: false,
       },
     }))
     resolveConfirmation?.(json({ code: 200, msg: 'ok', data: corpData(next.corpId, next.corpName) }))
@@ -676,9 +841,11 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData(current.corpId, current.corpName, false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(current.corpId) }))
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData(next.corpId, next.corpName, false, [current]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(next.corpId, true) }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
       baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
@@ -692,6 +859,7 @@ describe('JDCloud authentication controller', () => {
       corpId: next.corpId,
       corpName: next.corpName,
       corps: [next, current],
+      systemAdministrator: true,
     })
   })
 
@@ -700,13 +868,14 @@ describe('JDCloud authentication controller', () => {
     ['replaced', {
       kind: 'grant' as const,
       payload: {
-        version: 3,
+        version: 4,
         baseUrl: 'https://kindoucloud.com',
         token: 'another token',
         username: 'other-user',
         corpId: 'other-corp',
         corpName: 'Other Tenant',
         corps: [{ corpId: 'other-corp', corpName: 'Other Tenant' }],
+        systemAdministrator: false,
       },
     }],
   ])('does not overwrite a %s login during prompt tenant synchronization', async (_name, replacement) => {
@@ -718,7 +887,9 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant', false, [next]),
       }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
       .mockReturnValueOnce(validation)
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData(next.corpId) }))
     const ctx = await boot(fetcher as typeof fetch)
     const key = credentialKey('jdcloud-auth-controller', 'login')
     await ctx.jdcloudAuthController.login({
@@ -728,7 +899,7 @@ describe('JDCloud authentication controller', () => {
     const pending = ctx.waterfall('api-session/prompt-admission', {
       sessionId: 'session-test' as never, signal: AbortSignal.timeout(1000),
     }, nextAdmission)
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(3) })
+    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(4) })
     if (replacement === undefined) {
       await ctx.credentials.deleteRecord(key)
     } else {
@@ -744,7 +915,9 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
     const ctx = await boot(fetcher as typeof fetch, {
       defaultBaseUrl: 'https://kindoucloud.com', requestTimeoutMs: 1000,
     })
@@ -771,6 +944,45 @@ describe('JDCloud authentication controller', () => {
     })
   })
 
+  it('requires the current tenant to be a system administrator for model selection', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'ordinary-token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
+    const ctx = await boot(fetcher as typeof fetch)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, AbortSignal.timeout(1000))
+
+    await expect(ctx.waterfall('api-session/model-selection-admission', {
+      sessionId: 'session-test' as never,
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    }, () => Promise.resolve())).rejects.toMatchObject({
+      code: 'jdcloud/administrator-required',
+      details: { capability: 'model-selection' },
+    })
+  })
+
+  it('admits model selection for a system administrator', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'administrator-token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', true) }))
+    const ctx = await boot(fetcher as typeof fetch)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'administrator', password: 'secret',
+    }, AbortSignal.timeout(1000))
+    const next = vi.fn(() => Promise.resolve())
+
+    await ctx.waterfall('api-session/model-selection-admission', {
+      sessionId: 'session-test' as never,
+      provider: 'deepseek-official',
+      model: 'deepseek-chat',
+    }, next)
+    expect(next).toHaveBeenCalledOnce()
+  })
+
   it('reports login business and transport failures without storing a token', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 500, msg: 'login failed', data: null }))
@@ -788,6 +1000,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockResolvedValueOnce(json({ code, msg: 'token expired', data: null }))
     const ctx = await boot(fetcher as typeof fetch)
     await ctx.jdcloudAuthController.login({
@@ -805,6 +1018,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
       .mockRejectedValueOnce(new Error('network unavailable'))
       .mockResolvedValueOnce(json({ code, msg: 'backend failed', data: null }))
     const ctx = await boot(fetcher as typeof fetch)

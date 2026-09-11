@@ -46,6 +46,8 @@
     "tests/models-settings.e2e.ts",
     "tests/models-settings-recovery.e2e.ts",
     "tests/default-model.e2e.ts",
+    "tests/jdcloud-ordinary-user.e2e.ts",
+    "tests/jdcloud-current-member.e2e.ts",
     "tests/github-ready-review.e2e.ts",
     "tests/streaming-fence-highlight.e2e.ts",
     "tests/declared-reasoning.e2e.ts",

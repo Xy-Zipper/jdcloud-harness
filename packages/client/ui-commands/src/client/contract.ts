@@ -90,6 +90,9 @@ export interface CommandDecoration {
   readonly ui: CommandUiSpec
 }
 
+/** One reversible policy that removes commands from every client invocation path. */
+export type CommandAvailabilityFilter = (name: string, session: ClientSessionContext) => boolean
+
 /** The `ctx.commandUi` service face visible to business packages. */
 export interface CommandUiContract {
   /**
@@ -102,6 +105,12 @@ export interface CommandUiContract {
    * Duplicate names throw at registration.
    */
   decorate(decoration: CommandDecoration): () => void
+  /**
+   * Register one availability filter applied to Host and Client commands.
+   * Returning false removes the command from menus and leading-input claims,
+   * and refuses a typed invocation until the filter or its owner is disposed.
+   */
+  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void
   /** Resolve the per-session popup controller for one session scope (wiring/overlay layer). */
   popupFor(actx: ClientContext): unknown
 }

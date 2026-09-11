@@ -6,21 +6,35 @@ import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { isJdcloudAuthError, JdcloudApiError, JdcloudClient, normalizeJdcloudBaseUrl } from './client.ts'
+import {
+  isJdcloudAuthError,
+  JdcloudApiError,
+  JdcloudClient,
+  normalizeJdcloudBaseUrl,
+  readJdcloudWritableMenus,
+} from './client.ts'
 import type {
   JdcloudAuthenticatedRequest,
   JdcloudAuthStatus,
   JdcloudCorp,
   JdcloudLoginRequest,
   JdcloudTokenLoginRequest,
+  JdcloudWritableMenuState,
 } from './types.ts'
 
 export type * from './types.ts'
-export { isJdcloudAuthError, JdcloudApiError, JdcloudClient, normalizeJdcloudBaseUrl } from './client.ts'
+export {
+  isJdcloudAuthError,
+  JdcloudApiError,
+  JdcloudClient,
+  normalizeJdcloudBaseUrl,
+  readJdcloudLowcodeCapabilities,
+  readJdcloudWritableMenus,
+} from './client.ts'
 
 const AUTH_KEY = credentialKey('jdcloud-auth-controller', 'login')
 
-interface AuthPayload {
+interface LegacyAuthPayload {
   readonly version: 3
   readonly baseUrl: string
   readonly token: string
@@ -29,6 +43,13 @@ interface AuthPayload {
   readonly corpName: string
   readonly corps: readonly JdcloudCorp[]
 }
+
+interface AuthPayload extends Omit<LegacyAuthPayload, 'version'> {
+  readonly version: 4
+  readonly systemAdministrator: boolean
+}
+
+type StoredAuthPayload = LegacyAuthPayload | AuthPayload
 
 /** JDCloud authentication controller configuration. */
 export interface Config {
@@ -70,6 +91,20 @@ export class JdcloudAuthController extends TypertRemoteService {
       await this.validateStoredLogin(request.signal)
       await next()
     })
+    ctx.on('api-session/model-selection-admission', async (_request, next) => {
+      const auth = await this.readAuth()
+      if (auth === undefined) {
+        throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
+      }
+      if (!auth.systemAdministrator) {
+        throw new RemoteError(
+          'jdcloud/administrator-required',
+          'JDCloud system-administrator permission is required to select a model',
+          { capability: 'model-selection' },
+        )
+      }
+      await next()
+    })
   }
 
   /**
@@ -88,7 +123,22 @@ export class JdcloudAuthController extends TypertRemoteService {
         corpId: auth.corpId,
         corpName: auth.corpName,
         corps: auth.corps,
+        systemAdministrator: auth.systemAdministrator,
       }
+  }
+
+  /**
+   * Read the current tenant's forms and workflows carrying a supported data-write permission.
+   * @param signal - Caller cancellation combined with the configured request timeout.
+   * @returns Browser-safe menu identities, labels, paths, types, and write permissions.
+   */
+  @Remote
+  async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState> {
+    const currentUser = await this.requestAuthenticated<unknown>({
+      path: '/api/oauth/currentUser',
+      method: 'GET',
+    }, signal)
+    return readJdcloudWritableMenus(currentUser)
   }
 
   /**
@@ -112,13 +162,18 @@ export class JdcloudAuthController extends TypertRemoteService {
     const client = new JdcloudClient(baseUrl, this.fetcher)
     let token: string
     let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
+    let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
     try {
       token = await client.loginPassword(request.username.trim(), request.password, operationSignal)
       corp = await client.getCorpList(token, operationSignal)
+      currentUser = await client.getCurrentUser(token, operationSignal)
+      if (currentUser.corpId !== corp.corpId) {
+        throw new Error('JDCloud login returned inconsistent current tenants')
+      }
     } catch (error) {
       throw this.requestError('login', error)
     }
-    return this.commitLogin(baseUrl, token, request.username.trim(), corp)
+    return this.commitLogin(baseUrl, token, request.username.trim(), corp, currentUser.systemAdministrator)
   }
 
   /**
@@ -145,15 +200,15 @@ export class JdcloudAuthController extends TypertRemoteService {
     let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
     let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
     try {
-      currentUser = await client.getCurrentUser(token, operationSignal)
       corp = await client.getCorpList(token, operationSignal)
+      currentUser = await client.getCurrentUser(token, operationSignal)
       if (currentUser.corpId !== corp.corpId) {
         throw new Error('JDCloud transfer token returned inconsistent current tenants')
       }
     } catch (error) {
       throw this.requestError('login', error)
     }
-    return this.commitLogin(baseUrl, token, currentUser.username, corp)
+    return this.commitLogin(baseUrl, token, currentUser.username, corp, currentUser.systemAdministrator)
   }
 
   /**
@@ -176,11 +231,16 @@ export class JdcloudAuthController extends TypertRemoteService {
     const client = new JdcloudClient(auth.baseUrl, this.fetcher)
     const operationSignal = this.operationSignal(signal)
     let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
+    let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
     try {
       await client.switchCorp(auth.token, corpId, operationSignal)
       corp = await client.getCorpList(auth.token, operationSignal)
       if (corp.corpId !== corpId) {
         throw new Error('JDCloud tenant-list response did not confirm the requested tenant')
+      }
+      currentUser = await client.getCurrentUser(auth.token, operationSignal)
+      if (currentUser.corpId !== corp.corpId) {
+        throw new Error('JDCloud current-user response did not confirm the requested tenant')
       }
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
@@ -193,7 +253,10 @@ export class JdcloudAuthController extends TypertRemoteService {
     const updated = await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
       if (current === undefined) return Promise.resolve(undefined)
       const latest = parseAuthRecord(current)
-      if (latest.baseUrl !== auth.baseUrl || latest.token !== auth.token || latest.username !== auth.username) {
+      if (latest.version !== 4
+        || latest.baseUrl !== auth.baseUrl
+        || latest.token !== auth.token
+        || latest.username !== auth.username) {
         return Promise.resolve(undefined)
       }
       return Promise.resolve(authRecord({
@@ -201,13 +264,15 @@ export class JdcloudAuthController extends TypertRemoteService {
         corpId: corp.corpId,
         corpName: corp.corpName,
         corps: corp.corps,
+        systemAdministrator: currentUser.systemAdministrator,
       }))
     })
     if (updated === undefined) {
       throw new RemoteError('jdcloud/switch-failed', 'JDCloud login changed while switching tenant', { code: null })
     }
     const committed = parseAuthRecord(updated)
-    if (committed.baseUrl !== auth.baseUrl
+    if (committed.version !== 4
+      || committed.baseUrl !== auth.baseUrl
       || committed.token !== auth.token
       || committed.username !== auth.username
       || !sameCorpState(committed, corp)) {
@@ -257,11 +322,19 @@ export class JdcloudAuthController extends TypertRemoteService {
     try {
       const corp = await new JdcloudClient(auth.baseUrl, this.fetcher)
         .getCorpList(auth.token, this.operationSignal(callerSignal))
-      if (!sameCorpState(auth, corp)) {
+      const currentUser = await new JdcloudClient(auth.baseUrl, this.fetcher)
+        .getCurrentUser(auth.token, this.operationSignal(callerSignal))
+      if (currentUser.corpId !== corp.corpId) {
+        throw new Error('JDCloud prompt validation returned inconsistent current tenants')
+      }
+      if (!sameCorpState(auth, corp) || auth.systemAdministrator !== currentUser.systemAdministrator) {
         await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
           if (current === undefined) return Promise.resolve(undefined)
           const latest = parseAuthRecord(current)
-          if (latest.baseUrl !== auth.baseUrl || latest.token !== auth.token || latest.username !== auth.username) {
+          if (latest.version !== 4
+            || latest.baseUrl !== auth.baseUrl
+            || latest.token !== auth.token
+            || latest.username !== auth.username) {
             return Promise.resolve(undefined)
           }
           return Promise.resolve(authRecord({
@@ -269,6 +342,7 @@ export class JdcloudAuthController extends TypertRemoteService {
             corpId: corp.corpId,
             corpName: corp.corpName,
             corps: corp.corps,
+            systemAdministrator: currentUser.systemAdministrator,
           }))
         })
       }
@@ -291,15 +365,17 @@ export class JdcloudAuthController extends TypertRemoteService {
     token: string,
     username: string,
     corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>,
+    systemAdministrator: boolean,
   ): Promise<Extract<JdcloudAuthStatus, { readonly authenticated: true }>> {
     const payload: AuthPayload = {
-      version: 3,
+      version: 4,
       baseUrl,
       token,
       username,
       corpId: corp.corpId,
       corpName: corp.corpName,
       corps: corp.corps,
+      systemAdministrator,
     }
     await this.ctx.credentials.modifyRecord(AUTH_KEY, () => Promise.resolve(authRecord(payload)))
     return authenticatedStatus(payload)
@@ -316,12 +392,49 @@ export class JdcloudAuthController extends TypertRemoteService {
   private async readAuth(): Promise<AuthPayload | undefined> {
     const record = await this.ctx.credentials.readRecord(AUTH_KEY)
     if (record === undefined) return undefined
-    return parseAuthRecord(record)
+    const auth = parseAuthRecord(record)
+    if (auth.version === 4) return auth
+    return this.upgradeLegacyAuth(auth)
+  }
+
+  /** Upgrade one version-3 login by reading the current tenant permission once. */
+  private async upgradeLegacyAuth(auth: LegacyAuthPayload): Promise<AuthPayload | undefined> {
+    let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
+    try {
+      currentUser = await new JdcloudClient(auth.baseUrl, this.fetcher)
+        .getCurrentUser(auth.token, AbortSignal.timeout(this.requestTimeoutMs))
+    } catch (error) {
+      if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
+        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        return undefined
+      }
+      throw error
+    }
+    if (currentUser.corpId !== auth.corpId) {
+      throw new Error('stored JDCloud authentication record has an inconsistent current tenant')
+    }
+    const upgraded: AuthPayload = {
+      ...auth,
+      version: 4,
+      systemAdministrator: currentUser.systemAdministrator,
+    }
+    const record = await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
+      if (current === undefined) return Promise.resolve(undefined)
+      const latest = parseAuthRecord(current)
+      if (latest.version !== 3 || !sameStoredLogin(latest, auth)) return Promise.resolve(undefined)
+      return Promise.resolve(authRecord(upgraded))
+    })
+    if (record === undefined) return undefined
+    const committed = parseAuthRecord(record)
+    if (committed.version !== 4) {
+      throw new Error('stored JDCloud authentication record changed while upgrading')
+    }
+    return committed
   }
 }
 
 /** Validate the durable owner-defined grant payload before use. */
-function parseAuthRecord(record: CredentialRecord): AuthPayload {
+function parseAuthRecord(record: CredentialRecord): StoredAuthPayload {
   if (record.kind !== 'grant' || typeof record.payload !== 'object' || record.payload === null) {
     throw new Error('stored JDCloud authentication record is invalid')
   }
@@ -332,7 +445,8 @@ function parseAuthRecord(record: CredentialRecord): AuthPayload {
   const corpId: unknown = Reflect.get(record.payload, 'corpId')
   const corpName: unknown = Reflect.get(record.payload, 'corpName')
   const corps: unknown = Reflect.get(record.payload, 'corps')
-  if (version !== 3
+  const systemAdministrator: unknown = Reflect.get(record.payload, 'systemAdministrator')
+  if ((version !== 3 && version !== 4)
     || typeof baseUrl !== 'string'
     || typeof token !== 'string'
     || token.length === 0
@@ -343,10 +457,14 @@ function parseAuthRecord(record: CredentialRecord): AuthPayload {
     || typeof corpName !== 'string'
     || corpName.length === 0
     || !isCorpList(corps)
+    || (version === 4 && typeof systemAdministrator !== 'boolean')
     || !corps.some(corp => corp.corpId === corpId && corp.corpName === corpName)) {
     throw new Error('stored JDCloud authentication record is invalid')
   }
-  return { version, baseUrl: normalizeJdcloudBaseUrl(baseUrl), token, username, corpId, corpName, corps }
+  const common = { baseUrl: normalizeJdcloudBaseUrl(baseUrl), token, username, corpId, corpName, corps }
+  return version === 3
+    ? { version, ...common }
+    : { version, ...common, systemAdministrator: systemAdministrator as boolean }
 }
 
 function isCorpList(value: unknown): value is readonly JdcloudCorp[] {
@@ -376,7 +494,21 @@ function authenticatedStatus(auth: AuthPayload): Extract<JdcloudAuthStatus, { re
     corpId: auth.corpId,
     corpName: auth.corpName,
     corps: auth.corps,
+    systemAdministrator: auth.systemAdministrator,
   }
+}
+
+function sameStoredLogin(left: LegacyAuthPayload, right: LegacyAuthPayload): boolean {
+  return left.baseUrl === right.baseUrl
+    && left.token === right.token
+    && left.username === right.username
+    && left.corpId === right.corpId
+    && left.corpName === right.corpName
+    && left.corps.length === right.corps.length
+    && left.corps.every((corp, index) => {
+      const other = right.corps[index]
+      return other !== undefined && corp.corpId === other.corpId && corp.corpName === other.corpName
+    })
 }
 
 function sameCorpState(auth: AuthPayload, corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>): boolean {

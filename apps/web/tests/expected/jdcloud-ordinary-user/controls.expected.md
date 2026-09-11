@@ -1,0 +1,29 @@
+- button "新建会话"
+- button "收起侧边栏":
+  - img
+- button "当前账号 ordinary-user，租户 普通租户":
+  - text: ordinary-user 普通租户
+  - img
+- button "新建会话":
+  - img
+  - text: 新会话
+- text: 工作区
+- button "搜索会话":
+  - img
+- textbox "搜索会话…"
+- button "视图选项":
+  - img
+- button "添加工作区":
+  - img
+- tree "会话": 暂无会话
+- text: 探索未至之境 预览版
+- button "选择工作区":
+  - img
+  - text: 选择工作区
+  - img
+- textbox "选择工作区"
+- button "指令" [disabled]:
+  - img
+- button "添加附件" [disabled]:
+  - img
+- button "发送消息" [disabled]
