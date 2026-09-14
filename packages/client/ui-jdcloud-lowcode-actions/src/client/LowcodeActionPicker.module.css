@@ -1,8 +1,10 @@
 .panel {
   /* Keep the hero composer from shrinking the function row; two card rows
      remain available before the panel starts scrolling. */
+  box-sizing: border-box;
   flex: none;
-  width: min(100%, var(--dsh-chat-user-width, 904px));
+  width: calc(100% - 2 * var(--dsh-composer-side-clearance));
+  max-width: var(--dsh-composer-card-max-width);
   max-height: 216px;
   margin: 4px auto 12px;
   padding: 2px 0;
@@ -11,26 +13,25 @@
 }
 
 .list {
-  display: flex;
-  flex-wrap: wrap;
+  /* Auto-filled equal columns keep a partial final row on the left. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 12px;
-  justify-content: center;
 }
 
 .card {
   display: grid;
-  flex: 1 1 260px;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
+  width: 100%;
   min-width: 0;
-  max-width: 288px;
   min-height: 96px;
   padding: 16px 18px;
   color: var(--dsw-alias-label-primary);
   text-align: left;
   background: var(--dsw-alias-bg-layer-1);
-  border: 1px solid var(--dsw-alias-border-l4);
+  border: 0.5px solid var(--dsw-alias-border-l4);
   border-radius: 14px;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
@@ -55,6 +56,13 @@
   color: var(--dsw-alias-link);
   background: var(--dsw-alias-interactive-bg-hover);
   border-radius: 8px;
+}
+
+.iconImage {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
 .content {

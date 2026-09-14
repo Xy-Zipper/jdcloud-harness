@@ -12,9 +12,9 @@ Status: implemented
 
 `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions` 插件在空白顶层 Session 的输入框上方添加单选面板。
 
-- 认证控制器拥有 `/api/oauth/currentUser` 解析，并通过 `writableMenus()` Remote 暴露脱敏投影。它只返回至少拥有一项已识别 `addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程。
-- 点击卡片会在当前草稿开头插入一个原子引用标签。乐观本地状态会在点击帧隐藏面板；插入后，编辑器 occurrence 让面板继续隐藏。删除标签后面板恢复。
-- 标签只保存显示所需的租户 id、菜单 id 与标签。其提交 codec 会重新加载 `writableMenus()`，要求当前租户与菜单保持一致，并且只把 Host 确认的名称、路径、类型和权限序列化到已记录的用户消息中。
+- 认证控制器拥有 `/api/oauth/currentUser` 解析，并通过 `writableMenus()` Remote 暴露脱敏投影。它只返回至少拥有一项已识别 `addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程，并包含每个菜单的可选图标字符串。
+- 面板在输入卡片宽度内使用等宽网格，因此未占满的最后一行从左侧开始排列。`iconfont ...` 值使用选择器内置的 JDCloud 字体，以 `/` 开头的值使用当前认证服务地址下的自定义图片，其他值使用表单或流程默认图标。点击卡片会在当前草稿开头插入一个原子引用标签。乐观本地状态会在点击帧隐藏面板；插入后，编辑器 occurrence 让面板继续隐藏。删除标签后面板恢复。
+- 标签只保存显示所需的租户 id、菜单 id 与标签。其提交 codec 会重新加载 `writableMenus()`，要求当前租户与菜单保持一致，并把经 Host 确认的 `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` 标记序列化到已记录的用户消息中。transcript 投影会把该标记重新折叠为 `@label` 标签，模型则结合当前能力快照解析其中的菜单 id。
 - 活跃 Session、subagent Session、current-user 响应不可用或可写菜单结果为空时不显示面板。登录恢复仍由认证 UI 负责。
 - JDCloud 登录 bundle 将选择器与认证控制器、登录 UI 和低代码工具一起安装。
 
@@ -28,6 +28,6 @@ Status: implemented
 ## 后果
 
 - 新 Session 会执行一次 current-user 请求来填充面板，选中的引用会在提交期间再执行一次请求。现有 Prompt 准入与低代码能力路径保留各自的授权检查。
-- 用户只需选择一次可读功能，就能在输入框中看到一个 `@` 标签，并可通过删除该标签撤销选择。
+- 用户只需选择一次可读功能，就能在输入框和已发送 transcript 中看到同一个 `@` 标签，并可在提交前通过删除该标签撤销选择。
 - 浏览器状态永不授权操作。陈旧租户或已移除权限会使序列化在用户消息到达模型前失败，低代码 Host 工具仍会强制执行操作特定授权。
 - 仅查询菜单仍可通过普通自然语言发现和低代码能力快照使用，但不会显示为修改快捷入口。

@@ -41,6 +41,11 @@ async function startJdcloudServer(): Promise<JdcloudServer> {
   const requests: string[] = []
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://jdcloud.test')
+    if (request.method === 'GET' && url.pathname.startsWith('/api/file/previewImage/')) {
+      response.writeHead(200, { 'content-type': 'image/svg+xml' })
+      response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#3975f6"/></svg>')
+      return
+    }
     requests.push(`${request.method ?? 'GET'} ${url.pathname}`)
     const reply = (data: unknown): void => {
       response.writeHead(200, { 'content-type': 'application/json' })
@@ -66,11 +71,21 @@ async function startJdcloudServer(): Promise<JdcloudServer> {
           { id: 'folder-hr', parentId: '-1', fullName: '人事管理', type: 1 },
           {
             id: 'leave', parentId: 'folder-hr', fullName: '请假申请', type: 4,
+            icon: 'iconfont   icon-wo',
             agentPermissions: ['addData'],
           },
           {
             id: 'expense', parentId: 'folder-hr', fullName: '报账单', type: 3,
+            icon: '/api/file/previewImage/corp-ordinary/expense',
             agentPermissions: ['editData'],
+          },
+          {
+            id: 'onboarding', parentId: 'folder-hr', fullName: '入职申请', type: 4,
+            agentPermissions: ['addData'],
+          },
+          {
+            id: 'expense-copy', parentId: 'folder-hr', fullName: '报账单_复制', type: 3,
+            agentPermissions: ['addData'],
           },
           { id: 'attendance', parentId: 'folder-hr', fullName: '打卡记录', type: 3 },
           {
@@ -163,13 +178,34 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
       scaffold.workspaceCwd,
     )
     await compareOrRefreshGolden(LOWCODE_ACTIONS_EXPECTED, actionsSnapshot, MODE)
-    expect(await panel.getByRole('button').count()).toBe(2)
+    const actions = panel.getByRole('button')
+    expect(await actions.count()).toBe(4)
     expect(await panel.getByRole('button', { name: /打卡记录/ }).count()).toBe(0)
     expect(await panel.getByRole('button', { name: /数据看板/ }).count()).toBe(0)
-    const firstActionBox = await panel.getByRole('button', { name: /请假申请/ }).boundingBox()
-    expect(firstActionBox).not.toBeNull()
-    expect(firstActionBox?.width).toBeGreaterThanOrEqual(250)
-    expect(firstActionBox?.height).toBeGreaterThanOrEqual(96)
+    const [panelBox, composerBox] = await Promise.all([
+      panel.boundingBox(),
+      page.locator('[data-composer-card]').first().boundingBox(),
+    ])
+    expect(panelBox).not.toBeNull()
+    expect(composerBox).not.toBeNull()
+    expect(Math.abs((panelBox?.width ?? 0) - (composerBox?.width ?? 0))).toBeLessThanOrEqual(1)
+    const actionBoxes = await actions.evaluateAll(buttons => buttons.map((button) => {
+      const box = button.getBoundingClientRect()
+      return { x: box.x, width: box.width, height: box.height }
+    }))
+    expect(actionBoxes.every(box => Math.abs(box.width - actionBoxes[0]!.width) <= 1)).toBe(true)
+    expect(Math.abs(actionBoxes[3]!.x - actionBoxes[0]!.x)).toBeLessThanOrEqual(1)
+    expect(actionBoxes[0]!.width).toBeGreaterThanOrEqual(250)
+    expect(actionBoxes[0]!.height).toBeGreaterThanOrEqual(96)
+
+    const iconfont = panel.locator('.iconfont.icon-wo')
+    await iconfont.waitFor()
+    expect(await iconfont.evaluate(element => getComputedStyle(element).fontFamily))
+      .toContain('jdcloud-lowcode-iconfont')
+    expect(await iconfont.evaluate(element => getComputedStyle(element, '::before').content)).not.toBe('none')
+    await expect.poll(() => page.evaluate(() => document.fonts.check('20px jdcloud-lowcode-iconfont'))).toBe(true)
+    const customIcon = panel.locator(`img[src="${jdcloud.baseUrl}/api/file/previewImage/corp-ordinary/expense"]`)
+    await expect.poll(() => customIcon.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
     await panel.getByRole('button', { name: /请假申请/ }).click()
     expect(await page.getByRole('region', { name: '可用的低代码功能' }).count()).toBe(0)

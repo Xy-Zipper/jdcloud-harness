@@ -22,7 +22,7 @@
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - status:
-  - text: This turn failedAPI key is invalid
+  - text: This turn failedAPI authentication failed, or the current key cannot access the selected model
   - code: AUTH
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Commands":

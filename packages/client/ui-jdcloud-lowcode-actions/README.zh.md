@@ -31,7 +31,9 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'
 ```
 
-选择器仅在空白顶层 Session 至少存在一个可写 type `3` 表单或 type `4` 流程时显示。点击卡片会在草稿开头插入一个结构化标签，并隐藏完整选择器。删除该标签后，选择器会重新可用。
+选择器仅在空白顶层 Session 至少存在一个可写 type `3` 表单或 type `4` 流程时显示。卡片网格与输入卡片等宽，所有卡片宽度一致，未占满的最后一行从左侧开始排列。点击卡片会在草稿开头插入一个结构化标签，并隐藏完整选择器。删除该标签后，选择器会重新可用。
+
+每个菜单可以提供 `icon` 值。首个 class 为 `iconfont` 的值（例如 `iconfont icon-wo`）使用完整内置的 JDCloud iconfont。以 `/` 开头的值会相对当前认证的 JDCloud 服务地址解析，并渲染为自定义图片。缺失或不受支持的值继续使用表单或流程默认图标。
 
 本插件不接受配置字段。
 
@@ -43,7 +45,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节——点击展开</summary>
 
-浏览器通过 `jdcloudAuth.writableMenus()` 读取脱敏菜单投影。本插件拥有一个 `conversation.input.dock` 条目和一个输入引用 codec。该 dock 插入仅含当前租户 id、菜单 id 与显示标签的引用。提交期间，codec 会再次调用 Host，要求租户和菜单保持一致，并把 Host 确认的名称、路径、类型与写权限序列化到用户消息中。
+浏览器通过 `jdcloudAuth.writableMenus()` 读取脱敏菜单投影。本插件拥有一个 `conversation.input.dock` 条目和一个输入引用 codec。该 dock 插入仅含当前租户 id、菜单 id 与显示标签的引用。提交期间，codec 会再次调用 Host，要求租户和菜单保持一致，并把 Host 确认的显示标签与菜单 id 序列化为持久的 `dsh-reference` 标记。
 
 </details>
 
@@ -68,11 +70,11 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-选中的标签会向提交的用户消息添加一个插件拥有的文本块。该文本块标识 Host 确认的 `menuId`、完整名称、路径、表单或流程类型及支持的写权限，并将其中标签声明为不可信数据。仅查看选择器不会影响模型。
+选中的标签会向提交的用户消息添加一个插件拥有的 `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` 标记。transcript 会把该标记重新投影为 `@label` 标签，模型则结合当前能力快照使用其中经 Host 确认的 `menuId`。仅查看选择器不会影响模型。
 
 #### Token 影响
 
-一个所选功能会向已提交用户消息的后缀添加一个有界 JSON 对象。对象大小取决于所选功能的标签与权限列表，不取决于完整 current-user 响应。
+一个所选功能会向已提交用户消息的后缀添加一个有界引用标记。其大小只取决于所选功能的标签与菜单 id。
 
 #### KV Cache 影响
 

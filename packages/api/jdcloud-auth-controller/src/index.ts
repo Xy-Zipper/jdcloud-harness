@@ -130,7 +130,7 @@ export class JdcloudAuthController extends TypertRemoteService {
   /**
    * Read the current tenant's forms and workflows carrying a supported data-write permission.
    * @param signal - Caller cancellation combined with the configured request timeout.
-   * @returns Browser-safe menu identities, labels, paths, types, and write permissions.
+   * @returns Browser-safe menu identities, labels, paths, types, icons, and write permissions.
    */
   @Remote
   async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState> {
@@ -293,7 +293,7 @@ export class JdcloudAuthController extends TypertRemoteService {
 
   /**
    * Send one Host-only JDCloud API request with the stored login.
-   * @param request - Fixed API path, method, and optional JSON body.
+   * @param request - Fixed API path, method, and one optional JSON or multipart-file body.
    * @param signal - Caller cancellation combined with the configured request timeout.
    * @returns JDCloud response data without exposing the stored token.
    */

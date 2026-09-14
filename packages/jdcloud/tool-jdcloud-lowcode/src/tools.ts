@@ -2,10 +2,17 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {
+  FileAttachmentRef,
+  ImageAttachmentRef,
+  ImageMediaType,
+} from '@deepseek-ai/dsh-attachment'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
+import mime from 'mime-types'
 import type {
   LowcodeCapabilitySnapshot,
   LowcodeMenuCapability,
@@ -31,6 +38,60 @@ const FILTER_TYPES = ['custom', 'field', 'systemField'] as const
 const FIELD_KINDS = [
   'text', 'textarea', 'number', 'switch', 'single_select', 'multi_select', 'date', 'time',
 ] as const
+
+type FieldWriteType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'string[]'
+  | '{name:string,url:string}[]'
+  | 'object[]'
+  | '{lnglat:{lng:number,lat:number},address:string}'
+  | 'json'
+  | 'json[]'
+
+/** Fixed JDCloud component value types used by record create and update operations. */
+const COMPONENT_WRITE_TYPES: Readonly<Record<string, FieldWriteType>> = {
+  comInput: 'string',
+  textarea: 'string',
+  radio: 'string',
+  time: 'string',
+  editor: 'string',
+  editorParse: 'string',
+  billRule: 'string',
+  AssociatedData: 'string',
+  AssociatedSelect: 'string',
+  colorPicker: 'string',
+  creatorUserId: 'string',
+  lastModifyUserId: 'string',
+  numInput: 'number',
+  calculate: 'number',
+  slider: 'number',
+  rate: 'number',
+  switch: 'number',
+  date: 'number',
+  creatorTime: 'number',
+  lastModifyTime: 'number',
+  checkbox: 'string[]',
+  multipleInput: 'string[]',
+  uploadImg: '{name:string,url:string}[]',
+  uploadFz: '{name:string,url:string}[]',
+  table: 'object[]',
+  location: '{lnglat:{lng:number,lat:number},address:string}',
+}
+
+/** Components whose single- or multi-select mode is reported by the live field value kind. */
+const MODED_SELECTION_COMPONENTS = new Set(['select', 'userSelect', 'depSelect', 'roleSelect'])
+
+/** Layout-only components never own a record value. */
+const VALUELESS_COMPONENTS = new Set(['divider', 'text', 'groupTitle', 'tabs', 'card', 'row'])
+
+const IMAGE_FILE_EXTENSIONS: Readonly<Record<ImageMediaType, string>> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+}
 
 const MENU_PARAMETER = {
   menu_id: {
@@ -60,7 +121,8 @@ const DATA_PARAMETER = {
     type: 'object' as const,
     required: true as const,
     additionalProperties: true as const,
-    description: 'Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.',
+    description: 'Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; '
+      + 'single-select values are id strings and multi-select values are arrays of id strings.',
   },
 }
 
@@ -196,8 +258,62 @@ export function registerLowcodeTools(
   }))
 
   ctx.tools.register(defineTool({
+    name: 'jdcloud_lowcode_upload_file',
+    description: 'Upload one file or image already attached in this Session to JDCloud. '
+      + 'Host execution requires the target menu write permission. Use the returned name and url object inside an attachment or image-upload field only after user confirmation.',
+    parameters: {
+      ...MENU_PARAMETER,
+      write_kind: {
+        type: 'string',
+        required: true,
+        enum: ['create', 'update'] as const,
+        description: 'Whether the uploaded value will be used by a create or update operation.',
+      },
+      attachment_id: {
+        type: 'string',
+        required: true,
+        description: 'The sha256 value shown in the conversation attachment handle or its saved path.',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string', required: true },
+          url: { type: 'string', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `Untrusted JDCloud uploaded file reference:\n${JSON.stringify(value)}`,
+      }],
+    },
+    async execute(args, exec) {
+      const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
+      requirePermission(menu, args.write_kind === 'create' ? 'addData' : 'editData')
+      const ref = requireSessionAttachment(exec.agent as Agent, args.attachment_id)
+      const multipartFile = ref.type === 'image'
+        ? await imageMultipartFile(ctx, ref.attachment, exec.signal)
+        : {
+          name: ref.attachment.name,
+          mediaType: mime.lookup(ref.attachment.name) || 'application/octet-stream',
+          stream: ctx.attachments.readFileStream(ref.attachment, exec.signal),
+          bytes: ref.attachment.bytes,
+        }
+      const uploaded = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+        path: '/api/file/uploader',
+        method: 'POST',
+        multipartFile,
+      }, exec.signal)
+      return readUploadedFile(uploaded)
+    },
+    presentCall: args => present('Upload JDCloud file', 'other', args.attachment_id),
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'jdcloud_lowcode_create',
-    description: 'Create one form record or start one workflow. Host execution requires addData and rejects missing required fields from the live form definition.',
+    description: 'Create one form record or start one workflow. Host execution requires addData and rejects values that do not match the live field writeType or omit a required field.',
     parameters: { ...MENU_PARAMETER, ...AUTH_GROUP_PARAMETER, ...DATA_PARAMETER },
     output: TEXT_OUTPUT,
     async execute(args, exec) {
@@ -208,6 +324,7 @@ export function registerLowcodeTools(
         method: 'GET',
       }, exec.signal))
       requireCreateFields(args.data, fields)
+      requireFieldValueTypes(args.data, fields)
       const result = menu.type === 4
         ? await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
           path: '/api/workflow/flowTask/submit',
@@ -230,7 +347,7 @@ export function registerLowcodeTools(
 
   ctx.tools.register(defineTool({
     name: 'jdcloud_lowcode_update',
-    description: 'Update one JDCloud record. Host execution requires editData and removes empty automatic-number fields.',
+    description: 'Update one JDCloud record. Host execution requires editData, rejects values that do not match the live field writeType, and removes empty automatic-number fields.',
     parameters: { ...MENU_PARAMETER, ...RECORD_PARAMETER, ...AUTH_GROUP_PARAMETER, ...DATA_PARAMETER },
     output: TEXT_OUTPUT,
     async execute(args, exec) {
@@ -241,6 +358,7 @@ export function registerLowcodeTools(
         method: 'GET',
       }, exec.signal))
       const { data, omitted } = omitEmptyAutomaticFields(args.data, fields)
+      requireFieldValueTypes(data, fields)
       if (Object.keys(data).length === 0) {
         reject('update data contains no writable values after automatic-number protection', 'JDCLOUD_LOWCODE_EMPTY_UPDATE')
       }
@@ -442,12 +560,104 @@ function requirePermission(menu: LowcodeMenuCapability, permission: LowcodeWrite
   )
 }
 
+type SessionAttachment =
+  | { readonly type: 'image'; readonly attachment: ImageAttachmentRef }
+  | { readonly type: 'file'; readonly attachment: FileAttachmentRef }
+
+/** Resolve one full attachment id only from the calling Session's durable user blocks. */
+function requireSessionAttachment(agent: Agent, attachmentIdValue: string): SessionAttachment {
+  const attachmentId = requireText(attachmentIdValue, 'attachment_id')
+  const attachments = sessionAttachments(agent)
+  const exact = attachments.find(ref => String(ref.attachment.attachmentId) === attachmentId)
+  if (exact !== undefined) return exact
+
+  const candidate = attachmentId.startsWith('sha256:') ? attachmentId : `sha256:${attachmentId}`
+  const digest = /^sha256:([a-f0-9]{8}|[a-f0-9]{64})$/.exec(candidate)?.[1]
+  if (digest !== undefined) {
+    const prefix = `sha256:${digest}`
+    const matches = attachments.filter(ref => String(ref.attachment.attachmentId).startsWith(prefix))
+    const match = matches.length === 1 ? matches[0] : undefined
+    if (match !== undefined) return match
+    if (matches.length > 1) {
+      reject(
+        `attachment_id ${JSON.stringify(attachmentId)} matches multiple attachments in the current Session`,
+        'JDCLOUD_LOWCODE_ATTACHMENT_REQUIRED',
+      )
+    }
+  }
+  reject(
+    `attachment_id ${JSON.stringify(attachmentId)} is not a file or image in the current Session`,
+    'JDCLOUD_LOWCODE_ATTACHMENT_REQUIRED',
+  )
+}
+
+/** Collect each distinct durable user attachment available to the calling Session. */
+function sessionAttachments(agent: Agent): SessionAttachment[] {
+  const attachments = new Map<string, SessionAttachment>()
+  for (const message of agent.session.deriveMessages()) {
+    if (message.role !== 'user') continue
+    collectAttachments(message.content, attachments)
+  }
+  return [...attachments.values()]
+}
+
+/** Collect user attachments recursively without accepting a model-invented reference. */
+function collectAttachments(
+  blocks: readonly ContentBlock[],
+  attachments: Map<string, SessionAttachment>,
+): void {
+  for (const block of blocks) {
+    if (block.type === 'image') {
+      attachments.set(String(block.attachment.attachmentId), { type: 'image', attachment: block.attachment })
+    }
+    if (block.type === 'file') {
+      attachments.set(String(block.attachment.attachmentId), { type: 'file', attachment: block.attachment })
+    }
+    if (block.type === 'tool-result') {
+      collectAttachments(block.content, attachments)
+    }
+  }
+}
+
+/** Read one normalized image into the existing byte-backed multipart request. */
+async function imageMultipartFile(
+  ctx: Context,
+  ref: ImageAttachmentRef,
+  signal: AbortSignal,
+): Promise<{ readonly name: string; readonly mediaType: ImageMediaType; readonly data: Uint8Array }> {
+  const stored = await ctx.attachments.readImage(ref, signal)
+  return { name: imageFileName(ref), mediaType: ref.mediaType, data: stored.data }
+}
+
+/** Preserve a safe display name, or derive one that matches the verified image format. */
+function imageFileName(ref: ImageAttachmentRef): string {
+  if (ref.name !== undefined && ref.name.trim() !== '') return ref.name
+  const digest = String(ref.attachmentId).slice('sha256:'.length, 'sha256:'.length + 12)
+  return `image-${digest}${IMAGE_FILE_EXTENSIONS[ref.mediaType]}`
+}
+
+/** Validate the two external fields JDCloud attachment components persist. */
+function readUploadedFile(value: unknown): { readonly name: string; readonly url: string } {
+  if (!isRecord(value)) throw new Error('JDCloud file-upload response is invalid')
+  return {
+    name: requireExternalText(Reflect.get(value, 'name'), 'JDCloud uploaded file name'),
+    url: requireExternalText(Reflect.get(value, 'url'), 'JDCloud uploaded file url'),
+  }
+}
+
+/** Require one non-empty string from an external JDCloud response. */
+function requireExternalText(value: unknown, label: string): string {
+  if (typeof value !== 'string' || value.trim() === '') throw new Error(`${label} is invalid`)
+  return value.trim()
+}
+
 interface SafeField {
   readonly enCode: string
   readonly value?: string
   readonly jdcloudKey: string
   readonly fullName: string
   readonly required: boolean
+  readonly writeType?: FieldWriteType
   readonly children?: readonly SafeField[]
 }
 
@@ -468,15 +678,89 @@ function parseFields(value: unknown): SafeField[] {
     } else {
       fieldValue = requireText(rawValue, `field ${JSON.stringify(enCode)} value`)
     }
+    const writeType = fieldWriteType(jdcloudKey, fieldValue)
     return {
       enCode,
       ...fieldValue === undefined ? {} : { value: fieldValue },
       jdcloudKey,
       fullName,
       required: Reflect.get(entry, 'required') === true,
+      ...writeType === undefined ? {} : { writeType },
       ...parsedChildren === undefined ? {} : { children: parsedChildren },
     }
   })
+}
+
+/** Resolve the record-write type from the component and its live single- or multi-select mode. */
+function fieldWriteType(jdcloudKey: string, value: string | undefined): FieldWriteType | undefined {
+  if (VALUELESS_COMPONENTS.has(jdcloudKey)) return undefined
+  if (MODED_SELECTION_COMPONENTS.has(jdcloudKey)) return value === 'array' ? 'string[]' : 'string'
+  const fixed = COMPONENT_WRITE_TYPES[jdcloudKey]
+  if (fixed !== undefined) return fixed
+  if (value === 'string' || value === 'number' || value === 'boolean') return value
+  return value === 'array' ? 'json[]' : 'json'
+}
+
+/** Reject component values whose JSON types cannot be persisted by the live form fields. */
+function requireFieldValueTypes(data: Record<string, JsonValue>, fields: readonly SafeField[]): void {
+  const invalid = collectInvalidFieldValues(data, fields)
+  if (invalid.length === 0) return
+  reject(`JDCloud data has invalid field values: ${invalid.join(', ')}`, 'JDCLOUD_LOWCODE_FIELD_TYPE')
+}
+
+/** Collect readable type failures, including values inside child-table rows. */
+function collectInvalidFieldValues(
+  data: Record<string, unknown>,
+  fields: readonly SafeField[],
+  labelPrefix = '',
+  codePrefix = '',
+): string[] {
+  const invalid: string[] = []
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(data, field.enCode)) continue
+    const value = data[field.enCode]
+    const label = labelPrefix === '' ? field.fullName : `${labelPrefix}.${field.fullName}`
+    const code = codePrefix === '' ? field.enCode : `${codePrefix}.${field.enCode}`
+    if (field.writeType !== undefined && !matchesWriteType(value, field.writeType)) {
+      invalid.push(`${label} (${code}) must be ${field.writeType}`)
+      continue
+    }
+    if (field.jdcloudKey !== 'table' || field.children === undefined || !Array.isArray(value)) continue
+    const children = field.children
+    const rows = value as Record<string, unknown>[]
+    rows.forEach((row, index) => {
+      invalid.push(...collectInvalidFieldValues(
+        row,
+        children,
+        `${label}[${String(index + 1)}]`,
+        `${code}[${String(index + 1)}]`,
+      ))
+    })
+  }
+  return invalid
+}
+
+/** Test one JSON value against the model-visible JDCloud write type. */
+function matchesWriteType(value: unknown, writeType: FieldWriteType): boolean {
+  if (writeType === 'string') return typeof value === 'string'
+  if (writeType === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (writeType === 'boolean') return typeof value === 'boolean'
+  if (writeType === 'string[]') return Array.isArray(value) && value.every(item => typeof item === 'string')
+  if (writeType === 'json[]') return Array.isArray(value)
+  if (writeType === 'object[]') return Array.isArray(value) && value.every(isRecord)
+  if (writeType === '{name:string,url:string}[]') {
+    return Array.isArray(value) && value.every(item => isRecord(item)
+      && typeof Reflect.get(item, 'name') === 'string'
+      && typeof Reflect.get(item, 'url') === 'string')
+  }
+  if (writeType === '{lnglat:{lng:number,lat:number},address:string}') {
+    if (!isRecord(value) || !isRecord(Reflect.get(value, 'lnglat'))) return false
+    const lnglat = Reflect.get(value, 'lnglat') as Record<string, unknown>
+    return typeof Reflect.get(value, 'address') === 'string'
+      && typeof lnglat.lng === 'number' && Number.isFinite(lnglat.lng)
+      && typeof lnglat.lat === 'number' && Number.isFinite(lnglat.lat)
+  }
+  return true
 }
 
 /** Reject a create call when its live JDCloud field definition still has required values missing. */
@@ -526,13 +810,13 @@ function collectMissingRequiredFields(
 /** Decide whether one external JSON value satisfies the field's required-value semantics. */
 function hasRequiredValue(value: unknown, field: SafeField): boolean {
   if (value === undefined || value === null) return false
-  if (field.value === 'array') return Array.isArray(value) && value.length > 0
-  if (field.value === 'string') return typeof value === 'string' && value.trim() !== ''
-  if (field.value === 'number') return typeof value === 'number' && Number.isFinite(value)
-  if (field.value === 'boolean') return typeof value === 'boolean'
-  if (typeof value === 'string') return value.trim() !== ''
-  if (Array.isArray(value)) return value.length > 0
-  if (isRecord(value)) return Object.keys(value).length > 0
+  if (field.writeType === 'string[]' || field.writeType === 'json[]'
+    || field.writeType === 'object[]' || field.writeType === '{name:string,url:string}[]') {
+    return Array.isArray(value) && value.length > 0
+  }
+  if (field.writeType === 'string') return typeof value === 'string' && value.trim() !== ''
+  if (field.writeType === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (field.writeType === 'boolean') return typeof value === 'boolean'
   return true
 }
 

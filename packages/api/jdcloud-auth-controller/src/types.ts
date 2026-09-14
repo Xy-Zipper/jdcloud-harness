@@ -29,12 +29,44 @@ export interface JdcloudTokenLoginRequest {
   readonly token: string
 }
 
-/** One Host-only JDCloud API request that reuses the stored login. */
-export interface JdcloudAuthenticatedRequest {
+/** Common fields for one Host-only JDCloud API request. */
+interface JdcloudAuthenticatedRequestBase {
   readonly path: `/api/${string}`
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-  readonly body?: unknown
 }
+
+/** One Host-owned file body for a JDCloud multipart upload. */
+export type JdcloudMultipartFile =
+  | {
+    readonly name: string
+    readonly mediaType: string
+    readonly data: Uint8Array
+    readonly stream?: never
+    readonly bytes?: never
+  }
+  | {
+    readonly name: string
+    readonly mediaType: string
+    readonly data?: never
+    /** Exact chunks in order; the client forwards them without complete-file buffering. */
+    readonly stream: AsyncIterable<Uint8Array>
+    /** Exact file byte length used to frame the multipart request. */
+    readonly bytes: number
+  }
+
+/** One authenticated request carrying at most one JSON or multipart body. */
+export type JdcloudAuthenticatedRequest =
+  | JdcloudAuthenticatedRequestBase & {
+    /** JSON body serialized with `application/json`. */
+    readonly body?: unknown
+    readonly multipartFile?: never
+  }
+  | Omit<JdcloudAuthenticatedRequestBase, 'method'> & {
+    readonly method: 'POST'
+    readonly body?: never
+    /** One file sent as the `file` part of a multipart request. */
+    readonly multipartFile: JdcloudMultipartFile
+  }
 
 /** JDCloud low-code menu kinds exposed by the write-action picker. */
 export type JdcloudLowcodeMenuType = 3 | 4
@@ -48,6 +80,8 @@ export interface JdcloudWritableMenu {
   readonly fullName: string
   readonly path: string
   readonly type: JdcloudLowcodeMenuType
+  /** Iconfont class list or service-relative custom image path. */
+  readonly icon?: string
   readonly agentPermissions: readonly JdcloudLowcodeWritePermission[]
 }
 

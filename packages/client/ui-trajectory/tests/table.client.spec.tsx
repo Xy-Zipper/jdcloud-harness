@@ -896,7 +896,7 @@ describe('TrajectoryTable', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Request #1' }))
-    expect(screen.getByText('API key is invalid')).toBeTruthy()
+    expect(screen.getByText('API authentication failed, or the current key cannot access the selected model')).toBeTruthy()
   })
 
   it('shows the custom role tooltip only from the responsive icon', () => {

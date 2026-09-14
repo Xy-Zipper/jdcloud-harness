@@ -1,0 +1,179 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 3,
+      "createdAt": 1789108796913,
+      "cwd": "D:\\WebstormProjects\\jdcloud-harness",
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "title": {
+        "ver": 1,
+        "seq": 17,
+        "val": "Reply with exactly the word:"
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 17,
+        "val": {
+          "first": {
+            "seq": 8,
+            "text": "Reply with exactly the word: PONG. Do not use any tools."
+          },
+          "count": 1,
+          "lastSeq": 8
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 17,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 17,
+        "val": "danger-full-access"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 17,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 17,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": null
+        }
+      },
+      "contextPressure": {
+        "ver": 4,
+        "seq": 17,
+        "val": {
+          "surfaceTokens": 7630
+        }
+      },
+      "contextBreakdown": {
+        "ver": 4,
+        "seq": 17,
+        "val": {
+          "nodes": [
+            {
+              "seq": 7,
+              "heuristicTokens": 1960,
+              "system": true
+            },
+            {
+              "seq": 8,
+              "heuristicTokens": 22,
+              "system": false
+            },
+            {
+              "seq": 9,
+              "heuristicTokens": 4247,
+              "system": false
+            },
+            {
+              "seq": 10,
+              "heuristicTokens": 106,
+              "system": false
+            },
+            {
+              "seq": 11,
+              "heuristicTokens": 1295,
+              "system": false
+            }
+          ],
+          "breakdown": {
+            "systemTokens": 1960,
+            "toolsTokens": 7512,
+            "messageTokens": 5670
+          }
+        }
+      },
+      "subagentCatalog": {
+        "ver": 2,
+        "seq": 17,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 2,
+        "seq": 17,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 17,
+        "val": {}
+      },
+      "plan": {
+        "ver": 3,
+        "seq": 17,
+        "val": {
+          "active": false,
+          "wanted": null,
+          "running": null,
+          "activeAtLastHeader": false
+        }
+      },
+      "todos": {
+        "ver": 3,
+        "seq": 17,
+        "val": null
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 17,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": 6,
+          "lastStepBoundary": {
+            "kind": "end",
+            "seq": 16
+          },
+          "lastTurn": 1
+        }
+      },
+      "subagentModelSelectionPolicy": {
+        "ver": 1,
+        "seq": 17,
+        "val": null
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 17,
+        "val": {
+          "preset": "danger-full-access",
+          "sandbox": "danger-full-access",
+          "approval": "never",
+          "seeded": false
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 17,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      }
+    }
+  }
+}

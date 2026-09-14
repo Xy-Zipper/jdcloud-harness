@@ -36,9 +36,9 @@ Before Session Controller changes a Session model, the controller reads the stor
 
 The browser can read `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }` for an authenticated login; the token never crosses the Remote wire. Version-3 records are upgraded once through `currentUser` before use. `logout()` deletes the complete credential record. Passwords exist only for the duration of the login call and are never stored by this package.
 
-The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and receive only the current tenant id plus type `3` forms and type `4` workflows that carry at least one recognized `addData`, `editData`, or `deleteData` grant. Each returned menu contains its id, name, resolved parent path, type, and recognized write grants. The method uses the stored Host login and never returns profile fields, the service address, or the Token.
+The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and receive only the current tenant id plus type `3` forms and type `4` workflows that carry at least one recognized `addData`, `editData`, or `deleteData` grant. Each returned menu contains its id, name, resolved parent path, type, optional icon string, and recognized write grants. The method uses the stored Host login and never returns profile fields, the service address, or the Token.
 
-Host plugins can call `requestAuthenticated({ path, method, body? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests; `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
+Host plugins can call `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests, or one `POST` multipart file under the `file` field; a multipart file can carry Host-owned bytes or an exact-length asynchronous byte stream, which the controller forwards without complete-file buffering. JSON and multipart bodies are mutually exclusive, and `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
 
 <a id="configuration"></a>
 ## Configuration
@@ -61,7 +61,7 @@ None; accepted requests are unchanged, and rejected requests never reach prompt 
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- `requestAuthenticated()` is Host-only and supports JSON request bodies; it is not a browser proxy or a multipart upload client.
+- `requestAuthenticated()` is Host-only and accepts JSON or one multipart `file` part; it is not a browser proxy or a general-purpose multipart client.
 - A transferred service address is unrestricted after HTTP(S) URL validation, so a link can direct the Host to disclose its supplied Token to an arbitrary server and request private-network addresses.
 - The inherited JDCloud login protocol uses MD5 because the upstream endpoint requires that wire behavior; it is not a password-storage scheme.
 - Stored logins are Host-wide for this controller instance rather than browser-user scoped.

@@ -1,5 +1,5 @@
-// Keyless Web-profile coverage for current-account form selections: the Host
-// resolves current user, department, and role names before the first model call.
+// Keyless Web-profile coverage for current-account and tenant-department form
+// selections: the Host resolves both sources before the first model call.
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -40,12 +40,12 @@ interface JdcloudFixtureServer {
 
 /** Read one request JSON body after Node has received every chunk. */
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  const chunks: Uint8Array[] = []
+  for await (const chunk of request as AsyncIterable<Uint8Array>) chunks.push(chunk)
   return chunks.length === 0 ? undefined : JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
 }
 
-/** Start deterministic JDCloud endpoints for login, prompt admission, and member resolution. */
+/** Start deterministic JDCloud endpoints for login, prompt admission, and selection resolution. */
 async function startJdcloudServer(): Promise<JdcloudFixtureServer> {
   const requests: RecordedRequest[] = []
   const server = createServer((request, response) => {
@@ -97,6 +97,21 @@ async function startJdcloudServer(): Promise<JdcloudFixtureServer> {
           role: [{ id: 'role-1', fullName: '普通员工' }],
           user: [{ id: 'user-1', fullName: '测试用户', phone: '18100000000' }],
         })
+        return
+      }
+      if (method === 'GET' && url.pathname === '/api/system/permission/organize/selector') {
+        reply([{
+          id: 'tenant-root',
+          parentId: '-1',
+          hasChildren: true,
+          fullName: '测试租户',
+          children: [{
+            id: 'department-it',
+            parentId: 'tenant-root',
+            hasChildren: false,
+            fullName: 'IT部门',
+          }],
+        }])
         return
       }
       response.writeHead(404)
@@ -154,11 +169,14 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
 
   afterAll(async () => {
     const failures: unknown[] = []
-    await scaffold?.close().catch((error: unknown) => failures.push(error))
+    await scaffold?.close().catch((error: unknown) => { failures.push(error) })
     if (jdcloud !== undefined) {
       await new Promise<void>((resolve, reject) => {
-        jdcloud.server.close(error => error === undefined ? resolve() : reject(error))
-      }).catch((error: unknown) => failures.push(error))
+        jdcloud.server.close((error) => {
+          if (error === undefined) resolve()
+          else reject(error)
+        })
+      }).catch((error: unknown) => { failures.push(error) })
     }
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'JDCloud current-member teardown failed')
@@ -182,6 +200,7 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
         path: '/api/system/permission/users/getMemberName',
         body: ['user-1', 'department-1', 'role-1'],
       },
+      { method: 'GET', path: '/api/system/permission/organize/selector' },
     ])
     const pluginMessage = sessionEvents.find((event): event is Extract<SessionEvent, { type: 'user/message' }> => (
       event.type === 'user/message'
@@ -198,12 +217,17 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
         role: [{ id: 'role-1', fullName: '普通员工' }],
         user: [{ id: 'user-1', fullName: '测试用户', phone: '18100000000' }],
       },
+      tenantDepartments: [
+        { id: 'tenant-root', fullName: '测试租户', path: '测试租户' },
+        { id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' },
+      ],
     })
     if (settledSessionId === undefined) throw new Error('JDCloud current-member turn did not settle')
     const agent = scaffold.ctx.agents.get(settledSessionId)
     if (agent === undefined) throw new Error('JDCloud current-member Agent is not live')
     expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('研发部'))).toBe(true)
     expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('测试用户'))).toBe(true)
+    expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('IT部门'))).toBe(true)
     const answer = sessionEvents.find(event => event.type === 'assistant/message')
     expect(answer?.type === 'assistant/message'
       ? answer.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')

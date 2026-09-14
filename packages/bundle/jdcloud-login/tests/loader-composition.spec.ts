@@ -87,6 +87,7 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
 
   ctx = new Context()
   ctx.baseUrl = pathToFileURL(directory).href + '/'
+  ctx.provide('attachments', { readImage: () => Promise.reject(new Error('unused')) } as never)
   // The optional UI Host half owns `/login/transfer`; this composition needs only its route registry contract.
   ctx.provide('webServer', { register: () => () => {} } as never)
   await ctx.plugin(Loader)
@@ -152,6 +153,7 @@ describe('JDCloud login through a real Loader composition', () => {
       'jdcloud_lowcode_describe',
       'jdcloud_lowcode_query',
       'jdcloud_lowcode_get',
+      'jdcloud_lowcode_upload_file',
       'jdcloud_lowcode_create',
       'jdcloud_lowcode_update',
       'jdcloud_lowcode_delete',
@@ -202,6 +204,19 @@ describe('JDCloud login through a real Loader composition', () => {
             role: [],
             user: [{ id: 'user-1', fullName: '测试用户', phone: '13800000000' }],
           }))
+        case '/api/system/permission/organize/selector':
+          return Promise.resolve(json([{
+            id: 'tenant-root',
+            parentId: '-1',
+            hasChildren: true,
+            fullName: '测试租户',
+            children: [{
+              id: 'department-it',
+              parentId: 'tenant-root',
+              hasChildren: false,
+              fullName: 'IT部门',
+            }],
+          }]))
         default:
           throw new Error(`unexpected JDCloud request: ${url.pathname}`)
       }
@@ -238,6 +253,7 @@ describe('JDCloud login through a real Loader composition', () => {
       '/api/oauth/currentUser',
       '/api/oauth/currentUser',
       '/api/system/permission/users/getMemberName',
+      '/api/system/permission/organize/selector',
     ])
     expect(decision).toMatchObject({
       kind: 'enter',
@@ -249,6 +265,7 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(JSON.stringify(decision)).toContain('form-1')
     expect(JSON.stringify(decision)).toContain('测试用户')
     expect(JSON.stringify(decision)).toContain('研发部')
+    expect(JSON.stringify(decision)).toContain('测试租户 / IT部门')
     expect(JSON.stringify(decision)).not.toContain('board-1')
   })
 })

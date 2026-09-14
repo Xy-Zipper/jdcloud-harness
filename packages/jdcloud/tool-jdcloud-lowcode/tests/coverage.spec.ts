@@ -23,9 +23,7 @@ afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
 })
 
-interface RecordedRequest extends JdcloudAuthenticatedRequest {
-  readonly body?: unknown
-}
+type RecordedRequest = JdcloudAuthenticatedRequest
 
 type RequestResponder = (request: RecordedRequest, index: number) => unknown
 
@@ -49,6 +47,7 @@ const SNAPSHOT: LowcodeCapabilitySnapshot = {
     role: [],
     user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
   },
+  tenantDepartments: [],
   menus: [
     {
       menuId: 'form-1',
@@ -124,6 +123,7 @@ async function services(options: {
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
+  ctx.provide('attachments', { readImage: vi.fn() } as never)
 
   let statusValue: JdcloudAuthStatus = AUTHENTICATED
   let responder: RequestResponder = options.response ?? (() => ({ ok: true }))
@@ -233,7 +233,7 @@ describe('plugin configuration and prompt branches', () => {
   it('resolves omitted limits and rejects each unsafe or non-positive direct configuration', async () => {
     const mounted = await services()
     const fiber = await mounted.ctx.plugin(LowcodePlugin, {})
-    expect(mounted.ctx.tools.schemas()).toHaveLength(7)
+    expect(mounted.ctx.tools.schemas()).toHaveLength(8)
     await fiber.dispose()
 
     for (const maxPageSize of [0, 1.5]) {
@@ -351,6 +351,23 @@ describe('schemas, presenters, describe, and exact reads', () => {
         fullName: 'Attachments',
         required: false,
       },
+      {
+        enCode: 'department',
+        value: 'array',
+        jdcloudKey: 'depSelect',
+        fullName: 'Department',
+        required: false,
+      },
+      {
+        enCode: 'owner',
+        value: 'string',
+        jdcloudKey: 'userSelect',
+        fullName: 'Owner',
+        required: false,
+      },
+      { enCode: 'customText', value: 'string', jdcloudKey: 'custom', fullName: 'Custom text' },
+      { enCode: 'customFlag', value: 'boolean', jdcloudKey: 'custom', fullName: 'Custom flag' },
+      { enCode: 'customItems', value: 'array', jdcloudKey: 'custom', fullName: 'Custom items' },
     ]
     const mounted = await toolHarness({
       response: request => request.path.includes('/fields/') ? fields : { row: 'record-1' },
@@ -368,6 +385,13 @@ describe('schemas, presenters, describe, and exact reads', () => {
       ['jdcloud_lowcode_describe', { menu_id: 'form-1' }, 'Describe JDCloud function', 'read', 'form-1'],
       ['jdcloud_lowcode_query', { menu_id: 'form-1' }, 'Query JDCloud data', 'read', 'form-1'],
       ['jdcloud_lowcode_get', { menu_id: 'form-1', record_id: 'row-1' }, 'Read JDCloud record', 'read', 'row-1'],
+      [
+        'jdcloud_lowcode_upload_file',
+        { menu_id: 'form-1', write_kind: 'create', attachment_id: `sha256:${'1'.repeat(64)}` },
+        'Upload JDCloud file',
+        'other',
+        `sha256:${'1'.repeat(64)}`,
+      ],
       ['jdcloud_lowcode_create', { menu_id: 'form-1', data: {} }, 'Create JDCloud data', 'other', 'form-1'],
       [
         'jdcloud_lowcode_update',
@@ -399,6 +423,12 @@ describe('schemas, presenters, describe, and exact reads', () => {
     expect(described.isError).toBe(false)
     expect(resultText(described)).toContain('"required":true')
     expect(resultText(described)).toContain('"fullName":"Attachments","required":false')
+    expect(resultText(described)).toContain('"writeType":"{name:string,url:string}[]"')
+    expect(resultText(described)).toContain('"fullName":"Department","required":false,"writeType":"string[]"')
+    expect(resultText(described)).toContain('"fullName":"Owner","required":false,"writeType":"string"')
+    expect(resultText(described)).toContain('"fullName":"Custom text","required":false,"writeType":"string"')
+    expect(resultText(described)).toContain('"fullName":"Custom flag","required":false,"writeType":"boolean"')
+    expect(resultText(described)).toContain('"fullName":"Custom items","required":false,"writeType":"json[]"')
     expect(resultText(described)).toContain('"children"')
     expect(resultText(described)).not.toContain('privateValue')
 
@@ -550,6 +580,83 @@ describe('query validation, defaults, and bounded rendering', () => {
 })
 
 describe('write-tool failures and table partial completion', () => {
+  it.each([
+    ['jdcloud_lowcode_create', { menu_id: 'form-1', data: {
+      department: [{ id: 'department-1', fullName: 'Engineering' }],
+      role: [{ id: 'role-1', fullName: 'Developer' }],
+      owner: ['user-1'],
+    } }],
+    ['jdcloud_lowcode_update', { menu_id: 'form-1', record_id: 'row-1', data: {
+      department: [{ id: 'department-1', fullName: 'Engineering' }],
+      role: [{ id: 'role-1', fullName: 'Developer' }],
+      owner: ['user-1'],
+    } }],
+  ])('rejects expanded selection objects before %s modifies data', async (name, args) => {
+    const fields = [
+      { enCode: 'department', value: 'array', jdcloudKey: 'depSelect', fullName: 'Department' },
+      { enCode: 'role', value: 'array', jdcloudKey: 'roleSelect', fullName: 'Role' },
+      { enCode: 'owner', value: 'string', jdcloudKey: 'userSelect', fullName: 'Owner' },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/') ? fields : { ok: true },
+    })
+
+    const result = await mounted.call(name, args)
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(result)).toContain('Department (department) must be string[]')
+    expect(resultText(result)).toContain('Role (role) must be string[]')
+    expect(resultText(result)).toContain('Owner (owner) must be string')
+    expect(mounted.requests.map(request => request.path))
+      .toEqual(['/api/visualdev/base/fields/form-1'])
+  })
+
+  it('rejects scalar, generic, attachment, table, and location values with the wrong component types', async () => {
+    const fields = [
+      { enCode: 'title', value: 'string', jdcloudKey: 'comInput', fullName: 'Title' },
+      { enCode: 'amount', value: 'number', jdcloudKey: 'numInput', fullName: 'Amount' },
+      { enCode: 'enabled', value: 'number', jdcloudKey: 'switch', fullName: 'Enabled' },
+      { enCode: 'tags', value: 'array', jdcloudKey: 'checkbox', fullName: 'Tags' },
+      { enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files' },
+      { enCode: 'details', value: 'array', jdcloudKey: 'table', fullName: 'Details', children: [] },
+      { enCode: 'place', value: 'object', jdcloudKey: 'location', fullName: 'Place' },
+      { enCode: 'customFlag', value: 'boolean', jdcloudKey: 'custom', fullName: 'Custom flag' },
+      { enCode: 'customItems', value: 'array', jdcloudKey: 'custom', fullName: 'Custom items' },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/') ? fields : { ok: true },
+    })
+
+    const result = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: {
+        title: 1,
+        amount: '1',
+        enabled: true,
+        tags: [{ id: 'tag-1' }],
+        files: ['file-1'],
+        details: ['row-1'],
+        place: { address: 'Office', lnglat: { lng: '1', lat: 2 } },
+        customFlag: 'true',
+        customItems: 'item-1',
+      },
+    })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(result)).toContain('Title (title) must be string')
+    expect(resultText(result)).toContain('Amount (amount) must be number')
+    expect(resultText(result)).toContain('Enabled (enabled) must be number')
+    expect(resultText(result)).toContain('Tags (tags) must be string[]')
+    expect(resultText(result)).toContain('Files (files) must be {name:string,url:string}[]')
+    expect(resultText(result)).toContain('Details (details) must be object[]')
+    expect(resultText(result)).toContain('Place (place) must be {lnglat:{lng:number,lat:number},address:string}')
+    expect(resultText(result)).toContain('Custom flag (customFlag) must be boolean')
+    expect(resultText(result)).toContain('Custom items (customItems) must be json[]')
+    expect(mounted.requests.map(request => request.path))
+      .toEqual(['/api/visualdev/base/fields/form-1'])
+  })
+
   it('validates every supported required-value kind before creating a record', async () => {
     const fields = [
       { enCode: 'missing', value: 'string', jdcloudKey: 'comInput', fullName: 'Missing', required: true },
@@ -588,8 +695,8 @@ describe('write-tool failures and table partial completion', () => {
       data: {
         nullValue: null,
         title: ' ',
-        amount: '1',
-        approved: 'true',
+        amount: 1,
+        approved: 0,
         selection: [],
         customText: ' ',
         customList: [],
@@ -612,11 +719,11 @@ describe('write-tool failures and table partial completion', () => {
         nullValue: 'provided',
         title: 'Expense',
         amount: 1,
-        approved: false,
-        selection: [{ id: 'user-1' }],
+        approved: 0,
+        selection: ['user-1'],
         customText: 'provided',
         customList: ['provided'],
-        customObject: { id: 'object-1' },
+        customObject: 'provided',
         customScalar: 1,
         missingDetails: [{ line: 'provided' }],
         emptyDetails: [{ line: 'provided' }],

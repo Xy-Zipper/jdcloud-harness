@@ -31,7 +31,9 @@ Mount this plugin beside the JDCloud authentication controller, Session Controll
 - name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'
 ```
 
-The picker appears only for a blank top-level Session with at least one writable type `3` form or type `4` workflow. Clicking a card inserts one structured tag at the beginning of the draft and hides the complete picker. Removing that tag makes the picker available again.
+The picker appears only for a blank top-level Session with at least one writable type `3` form or type `4` workflow. Its card grid matches the composer card width, keeps every card the same width, and starts an incomplete final row at the left. Clicking a card inserts one structured tag at the beginning of the draft and hides the complete picker. Removing that tag makes the picker available again.
+
+Each menu may provide an `icon` value. A value whose first class is `iconfont`, such as `iconfont icon-wo`, uses the complete bundled JDCloud icon font. A value beginning with `/` is resolved against the authenticated JDCloud service address and rendered as a custom image. Missing and unsupported values retain the form or workflow fallback icon.
 
 This plugin accepts no configuration fields.
 
@@ -43,7 +45,7 @@ This plugin accepts no configuration fields.
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The browser reads a redacted menu projection through `jdcloudAuth.writableMenus()`. The plugin owns one `conversation.input.dock` entry and one input-reference codec. The dock inserts a reference containing only the current tenant id, menu id, and display label. The codec calls the Host again during submission, requires the same tenant and menu, and serializes the Host-confirmed name, path, type, and write permissions into the user message.
+The browser reads a redacted menu projection through `jdcloudAuth.writableMenus()`. The plugin owns one `conversation.input.dock` entry and one input-reference codec. The dock inserts a reference containing only the current tenant id, menu id, and display label. The codec calls the Host again during submission, requires the same tenant and menu, and serializes a durable `dsh-reference` marker containing the Host-confirmed display label and menu id.
 
 </details>
 
@@ -68,11 +70,11 @@ These pages cover the Host authorization source, structured tags, and the low-co
 
 #### What the model sees
 
-A selected tag adds one plugin-owned text block to the submitted user message. The block identifies the Host-confirmed `menuId`, full name, path, form or workflow type, and supported write permissions, and marks its labels as untrusted data. Merely viewing the picker has no model effect.
+A selected tag adds one plugin-owned `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` marker to the submitted user message. The transcript projects that marker back to an `@label` tag, while the model uses its Host-confirmed `menuId` with the current capability snapshot. Merely viewing the picker has no model effect.
 
 #### Token effect
 
-One selected function adds one bounded JSON object to the submitted user-message suffix. The object size depends on the selected function's labels and permission list, not on the complete current-user response.
+One selected function adds one bounded reference marker to the submitted user-message suffix. Its size depends only on the selected function's label and menu id.
 
 #### KV Cache effect
 

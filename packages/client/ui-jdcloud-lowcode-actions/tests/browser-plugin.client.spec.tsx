@@ -2,7 +2,10 @@
 /** Real client-plugin registration and card interaction coverage. */
 
 import { Context } from '@deepseek-ai/cordis'
-import type { JdcloudWritableMenu } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
+import type {
+  JdcloudAuthStatus,
+  JdcloudWritableMenu,
+} from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -35,6 +38,22 @@ const MENUS: readonly JdcloudWritableMenu[] = [
     type: 3,
     agentPermissions: ['editData', 'deleteData'],
   },
+  {
+    menuId: 'profile',
+    fullName: '个人资料',
+    path: '系统 / 个人资料',
+    type: 4,
+    icon: 'iconfont   icon-wo',
+    agentPermissions: ['editData'],
+  },
+  {
+    menuId: 'receipt',
+    fullName: '报账单',
+    path: '财务 / 报账单',
+    type: 3,
+    icon: '/api/file/previewImage/corp-current/receipt',
+    agentPermissions: ['addData'],
+  },
 ]
 
 /** Assemble the plugin over controllable Remote and input-source faces. */
@@ -50,9 +69,21 @@ async function bench() {
     ok: true as const,
     value: { corpId: 'corp-current', menus: MENUS },
   }))
+  const status = vi.fn<() => Promise<{ ok: true; value: JdcloudAuthStatus }>>(() => Promise.resolve({
+    ok: true as const,
+    value: {
+      authenticated: true as const,
+      baseUrl: 'https://mi.kindoucloud.com',
+      username: 'user',
+      corpId: 'corp-current',
+      corpName: 'Current Tenant',
+      corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
+      systemAdministrator: false,
+    },
+  }))
   let credentialListener: ((key: string) => void) | undefined
   ctx.provide('remote', {
-    jdcloudAuth: { writableMenus },
+    jdcloudAuth: { status, writableMenus },
     $on: vi.fn((event: string, listener: (key: string) => void) => {
       if (event === 'credentials/record-updated') credentialListener = listener
       return () => {
@@ -60,7 +91,7 @@ async function bench() {
       }
     }),
   } as never)
-  ctx.provide('remote.jdcloudAuth', { writableMenus } as never)
+  ctx.provide('remote.jdcloudAuth', { status, writableMenus } as never)
   let source: InputTriggerSource | undefined
   ctx.provide('inputTriggers', {
     registerSource(next: InputTriggerSource) {
@@ -85,11 +116,12 @@ async function bench() {
     'session-1' as SessionId,
   )
   await vi.waitFor(() => { expect(writableMenus).toHaveBeenCalledTimes(2) })
-  expect(injected.hooks.writableMenus.getSnapshot().phase).toBe('ready')
+  await vi.waitFor(() => { expect(injected.hooks.writableMenus.getSnapshot().phase).toBe('ready') })
   return {
     ctx,
     fiber,
     writableMenus,
+    status,
     injected,
     source: () => source,
     inserted: () => inserted,
@@ -123,13 +155,7 @@ describe('JDCloud low-code action browser plugin', () => {
     const reference = b.inserted()?.reference
     if (reference === undefined) throw new Error('selection did not insert a reference')
     await expect(b.source()?.codec?.serialize(reference.ref, AbortSignal.timeout(1000)))
-      .resolves.toContain(JSON.stringify({
-        menuId: 'leave',
-        fullName: '请假申请',
-        path: '人事管理 / 请假申请',
-        type: 'workflow',
-        agentPermissions: ['addData'],
-      }))
+      .resolves.toBe('@[请假申请](dsh-reference:jdcloud-lowcode-function/leave)')
     expect(b.writableMenus).toHaveBeenCalledTimes(3)
 
     b.writableMenus.mockResolvedValueOnce({
@@ -150,6 +176,33 @@ describe('JDCloud low-code action browser plugin', () => {
     await vi.waitFor(() => { expect(b.writableMenus).toHaveBeenCalledTimes(3) })
     await b.fiber.dispose()
   })
+
+  it('requires an authenticated matching status before publishing the menu projection', async () => {
+    const b = await bench()
+    b.status.mockResolvedValueOnce({
+      ok: true,
+      value: { authenticated: false, baseUrl: 'https://mi.kindoucloud.com' },
+    })
+    b.emitCredential('jdcloud-auth-controller/login')
+    await vi.waitFor(() => { expect(b.injected.hooks.writableMenus.getSnapshot().phase).toBe('error') })
+
+    b.status.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        authenticated: true,
+        baseUrl: 'https://mi.kindoucloud.com',
+        username: 'user',
+        corpId: 'corp-next',
+        corpName: 'Next Tenant',
+        corps: [{ corpId: 'corp-next', corpName: 'Next Tenant' }],
+        systemAdministrator: false,
+      },
+    })
+    b.emitCredential('jdcloud-auth-controller/login')
+    await vi.waitFor(() => { expect(b.status).toHaveBeenCalledTimes(4) })
+    await vi.waitFor(() => { expect(b.injected.hooks.writableMenus.getSnapshot().phase).toBe('error') })
+    await b.fiber.dispose()
+  })
 })
 
 describe('LowcodeActionPicker', () => {
@@ -166,7 +219,7 @@ describe('LowcodeActionPicker', () => {
 
   it('hides immediately after selection and returns when the tag is removed', () => {
     const store = createSnapshotStore<WritableMenuState>({
-      phase: 'ready', corpId: 'corp-current', menus: MENUS,
+      phase: 'ready', corpId: 'corp-current', baseUrl: 'https://mi.kindoucloud.com', menus: MENUS,
     })
     const selectMenu = vi.fn(() => true)
     const props = {
@@ -192,9 +245,29 @@ describe('LowcodeActionPicker', () => {
     expect(view.getByLabelText('可用的低代码功能')).toBeTruthy()
   })
 
+  it('renders iconfont classes, service-relative images, and type fallbacks', () => {
+    const store = createSnapshotStore<WritableMenuState>({
+      phase: 'ready', corpId: 'corp-current', baseUrl: 'https://mi.kindoucloud.com', menus: MENUS,
+    })
+    const view = render(<LowcodeActionPicker {...{
+      sessionId: 'session-1' as SessionId,
+      session,
+      input,
+      useWritableMenus: (selector: (state: WritableMenuState) => unknown) => selector(store.getSnapshot()),
+      selectMenu: vi.fn(() => true),
+      t,
+    } as unknown as Parameters<typeof LowcodeActionPicker>[0]} />)
+
+    expect(view.container.querySelector('.iconfont.icon-wo')).not.toBeNull()
+    expect(view.container.querySelector('img')?.getAttribute('src'))
+      .toBe('https://mi.kindoucloud.com/api/file/previewImage/corp-current/receipt')
+    expect(view.getByRole('button', { name: /请假申请/ }).querySelector('svg')).not.toBeNull()
+    expect(view.getByRole('button', { name: /打卡记录/ }).querySelector('svg')).not.toBeNull()
+  })
+
   it('does not render for an active Session or an empty writable-menu list', () => {
     const readyEmpty = createSnapshotStore<WritableMenuState>({
-      phase: 'ready', corpId: 'corp-current', menus: [],
+      phase: 'ready', corpId: 'corp-current', baseUrl: 'https://mi.kindoucloud.com', menus: [],
     })
     const base = {
       sessionId: 'session-1' as SessionId,
@@ -207,7 +280,7 @@ describe('LowcodeActionPicker', () => {
       ...base,
       session: { ...session, promptAttempted: true },
       useWritableMenus: (selector: (state: WritableMenuState) => unknown) => selector({
-        phase: 'ready', corpId: 'corp-current', menus: MENUS,
+        phase: 'ready', corpId: 'corp-current', baseUrl: 'https://mi.kindoucloud.com', menus: MENUS,
       }),
     } as unknown as Parameters<typeof LowcodeActionPicker>[0]} />)
     expect(active.container.firstChild).toBeNull()

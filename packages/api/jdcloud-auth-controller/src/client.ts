@@ -1,12 +1,13 @@
 /** Minimal JDCloud HTTP client for password login and tenant selection. */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type {
   JdcloudAuthenticatedRequest,
   JdcloudCorp,
   JdcloudLowcodeCapabilityState,
   JdcloudLowcodeMenuType,
   JdcloudLowcodeWritePermission,
+  JdcloudMultipartFile,
   JdcloudWritableMenu,
   JdcloudWritableMenuState,
 } from './types.ts'
@@ -49,6 +50,7 @@ interface JdcloudMenuNode {
   readonly parentId: string | undefined
   readonly fullName: string
   readonly type: number
+  readonly icon: string | undefined
   readonly permissions: readonly JdcloudLowcodeWritePermission[]
 }
 
@@ -196,7 +198,7 @@ export class JdcloudClient {
   /**
    * Send one authenticated request to a fixed JDCloud API path.
    * @param token - Raw JDCloud authorization header value.
-   * @param request - API path, method, and optional JSON body.
+   * @param request - API path, method, and one optional JSON or multipart-file body.
    * @param signal - Request cancellation signal.
    * @returns JDCloud response data.
    */
@@ -207,12 +209,25 @@ export class JdcloudClient {
   ): Promise<T> {
     const url = this.resolveApiUrl(request.path)
     const headers: Record<string, string> = { authorization: token }
-    const init: RequestInit = { method: request.method, headers, signal }
+    const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers, signal }
     if (request.method === 'GET') {
       url.searchParams.set('n', String(Date.now()))
       init.cache = 'no-store'
     }
-    if (request.body !== undefined) {
+    if (request.multipartFile !== undefined) {
+      if (request.multipartFile.data !== undefined) {
+        const form = new FormData()
+        const bytes = Uint8Array.from(request.multipartFile.data)
+        form.append('file', new Blob([bytes], { type: request.multipartFile.mediaType }), request.multipartFile.name)
+        init.body = form
+      } else {
+        const multipart = createStreamingMultipart(request.multipartFile)
+        headers['content-type'] = `multipart/form-data; boundary=${multipart.boundary}`
+        headers['content-length'] = String(multipart.bytes)
+        init.body = multipart.body
+        init.duplex = 'half'
+      }
+    } else if (request.body !== undefined) {
       headers['content-type'] = 'application/json'
       init.body = JSON.stringify(request.body)
     }
@@ -254,6 +269,66 @@ export class JdcloudClient {
   }
 }
 
+interface StreamingMultipartBody {
+  readonly boundary: string
+  readonly bytes: number
+  readonly body: ReadableStream<Uint8Array>
+}
+
+/** Frame one exact-length file stream as the single `file` multipart part JDCloud accepts. */
+function createStreamingMultipart(
+  file: Extract<JdcloudMultipartFile, { readonly stream: AsyncIterable<Uint8Array> }>,
+): StreamingMultipartBody {
+  const boundary = `dsh-${randomUUID()}`
+  const encoder = new TextEncoder()
+  const prefix = encoder.encode(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${escapeMultipartFilename(file.name)}"\r\n`
+    + `Content-Type: ${file.mediaType}\r\n\r\n`,
+  )
+  const suffix = encoder.encode(`\r\n--${boundary}--\r\n`)
+  const chunks = multipartChunks(prefix, file.stream, suffix)
+  return {
+    boundary,
+    bytes: prefix.byteLength + file.bytes + suffix.byteLength,
+    body: readableStreamFrom(chunks),
+  }
+}
+
+/** Prevent one display filename from adding multipart header fields. */
+function escapeMultipartFilename(value: string): string {
+  return value.replace(/[\r\n]/g, '_').replace(/["\\]/g, '\\$&')
+}
+
+/** Yield multipart framing around the caller-owned bounded file chunks. */
+async function* multipartChunks(
+  prefix: Uint8Array,
+  file: AsyncIterable<Uint8Array>,
+  suffix: Uint8Array,
+): AsyncIterable<Uint8Array> {
+  yield prefix
+  yield* file
+  yield suffix
+}
+
+/** Adapt an async byte iterator to the Fetch request-body stream contract. */
+function readableStreamFrom(chunks: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+  const iterator = chunks[Symbol.asyncIterator]()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await iterator.next()
+        if (next.done) controller.close()
+        else controller.enqueue(next.value)
+      } catch (error) {
+        controller.error(error)
+      }
+    },
+    async cancel() {
+      await iterator.return?.()
+    },
+  })
+}
+
 /**
  * Parse the Host low-code capability projection from `/api/oauth/currentUser`.
  * @param value - Unwrapped JDCloud current-user response data.
@@ -280,6 +355,7 @@ export function readJdcloudLowcodeCapabilities(value: unknown): JdcloudLowcodeCa
       fullName: node.fullName,
       path: resolveMenuPath(node, byId),
       type: node.type,
+      ...(node.icon === undefined ? {} : { icon: node.icon }),
       agentPermissions: node.permissions,
     }))
   return { systemAdministrator, menus }
@@ -333,6 +409,9 @@ function collectMenuNodes(menuList: readonly unknown[]): JdcloudMenuNode[] {
       parentId,
       fullName,
       type,
+      icon: type === 3 || type === 4
+        ? readOptionalMenuIcon(Reflect.get(menu, 'icon'), id)
+        : undefined,
       permissions: readWritePermissions(Reflect.get(menu, 'agentPermissions')),
     })
     const children = Reflect.get(menu, 'children')
@@ -364,6 +443,15 @@ function resolveMenuPath(
     parentId = parent.parentId
   }
   return names.join(' / ')
+}
+
+/** Read one optional menu icon string from the external current-user response. */
+function readOptionalMenuIcon(value: unknown, menuId: string): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`JDCloud menu ${JSON.stringify(menuId)} icon is invalid`)
+  }
+  return value.trim()
 }
 
 /** Keep only the three data-write permissions supported by the low-code tools. */

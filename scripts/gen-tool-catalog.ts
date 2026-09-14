@@ -401,19 +401,22 @@ const TOOL_PACKAGES: ToolPackage[] = [
     requires: [
       'ctx.tools',
       'ctx.agents',
+      'ctx.attachments',
       'ctx.jdcloudAuthController',
       'ctx.sessionProjections',
       'ctx.systemPrompt',
       'an admitted browser prompt for current-Turn capability authority',
     ],
-    writes: ['user/message capability snapshot', 'tool/call', 'tool/result', 'authorized JDCloud data mutations'],
+    writes: ['user/message capability snapshot', 'tool/call', 'authenticated JDCloud file upload', 'tool/result', 'authorized JDCloud data mutations'],
     async mount(ctx) {
       await ctx.plugin(AgentRegistry)
+      // The upload schema requires the attachment service, but catalog harvest never reads bytes.
+      await ctx.plugin(CatalogAttachmentStore)
       await ctx.plugin(CatalogJdcloudAuthController)
       await ctx.plugin(ToolJdcloudLowcode)
     },
     note:
-      'The seven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, write-grant, and administrator authority before requests. The schema harvest mounts an inert authentication service because no tool executes.',
+      'The eight tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-schedule',

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-10-jdcloud-writable-function-picker.md
-2026-09-10-jdcloud-writable-function-picker.md: 094103bfa3f4f15fd62dd8527423bb27ca69687d
-2026-09-10-jdcloud-writable-function-picker.zh.md: 4ea2b9652f2889311bdeed95fb1277555a1614df
+2026-09-10-jdcloud-writable-function-picker.md: 3124c4e7ab5734fb2b5fca93688a1b6295ad30d7
+2026-09-10-jdcloud-writable-function-picker.zh.md: 4554cb5f4e76022483c3b286b5074a455a45e01f

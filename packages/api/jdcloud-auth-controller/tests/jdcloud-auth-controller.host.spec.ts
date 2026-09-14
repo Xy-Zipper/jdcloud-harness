@@ -76,12 +76,14 @@ describe('minimal JDCloud HTTP client', () => {
             id: 'leave',
             fullName: '请假申请',
             type: 4,
+            icon: 'iconfont   icon-wo',
             agentPermissions: ['addData', 'queryData', 'addData'],
           },
           {
             id: 'attendance',
             fullName: '打卡记录',
             type: 3,
+            icon: '/api/file/previewImage/corp-current/attendance',
             agentPermissions: ['editData'],
           },
           { id: 'read-only', fullName: '只读表单', type: 3 },
@@ -96,6 +98,7 @@ describe('minimal JDCloud HTTP client', () => {
           fullName: '请假申请',
           path: '人事管理 / 请假申请',
           type: 4,
+          icon: 'iconfont   icon-wo',
           agentPermissions: ['addData'],
         },
         {
@@ -103,6 +106,7 @@ describe('minimal JDCloud HTTP client', () => {
           fullName: '打卡记录',
           path: '人事管理 / 打卡记录',
           type: 3,
+          icon: '/api/file/previewImage/corp-current/attendance',
           agentPermissions: ['editData'],
         },
       ],
@@ -112,6 +116,15 @@ describe('minimal JDCloud HTTP client', () => {
   it('requires a current tenant for the browser writable-menu projection', () => {
     expect(() => readJdcloudWritableMenus({ userInfo: {}, menuList: [] }))
       .toThrow('JDCloud current-user response current tenant is invalid')
+  })
+
+  it('rejects a non-string menu icon from the external current-user response', () => {
+    expect(() => readJdcloudWritableMenus({
+      userInfo: { corpId: 'corp-current' },
+      menuList: [{
+        id: 'leave', fullName: '请假申请', type: 4, icon: 7, agentPermissions: ['addData'],
+      }],
+    })).toThrow('JDCloud menu "leave" icon is invalid')
   })
 
   it.each([
@@ -554,6 +567,7 @@ describe('JDCloud authentication controller', () => {
               parentId: '-1',
               fullName: '请假申请',
               type: 4,
+              icon: 'iconfont icon-wo',
               agentPermissions: ['addData'],
             },
             {
@@ -578,6 +592,7 @@ describe('JDCloud authentication controller', () => {
         fullName: '请假申请',
         path: '请假申请',
         type: 4,
+        icon: 'iconfont icon-wo',
         agentPermissions: ['addData'],
       }],
     })
@@ -595,6 +610,98 @@ describe('JDCloud authentication controller', () => {
       code: 'jdcloud/auth-required', details: { reason: 'missing' },
     })
     expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('sends one authenticated multipart file without overriding the FormData boundary', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
+      .mockResolvedValueOnce(json({
+        code: 200,
+        msg: 'ok',
+        data: { name: 'receipt.png', url: '/api/file/dowloadFile/corp-current/file-1' },
+      }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+
+    await expect(ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/file/uploader',
+      method: 'POST',
+      multipartFile: {
+        name: 'receipt.png',
+        mediaType: 'image/png',
+        data: Uint8Array.from([1, 2, 3]),
+      },
+    }, signal)).resolves.toEqual({
+      name: 'receipt.png',
+      url: '/api/file/dowloadFile/corp-current/file-1',
+    })
+
+    const [url, init] = fetcher.mock.calls[3] as unknown as [string, RequestInit]
+    expect(new URL(url).pathname).toBe('/api/file/uploader')
+    expect(init.method).toBe('POST')
+    expect(init.headers).toEqual({ authorization: 'bearer token' })
+    expect(init.body).toBeInstanceOf(FormData)
+    const form = init.body as FormData
+    const file = form.get('file')
+    expect(file).toBeInstanceOf(File)
+    expect(file).toMatchObject({ name: 'receipt.png', type: 'image/png', size: 3 })
+    expect(Array.from(new Uint8Array(await (file as File).arrayBuffer()))).toEqual([1, 2, 3])
+  })
+
+  it('streams one authenticated multipart file with an exact content length', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
+      .mockResolvedValueOnce(json({
+        code: 200,
+        msg: 'ok',
+        data: { name: '熊香玉简历(2)(1).pdf', url: '/api/file/dowloadFile/corp-current/file-2' },
+      }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await ctx.jdcloudAuthController.login({
+      baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+    }, signal)
+
+    await expect(ctx.jdcloudAuthController.requestAuthenticated({
+      path: '/api/file/uploader',
+      method: 'POST',
+      multipartFile: {
+        name: '熊香玉简历(2)(1)"\r\nX-Test: injected.pdf',
+        mediaType: 'application/pdf',
+        bytes: 3,
+        stream: (async function* () {
+          yield Uint8Array.from([1, 2])
+          yield Uint8Array.from([3])
+        })(),
+      },
+    }, signal)).resolves.toEqual({
+      name: '熊香玉简历(2)(1).pdf',
+      url: '/api/file/dowloadFile/corp-current/file-2',
+    })
+
+    const [, init] = fetcher.mock.calls[3] as unknown as [string, RequestInit & { duplex?: string }]
+    const headers = init.headers as Record<string, string>
+    const contentType = headers['content-type']
+    const boundary = contentType?.slice('multipart/form-data; boundary='.length)
+    expect(boundary).toBeTruthy()
+    expect(init.duplex).toBe('half')
+    expect(init.body).toBeInstanceOf(ReadableStream)
+    const body = new Uint8Array(await new Response(init.body).arrayBuffer())
+    const encoder = new TextEncoder()
+    const prefix = encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="熊香玉简历(2)(1)\\"__X-Test: injected.pdf"\r\n`
+      + 'Content-Type: application/pdf\r\n\r\n',
+    )
+    const suffix = encoder.encode(`\r\n--${boundary}--\r\n`)
+    expect(body).toEqual(Uint8Array.from([...prefix, 1, 2, 3, ...suffix]))
+    expect(headers['content-length']).toBe(String(body.byteLength))
   })
 
   it('rejects authenticated Host requests outside the JDCloud API path', async () => {

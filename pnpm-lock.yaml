@@ -7041,6 +7041,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
+      mime-types:
+        specifier: ^3.0.2
+        version: 3.0.2
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -7054,6 +7057,9 @@ importers:
       '@deepseek-ai/dsh-api-jdcloud-auth-controller':
         specifier: workspace:^
         version: link:../../api/jdcloud-auth-controller
+      '@deepseek-ai/dsh-attachment':
+        specifier: workspace:^
+        version: link:../../attachment/attachment
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
@@ -7069,6 +7075,9 @@ importers:
       '@deepseek-ai/dsh-util-values':
         specifier: workspace:^
         version: link:../../util/values
+      '@types/mime-types':
+        specifier: ^3.0.1
+        version: 3.0.1
 
   packages/jobs/jobs:
     devDependencies:

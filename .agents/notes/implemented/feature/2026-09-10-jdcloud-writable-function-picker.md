@@ -12,9 +12,9 @@ Users starting a JDCloud data-mutation conversation need to identify the intende
 
 The `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions` plugin adds a single-selection panel above the composer for a blank top-level Session.
 
-- The authentication controller owns `/api/oauth/currentUser` parsing and exposes `writableMenus()` as a redacted Remote projection. It returns only type `3` forms and type `4` workflows with at least one recognized `addData`, `editData`, or `deleteData` grant.
-- A card click inserts one atomic reference tag at the beginning of the current draft. Optimistic local state hides the panel in the click frame; the editor occurrence keeps it hidden after insertion. Removing the tag restores the panel.
-- The tag stores only the tenant id, menu id, and label needed for display. Its submission codec reloads `writableMenus()`, requires the same current tenant and menu, and serializes only the Host-confirmed name, path, type, and permissions into the logged user message.
+- The authentication controller owns `/api/oauth/currentUser` parsing and exposes `writableMenus()` as a redacted Remote projection. It returns only type `3` forms and type `4` workflows with at least one recognized `addData`, `editData`, or `deleteData` grant, including each menu's optional icon string.
+- The panel uses an equal-width grid on the composer's card width, so an incomplete final row starts at the left. An `iconfont ...` value uses the picker-bundled JDCloud font, a leading `/` uses a custom image under the authenticated service address, and other values use the form or workflow fallback. A card click inserts one atomic reference tag at the beginning of the current draft. Optimistic local state hides the panel in the click frame; the editor occurrence keeps it hidden after insertion. Removing the tag restores the panel.
+- The tag stores only the tenant id, menu id, and label needed for display. Its submission codec reloads `writableMenus()`, requires the same current tenant and menu, and serializes a Host-confirmed `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` marker into the logged user message. Transcript projection folds the marker back to an `@label` tag, while the model resolves its menu id against the current capability snapshot.
 - The panel is absent for an active Session, a subagent Session, an unavailable current-user response, or an empty writable-menu result. Login recovery stays with the authentication UI.
 - The JDCloud login bundle installs the picker beside the authentication controller, login UI, and low-code tools.
 
@@ -28,6 +28,6 @@ The `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions` plugin adds a single-se
 ## Consequences
 
 - A new Session performs a current-user request to populate the panel, and a selected reference performs another request during submission. The existing prompt-admission and low-code capability paths retain their own authorization checks.
-- Users choose a readable function once, see an `@` tag in the composer, and can reverse the choice by deleting that tag.
+- Users choose a readable function once, see the same `@` tag in the composer and sent transcript, and can reverse the choice before submission by deleting that tag.
 - Browser state never authorizes an operation. A stale tenant or removed permission makes serialization fail before the user message reaches the model, and the low-code Host tools still enforce operation-specific grants.
 - Query-only menus remain available through ordinary natural-language discovery and the low-code capability snapshot, but they do not appear as mutation shortcuts.

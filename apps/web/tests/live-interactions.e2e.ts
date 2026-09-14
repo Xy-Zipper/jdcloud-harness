@@ -235,7 +235,9 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     expect(await page.locator('[data-streaming="true"]').count()).toBe(0)
     const errorStatus = page.getByRole('status').filter({ hasText: 'This turn failed' })
     await errorStatus.waitFor({ timeout: 10_000 })
-    expect(await errorStatus.textContent()).toContain('API key is invalid')
+    expect(await errorStatus.textContent()).toContain(
+      'API authentication failed, or the current key cannot access the selected model',
+    )
     expect(await errorStatus.textContent()).toContain('AUTH')
     expect(await page.locator('body').textContent()).not.toContain('sk-preview-secret')
     const snapshot = await captureStableAria(page, '[class*="centerCol"]', scaffold!.workspaceCwd)
@@ -244,7 +246,10 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     const requestMarker = page.locator('tr[data-request-only="true"]').last()
       .getByRole('button', { name: /Request #/ })
     await requestMarker.click()
-    await page.getByText('API key is invalid', { exact: true }).waitFor({ timeout: 10_000 })
+    await page.getByText(
+      'API authentication failed, or the current key cannot access the selected model',
+      { exact: true },
+    ).waitFor({ timeout: 10_000 })
     expect(await page.locator('body').textContent()).not.toContain('sk-preview-secret')
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])

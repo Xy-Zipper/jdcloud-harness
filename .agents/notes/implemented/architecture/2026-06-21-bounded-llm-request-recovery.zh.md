@@ -84,7 +84,7 @@ agent loop（智能体循环）会将终止 finish 的 `LlmFailure` 传给 `agen
 
 失败 attempt 会追加带嵌入式 stream 的 `assistant/attempt`，但绝不追加 surface `assistant/message` 或分派工具。重试在失败 turn 与 step 内继续，从持久 surface 重建请求，并产生自己的 settlement；只有最终结果才会关闭 turn。step 打开时，UI 可以渲染瞬态 `assistant/live-chunk` update；当 `llm/retry` 标识失败 attempt 或 `turn/end` 记录失败时，UI 再结算它。Web 会校验完整 retry payload contract，把每条 producer-correlated `retryId` chain 投影为稳定一行并更新到最新 attempt，再从 `llm/retry-started` 与所属 turn、step boundary 的关闭派生 scheduled、started 或 cancelled 状态。倒计时以浏览器收到 event 的时刻为计划延迟起点，而不是 Host event clock；它按向上取整且不低于 1 秒的秒数显示，只在未结算时动画，并把最新失败详情折叠在该行后。即使失败 attempt 没有 surface Assistant node，retry node 也会锚定自己的 trajectory turn。Message derivation 会忽略 `assistant/attempt`，Web 在历史重建时应用同一投影，因此刷新不会把失败 partial 提升进模型历史，也不会生成重复 retry row。
 
-如果恢复预算耗尽，最终失败会连同结构化事实在 `turn/end.reason` 中存储一次。Web 会在该序列位置派生一个 `turn-error` 节点，并内联渲染适合展示的消息与可选错误码；AUTH 投影会把可能回显凭据片段的提供方文案替换为 `API key is invalid`，原始诊断仍保留在会话日志中。实时事件和历史回放使用同一套折叠逻辑。暂时性恢复继续期间，`llm/retry` 是每次中间失败与延迟的持久归属位置；终态错误行只在 `turn/end` 记录错误后才存在，而由于耗尽的恢复与失败共享同一轮次，该轮次的重试历史绝不会抑制这一行——定格的重试链与终态错误并列渲染。本决策不增加独立的最终错误事件或响应 id 词汇。
+如果恢复预算耗尽，最终失败会连同结构化事实在 `turn/end.reason` 中存储一次。Web 会在该序列位置派生一个 `turn-error` 节点，并内联渲染适合展示的消息与可选错误码；AUTH 投影会把可能回显凭据片段的提供方文案替换为“API 鉴权失败，或当前密钥无权访问所选模型”，原始诊断仍保留在会话日志中。实时事件和历史回放使用同一套折叠逻辑。暂时性恢复继续期间，`llm/retry` 是每次中间失败与延迟的持久归属位置；终态错误行只在 `turn/end` 记录错误后才存在，而由于耗尽的恢复与失败共享同一轮次，该轮次的重试历史绝不会抑制这一行——定格的重试链与终态错误并列渲染。本决策不增加独立的最终错误事件或响应 id 词汇。
 
 ## 不在范围内
 

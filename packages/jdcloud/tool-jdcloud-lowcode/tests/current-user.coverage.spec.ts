@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   parseCurrentMemberLookup,
   parseCurrentMemberNames,
+  parseTenantDepartments,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
 } from '../src/current-user.ts'
@@ -240,22 +241,48 @@ describe('current-member wire validation coverage', () => {
     })).toThrow('member-name user "user-1" phone is invalid')
   })
 
-  it('rejects a member-name response that omits a current-user selection', () => {
+  it('omits deleted current departments and roles from resolved selections', () => {
     const lookup = parseCurrentMemberLookup({
-      userInfo: { id: 'user-1', departmentId: ['department-1'], roleId: ['role-1'] },
+      userInfo: {
+        id: 'user-1',
+        departmentId: ['department-deleted', 'department-1'],
+        roleId: ['role-1', 'role-deleted'],
+      },
     })
-    const valid = {
+    expect(parseCurrentMemberNames(lookup, {
       department: [{ id: 'department-1', fullName: '研发部' }],
       role: [{ id: 'role-1', fullName: '开发人员' }],
       user: [{ id: 'user-1', fullName: '测试用户', phone: '' }],
-    }
+    })).toEqual({
+      department: [{ id: 'department-1', fullName: '研发部' }],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+      user: [{ id: 'user-1', fullName: '测试用户', phone: '' }],
+    })
+  })
 
-    expect(() => parseCurrentMemberNames(lookup, { ...valid, department: [] }))
-      .toThrow('has no department for "department-1"')
-    expect(() => parseCurrentMemberNames(lookup, { ...valid, role: [] }))
-      .toThrow('has no role for "role-1"')
-    expect(() => parseCurrentMemberNames(lookup, { ...valid, user: [] }))
+  it('rejects a member-name response that omits the current user', () => {
+    const lookup = parseCurrentMemberLookup({
+      userInfo: { id: 'user-1', departmentId: [], roleId: [] },
+    })
+
+    expect(() => parseCurrentMemberNames(lookup, { department: [], role: [], user: [] }))
       .toThrow('has no user for "user-1"')
+  })
+})
+
+describe('tenant-department wire validation coverage', () => {
+  it('rejects malformed selector containers, entries, names, children, and duplicate ids', () => {
+    expect(() => parseTenantDepartments(null)).toThrow('department selector list is invalid')
+    expect(() => parseTenantDepartments([null])).toThrow('department selector item is invalid')
+    expect(() => parseTenantDepartments([{ id: '', fullName: 'Root' }]))
+      .toThrow('department selector id is invalid')
+    expect(() => parseTenantDepartments([{ id: 'root', fullName: '' }]))
+      .toThrow('department selector "root" name is invalid')
+    expect(() => parseTenantDepartments([{ id: 'root', fullName: 'Root', children: {} }]))
+      .toThrow('department selector "root" child list is invalid')
+    expect(() => parseTenantDepartments([
+      { id: 'same', fullName: 'Root', children: [{ id: 'same', fullName: 'Child' }] },
+    ])).toThrow('department selector repeats id "same"')
   })
 })
 
@@ -271,6 +298,7 @@ describe('current-user model snapshot coverage', () => {
         role: [],
         user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
       },
+      tenantDepartments: [{ id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' }],
       menus: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 3, agentPermissions: ['addData'],
@@ -289,6 +317,7 @@ describe('current-user model snapshot coverage', () => {
         role: [],
         user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
       },
+      tenantDepartments: [{ id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' }],
       functions: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 'form', agentPermissions: ['addData'],

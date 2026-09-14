@@ -6,6 +6,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import { useEffect, useRef, useState } from 'react'
 import type { WritableMenuPickerInjected } from './types.ts'
 import { NS } from './locales.ts'
+import './iconfont.css'
 import css from './LowcodeActionPicker.module.css'
 
 /** Full props for the writable-menu cards in the input dock. */
@@ -13,6 +14,22 @@ export type LowcodeActionPickerProps =
   PropsRuntime<'conversation.input.dock'>
   & InjectFace<WritableMenuPickerInjected>
   & PropsLocale<typeof NS>
+
+/** Render the menu-owned icon format, falling back to the current type glyph. */
+function MenuIcon({ menu, baseUrl }: { menu: JdcloudWritableMenu; baseUrl: string }) {
+  const icon = menu.icon?.trim()
+  const iconClasses = icon?.split(/\s+/)
+  if (iconClasses !== undefined
+    && iconClasses.length > 1
+    && iconClasses[0] === 'iconfont'
+    && iconClasses.slice(1).every(className => className.startsWith('icon-'))) {
+    return <i className={iconClasses.join(' ')} />
+  }
+  if (icon?.startsWith('/')) {
+    return <img className={css.iconImage} src={`${baseUrl}${icon}`} alt="" />
+  }
+  return menu.type === 3 ? <IconDataOutline16 size={20} /> : <IconBranchOutline16 size={20} />
+}
 
 /** Show one single-select menu panel only while the current Session is blank. */
 export function LowcodeActionPicker({
@@ -62,7 +79,7 @@ export function LowcodeActionPicker({
             }}
           >
             <span className={css.icon} aria-hidden="true">
-              {menu.type === 3 ? <IconDataOutline16 size={20} /> : <IconBranchOutline16 size={20} />}
+              <MenuIcon menu={menu} baseUrl={menuState.baseUrl} />
             </span>
             <span className={css.content}>
               <span className={css.name}>{menu.fullName}</span>

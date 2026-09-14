@@ -136,7 +136,7 @@
     },
     {
       "name": "jdcloud_lowcode_create",
-      "description": "Create one form record or start one workflow. Host execution requires addData and rejects missing required fields from the live form definition.",
+      "description": "Create one form record or start one workflow. Host execution requires addData and rejects values that do not match the live field writeType or omit a required field.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -150,7 +150,7 @@
           },
           "data": {
             "type": "object",
-            "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+            "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
             "additionalProperties": true
           }
         },
@@ -418,7 +418,7 @@
     },
     {
       "name": "jdcloud_lowcode_update",
-      "description": "Update one JDCloud record. Host execution requires editData and removes empty automatic-number fields.",
+      "description": "Update one JDCloud record. Host execution requires editData, rejects values that do not match the live field writeType, and removes empty automatic-number fields.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -436,7 +436,7 @@
           },
           "data": {
             "type": "object",
-            "description": "Field-code to JSON-value map. Use field codes returned by jdcloud_lowcode_describe.",
+            "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
             "additionalProperties": true
           }
         },
@@ -444,6 +444,36 @@
           "menu_id",
           "record_id",
           "data"
+        ]
+      }
+    },
+    {
+      "name": "jdcloud_lowcode_upload_file",
+      "description": "Upload one file or image already attached in this Session to JDCloud. Host execution requires the target menu write permission. Use the returned name and url object inside an attachment or image-upload field only after user confirmation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "menu_id": {
+            "type": "string",
+            "description": "Exact menuId from the current JDCloud capability snapshot."
+          },
+          "write_kind": {
+            "type": "string",
+            "description": "Whether the uploaded value will be used by a create or update operation.",
+            "enum": [
+              "create",
+              "update"
+            ]
+          },
+          "attachment_id": {
+            "type": "string",
+            "description": "The sha256 value shown in the conversation attachment handle or its saved path."
+          }
+        },
+        "required": [
+          "menu_id",
+          "write_kind",
+          "attachment_id"
         ]
       }
     },

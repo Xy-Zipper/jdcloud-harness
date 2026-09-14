@@ -1159,7 +1159,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: '@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>',
         description: 'Read the current tenant\'s forms and workflows carrying a supported data-write permission.',
         parameters: [{ name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
-        returns: 'Browser-safe menu identities, labels, paths, types, and write permissions.',
+        returns: 'Browser-safe menu identities, labels, paths, types, icons, and write permissions.',
       },
       {
         signature: '@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
@@ -1188,7 +1188,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>',
         description: 'Send one Host-only JDCloud API request with the stored login.',
-        parameters: [{ name: 'request', description: 'Fixed API path, method, and optional JSON body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        parameters: [{ name: 'request', description: 'Fixed API path, method, and one optional JSON or multipart-file body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
         returns: 'JDCloud response data without exposing the stored token.',
       },
     ],
@@ -4487,7 +4487,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'JdcloudAuthenticatedRequest',
-    declaration: 'export interface JdcloudAuthenticatedRequest {\n    readonly path: `/api/${string}`;\n    readonly method: \'GET\' | \'POST\' | \'PUT\' | \'DELETE\';\n    readonly body?: unknown;\n}',
+    declaration: 'export type JdcloudAuthenticatedRequest = JdcloudAuthenticatedRequestBase & {\n    readonly body?: unknown;\n    readonly multipartFile?: never;\n} | Omit<JdcloudAuthenticatedRequestBase, \'method\'> & {\n    readonly method: \'POST\';\n    readonly body?: never;\n    readonly multipartFile: JdcloudMultipartFile;\n};',
   },
   {
     name: 'JdcloudAuthStatus',
@@ -4510,12 +4510,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type JdcloudLowcodeWritePermission = \'addData\' | \'editData\' | \'deleteData\';',
   },
   {
+    name: 'JdcloudMultipartFile',
+    declaration: 'export interface JdcloudMultipartFile {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n}',
+  },
+  {
     name: 'JdcloudTokenLoginRequest',
     declaration: 'export interface JdcloudTokenLoginRequest {\n    readonly baseUrl: string;\n    readonly token: string;\n}',
   },
   {
     name: 'JdcloudWritableMenu',
-    declaration: 'export interface JdcloudWritableMenu {\n    readonly menuId: string;\n    readonly fullName: string;\n    readonly path: string;\n    readonly type: JdcloudLowcodeMenuType;\n    readonly agentPermissions: readonly JdcloudLowcodeWritePermission[];\n}',
+    declaration: 'export interface JdcloudWritableMenu {\n    readonly menuId: string;\n    readonly fullName: string;\n    readonly path: string;\n    readonly type: JdcloudLowcodeMenuType;\n    readonly icon?: string;\n    readonly agentPermissions: readonly JdcloudLowcodeWritePermission[];\n}',
   },
   {
     name: 'JdcloudWritableMenuState',

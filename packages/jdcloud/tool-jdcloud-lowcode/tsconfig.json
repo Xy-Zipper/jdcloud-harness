@@ -12,6 +12,7 @@
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../api/jdcloud-auth-controller" },
+    { "path": "../../attachment/attachment" },
     { "path": "../../core/agent" },
     { "path": "../../llm/llm" },
     { "path": "../../session/session-projection" },

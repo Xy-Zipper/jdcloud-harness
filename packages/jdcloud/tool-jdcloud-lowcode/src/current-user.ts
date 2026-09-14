@@ -34,6 +34,11 @@ export interface LowcodeCurrentMember {
   readonly user: readonly LowcodeUserMember[]
 }
 
+/** One department selectable in the current JDCloud tenant. */
+export interface LowcodeTenantDepartment extends LowcodeNamedMember {
+  readonly path: string
+}
+
 /** IDs sent in one `/getMemberName` request for the current account. */
 export interface LowcodeCurrentMemberLookup {
   readonly ids: readonly string[]
@@ -49,6 +54,7 @@ export interface LowcodeCapabilitySnapshot {
   readonly corpName: string
   readonly systemAdministrator: boolean
   readonly currentMember: LowcodeCurrentMember
+  readonly tenantDepartments: readonly LowcodeTenantDepartment[]
   readonly menus: readonly LowcodeMenuCapability[]
 }
 
@@ -88,7 +94,7 @@ export function parseCurrentMemberLookup(value: unknown): LowcodeCurrentMemberLo
  * Select only the requested current-account members from `/getMemberName` data.
  * @param lookup - Current-user IDs that were sent to JDCloud.
  * @param value - Unwrapped member-name response data.
- * @returns Exact user, department, and role field selections in current-user order.
+ * @returns Resolved selections in current-user order, omitting deleted departments and roles.
  */
 export function parseCurrentMemberNames(
   lookup: LowcodeCurrentMemberLookup,
@@ -99,10 +105,46 @@ export function parseCurrentMemberNames(
   const roles = readNamedMembers(Reflect.get(root, 'role'), 'role')
   const users = readUserMembers(Reflect.get(root, 'user'))
   return {
-    department: lookup.departmentIds.map(id => requireResolvedMember(departments, id, 'department')),
-    role: lookup.roleIds.map(id => requireResolvedMember(roles, id, 'role')),
+    department: resolvedMembers(departments, lookup.departmentIds),
+    role: resolvedMembers(roles, lookup.roleIds),
     user: [requireResolvedMember(users, lookup.userId, 'user')],
   }
+}
+
+/**
+ * Flatten `/api/system/permission/organize/selector` into exact department selections.
+ * @param value - Unwrapped recursive department-selector response data.
+ * @returns Departments in response order with their complete display paths.
+ */
+export function parseTenantDepartments(value: unknown): LowcodeTenantDepartment[] {
+  if (!Array.isArray(value)) throw new Error('JDCloud department selector list is invalid')
+  const ids = new Set<string>()
+  const departments: LowcodeTenantDepartment[] = []
+
+  /** Visit one external selector level while preserving the upstream tree order. */
+  function visit(entries: readonly unknown[], parents: readonly string[]): void {
+    for (const entry of entries) {
+      const department = requireRecord(entry, 'JDCloud department selector item')
+      const id = requireNonEmptyString(Reflect.get(department, 'id'), 'JDCloud department selector id')
+      if (ids.has(id)) throw new Error(`JDCloud department selector repeats id ${JSON.stringify(id)}`)
+      ids.add(id)
+      const fullName = requireNonEmptyString(
+        Reflect.get(department, 'fullName'),
+        `JDCloud department selector ${JSON.stringify(id)} name`,
+      )
+      const path = [...parents, fullName]
+      departments.push({ id, fullName, path: path.join(' / ') })
+      const children = Reflect.get(department, 'children')
+      if (children === undefined || children === null) continue
+      if (!Array.isArray(children)) {
+        throw new Error(`JDCloud department selector ${JSON.stringify(id)} child list is invalid`)
+      }
+      visit(children, path)
+    }
+  }
+
+  visit(value, [])
+  return departments
 }
 
 /**
@@ -115,6 +157,7 @@ export function renderCapabilitySnapshot(snapshot: LowcodeCapabilitySnapshot): s
     tenant: { id: snapshot.corpId, name: snapshot.corpName },
     systemAdministrator: snapshot.systemAdministrator,
     currentMember: snapshot.currentMember,
+    tenantDepartments: snapshot.tenantDepartments,
     functions: snapshot.menus.map(menu => ({
       menuId: menu.menuId,
       fullName: menu.fullName,
@@ -171,6 +214,14 @@ function readUserMembers(value: unknown): Map<string, LowcodeUserMember> {
     })
   }
   return result
+}
+
+/** Keep only current-member IDs that the member-name response still resolves. */
+function resolvedMembers<T>(members: ReadonlyMap<string, T>, ids: readonly string[]): T[] {
+  return ids.flatMap((id) => {
+    const member = members.get(id)
+    return member === undefined ? [] : [member]
+  })
 }
 
 /** Require the member-name response to resolve one current-user ID. */

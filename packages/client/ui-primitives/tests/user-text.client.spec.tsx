@@ -43,6 +43,16 @@ describe('projectUserText', () => {
     expect(host.querySelector('[data-ref-chip="session"]')!.textContent).toBe('a')
   })
 
+  it('folds a durable plugin reference to an at-tag without exposing its wire id', () => {
+    const marker = '@[报账审批表](dsh-reference:jdcloud-lowcode-function/6a5861c3120862bdfedd15ff)'
+    const host = project(`使用 ${marker} 新增数据`)
+    const chip = host.querySelector('[data-ref-chip="reference"]')!
+    expect(chip.textContent).toBe('@报账审批表')
+    expect(chip.getAttribute('title')).toBe(marker)
+    expect(chip.querySelector('svg')).toBeNull()
+    expect(host.textContent).toBe('使用 @报账审批表 新增数据')
+  })
+
   it('decorates recall-associated labels, files, folders, and quoted paths', () => {
     const host = project('@会话一 说 @src/deep/file.txt 与 @dir/ 与 @"a b.md"', ['会话一'])
     const kinds = [...host.querySelectorAll('[data-ref-chip]')].map(c =>

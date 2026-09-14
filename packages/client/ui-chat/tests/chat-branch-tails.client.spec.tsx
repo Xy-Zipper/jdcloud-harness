@@ -122,6 +122,22 @@ describe('MessageItem arms', () => {
     expect(view.getByText('引用会话 · Research notes')).toBeTruthy()
   })
 
+  it('renders a sent low-code function marker as the original at-tag', () => {
+    const marker = '@[报账审批表](dsh-reference:jdcloud-lowcode-function/6a5861c3120862bdfedd15ff)'
+    const view = render(
+      <MessageItem t={t} node={{
+        kind: 'user',
+        seq: 1,
+        time: 1_000,
+        content: [{ type: 'text', text: marker }] as never,
+        source: null,
+      }} />,
+    )
+    const chip = view.container.querySelector('[data-ref-chip="reference"]')
+    expect(chip?.textContent).toBe('@报账审批表')
+    expect(chip?.getAttribute('title')).toBe(marker)
+  })
+
   it('renders no-extension paths as files and leaves sentence punctuation outside the reference', () => {
     const view = render(
       <MessageItem t={t} node={{

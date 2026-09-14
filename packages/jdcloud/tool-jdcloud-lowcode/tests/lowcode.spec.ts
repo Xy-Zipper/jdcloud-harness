@@ -3,6 +3,11 @@ import { Context, type Fiber } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import {
+  AttachmentId,
+  type FileAttachmentRef,
+  type ImageAttachmentRef,
+} from '@deepseek-ai/dsh-attachment'
 import type {
   JdcloudAuthenticatedRequest,
   JdcloudAuthStatus,
@@ -18,6 +23,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { type ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import * as LowcodePlugin from '../src/index.ts'
 import {
+  parseTenantDepartments,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
 } from '../src/current-user.ts'
@@ -30,9 +36,7 @@ afterEach(async () => {
   for (const ctx of activeContexts.splice(0)) await ctx.fiber.dispose()
 })
 
-interface RecordedRequest extends JdcloudAuthenticatedRequest {
-  readonly body?: unknown
-}
+type RecordedRequest = JdcloudAuthenticatedRequest
 
 interface MountedLowcode {
   readonly ctx: Context
@@ -41,6 +45,8 @@ interface MountedLowcode {
   readonly requests: RecordedRequest[]
   readonly requestAuthenticated: ReturnType<typeof vi.fn>
   readonly status: ReturnType<typeof vi.fn>
+  readonly readFileStream: ReturnType<typeof vi.fn>
+  readonly readImage: ReturnType<typeof vi.fn>
   browserPrompt(turn?: number, step?: number): Promise<UserMessage[]>
   continuation(turn?: number, step?: number): Promise<UserMessage[]>
   call(name: string, argumentsValue: unknown): Promise<ToolExecutionResult>
@@ -125,6 +131,16 @@ async function mountLowcode(options: {
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
 
+  const readImage = vi.fn(async (ref: ImageAttachmentRef) => ({
+    ref,
+    data: Uint8Array.from([1, 2, 3]),
+  }))
+  const readFileStream = vi.fn((_ref: FileAttachmentRef) => (async function* () {
+    yield Uint8Array.from([1, 2])
+    yield Uint8Array.from([3])
+  })())
+  ctx.provide('attachments', { readFileStream, readImage } as never)
+
   const requests: RecordedRequest[] = []
   const current = options.currentUser ?? currentUser()
   const requestAuthenticated = vi.fn(async (request: RecordedRequest): Promise<unknown> => {
@@ -136,6 +152,20 @@ async function mountLowcode(options: {
         role: [{ id: 'role-1', fullName: '开发人员' }],
         user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
       }
+    }
+    if (request.path === '/api/system/permission/organize/selector') {
+      return [{
+        id: 'tenant-root',
+        parentId: '-1',
+        hasChildren: true,
+        fullName: '测试租户',
+        children: [{
+          id: 'department-it',
+          parentId: 'tenant-root',
+          hasChildren: false,
+          fullName: 'IT部门',
+        }],
+      }]
     }
     if (request.path.startsWith('/api/visualdev/base/fields/')) {
       return options.response?.(request) ?? []
@@ -179,6 +209,8 @@ async function mountLowcode(options: {
     requests,
     requestAuthenticated,
     status,
+    readFileStream,
+    readImage,
     async browserPrompt(turn = 1, step = 1) {
       return await preStep([createUserMessage({
         content: [{ type: 'text', text: '查询本周打卡数据' }],
@@ -208,6 +240,43 @@ function errorCode(result: ToolExecutionResult): string | undefined {
 /** Join text blocks from one normalized tool result. */
 function resultText(result: ToolExecutionResult): string {
   return result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
+}
+
+/** Append one durable user image so upload tests exercise Session-owned references. */
+function appendUserImage(
+  mounted: MountedLowcode,
+  options: { readonly digest?: string; readonly name?: string } = {},
+): ImageAttachmentRef {
+  const ref: ImageAttachmentRef = {
+    attachmentId: AttachmentId(`sha256:${options.digest ?? '1'.repeat(64)}`),
+    mediaType: 'image/png',
+    bytes: 3,
+    width: 10,
+    height: 10,
+    ...options.name === undefined ? {} : { name: options.name },
+  }
+  mounted.agent.session.append('user/message', createUserMessage({
+    content: [{ type: 'image', attachment: ref }],
+    source: { kind: 'user', rpcId: `rpc-image-${String(ref.attachmentId)}` } as never,
+  }), { surfaceOp: 'append' })
+  return ref
+}
+
+/** Append one durable user file so upload tests exercise Session-owned references. */
+function appendUserFile(
+  mounted: MountedLowcode,
+  options: { readonly digest?: string; readonly name?: string } = {},
+): FileAttachmentRef {
+  const ref: FileAttachmentRef = {
+    attachmentId: AttachmentId(`sha256:${options.digest ?? '3'.repeat(64)}`),
+    name: options.name ?? 'invoice.pdf',
+    bytes: 3,
+  }
+  mounted.agent.session.append('user/message', createUserMessage({
+    content: [{ type: 'file', attachment: ref }],
+    source: { kind: 'user', rpcId: `rpc-file-${String(ref.attachmentId)}` } as never,
+  }), { surfaceOp: 'append' })
+  return ref
 }
 
 describe('current-user capability parsing', () => {
@@ -254,6 +323,37 @@ describe('current-user capability parsing', () => {
     })).toThrow('repeats menu "same"')
   })
 
+  it('flattens the complete tenant department selector tree', () => {
+    expect(parseTenantDepartments([{
+      id: 'tenant-root',
+      parentId: '-1',
+      hasChildren: true,
+      fullName: '测试',
+      children: [{
+        id: 'department-a',
+        parentId: 'tenant-root',
+        hasChildren: true,
+        fullName: 'a',
+        children: [{
+          id: 'department-b',
+          parentId: 'department-a',
+          hasChildren: false,
+          fullName: 'b',
+        }],
+      }, {
+        id: 'department-it',
+        parentId: 'tenant-root',
+        hasChildren: false,
+        fullName: 'IT部门',
+      }],
+    }])).toEqual([
+      { id: 'tenant-root', fullName: '测试', path: '测试' },
+      { id: 'department-a', fullName: 'a', path: '测试 / a' },
+      { id: 'department-b', fullName: 'b', path: '测试 / a / b' },
+      { id: 'department-it', fullName: 'IT部门', path: '测试 / IT部门' },
+    ])
+  })
+
   it('renders only tenant identity, administrator status, and filtered menu capabilities', () => {
     const text = renderCapabilitySnapshot({
       turn: 7,
@@ -265,6 +365,7 @@ describe('current-user capability parsing', () => {
         role: [{ id: 'role-1', fullName: '开发人员' }],
         user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
       },
+      tenantDepartments: [{ id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' }],
       menus: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -283,6 +384,7 @@ describe('current-user capability parsing', () => {
         role: [{ id: 'role-1', fullName: '开发人员' }],
         user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
       },
+      tenantDepartments: [{ id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' }],
       functions: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -350,7 +452,16 @@ describe('table schema generation', () => {
 
 describe('prompt refresh and plugin lifecycle', () => {
   it('injects one safe snapshot for a browser prompt and does not refresh on the tool continuation', async () => {
-    const mounted = await mountLowcode()
+    const current = currentUser()
+    const mounted = await mountLowcode({
+      currentUser: {
+        ...current,
+        userInfo: {
+          ...(current.userInfo as Record<string, unknown>),
+          roleId: ['role-1', 'role-deleted'],
+        },
+      },
+    })
     const entered = await mounted.browserPrompt()
 
     expect(mounted.requests).toEqual([
@@ -358,8 +469,9 @@ describe('prompt refresh and plugin lifecycle', () => {
       {
         path: '/api/system/permission/users/getMemberName',
         method: 'POST',
-        body: ['user-secret', 'department-1', 'role-1'],
+        body: ['user-secret', 'department-1', 'role-1', 'role-deleted'],
       },
+      { path: '/api/system/permission/organize/selector', method: 'GET' },
     ])
     expect(entered).toHaveLength(2)
     expect(entered[1]?.source).toMatchObject({
@@ -371,10 +483,12 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(JSON.stringify(entered[1])).not.toContain('board-overview')
     expect(JSON.stringify(entered[1])).toContain('测试用户')
     expect(JSON.stringify(entered[1])).toContain('研发部')
+    expect(JSON.stringify(entered[1])).toContain('测试租户 / IT部门')
+    expect(JSON.stringify(entered[1])).not.toContain('role-deleted')
     expect(JSON.stringify(entered[1])).not.toContain('private-account')
 
     expect(await mounted.continuation()).toEqual([])
-    expect(mounted.requestAuthenticated).toHaveBeenCalledTimes(2)
+    expect(mounted.requestAuthenticated).toHaveBeenCalledTimes(3)
   })
 
   it('disposes its tools, prompt section, and browser-prompt listener with the plugin fiber', async () => {
@@ -383,6 +497,7 @@ describe('prompt refresh and plugin lifecycle', () => {
       'jdcloud_lowcode_describe',
       'jdcloud_lowcode_query',
       'jdcloud_lowcode_get',
+      'jdcloud_lowcode_upload_file',
       'jdcloud_lowcode_create',
       'jdcloud_lowcode_update',
       'jdcloud_lowcode_delete',
@@ -391,6 +506,10 @@ describe('prompt refresh and plugin lifecycle', () => {
     const assembled = await mounted.ctx.systemPrompt.assemble()
     expect(assembled.sections.map(section => section.name)).toContain('tool:jdcloud-lowcode')
     const guidance = assembled.sections.find(section => section.name === 'tool:jdcloud-lowcode')?.text ?? ''
+    expect(guidance).toContain('dsh-reference:jdcloud-lowcode-function/<menuId>')
+    expect(guidance).toContain('follow each described writeType exactly')
+    expect(guidance).toContain('multi-select fields, including userSelect, depSelect, and roleSelect')
+    expect(guidance).toContain('expanded read objects such as `{id,fullName}` are not writable values')
     expect(guidance).toContain('infer every field value that is directly supported')
     expect(guidance).toContain('not only titles, but also values such as amounts, dates')
     expect(guidance).toContain('Never invent opaque ids')
@@ -399,7 +518,9 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(guidance).toContain('before treating those fields as missing')
     expect(guidance).toContain('目前还缺少关键信息')
     expect(guidance).toContain('every described field, including required and optional fields')
-    expect(guidance).toContain('Conversation attachments are evidence, not JDCloud file uploads')
+    expect(guidance).toContain('conversation file or image')
+    expect(guidance).toContain('jdcloud_lowcode_upload_file')
+    expect(guidance).toContain('Conversation attachments are evidence until this upload succeeds')
     await mounted.browserPrompt()
 
     await mounted.fiber.dispose()
@@ -518,6 +639,195 @@ describe('Host-authorized tool execution', () => {
       path: '/api/visualdev/base/fields/form-clock',
       method: 'GET',
     }])
+  })
+
+  it('uploads a Session image through the authenticated JDCloud multipart request', async () => {
+    const uploaded = { name: 'receipt.png', url: '/api/file/dowloadFile/corp-1/file-1' }
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['addData']),
+      response: request => request.path === '/api/file/uploader' ? uploaded : { ok: true },
+    })
+    await mounted.browserPrompt()
+    const ref = appendUserImage(mounted, { name: 'receipt.png' })
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: ref.attachmentId,
+    })
+
+    expect(result.isError).toBe(false)
+    expect(resultText(result)).toContain('"name":"receipt.png"')
+    expect(resultText(result)).toContain('"url":"/api/file/dowloadFile/corp-1/file-1"')
+    expect(mounted.readImage).toHaveBeenCalledWith(ref, expect.any(AbortSignal))
+    expect(mounted.requests).toEqual([{
+      path: '/api/file/uploader',
+      method: 'POST',
+      multipartFile: {
+        name: 'receipt.png',
+        mediaType: 'image/png',
+        data: Uint8Array.from([1, 2, 3]),
+      },
+    }])
+  })
+
+  it('streams a Session PDF with its MIME type and accepts the model-visible digest', async () => {
+    const uploaded = { name: '熊香玉简历(2)(1).pdf', url: '/api/file/dowloadFile/corp-1/file-2' }
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['addData']),
+      response: request => request.path === '/api/file/uploader' ? uploaded : { ok: true },
+    })
+    await mounted.browserPrompt()
+    const ref = appendUserFile(mounted, { name: '熊香玉简历(2)(1).pdf' })
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: String(ref.attachmentId).slice('sha256:'.length),
+    })
+
+    expect(result.isError).toBe(false)
+    expect(mounted.readFileStream).toHaveBeenCalledWith(ref, expect.any(AbortSignal))
+    const request = mounted.requests[0]
+    expect(request).toMatchObject({
+      path: '/api/file/uploader',
+      method: 'POST',
+      multipartFile: {
+        name: '熊香玉简历(2)(1).pdf',
+        mediaType: 'application/pdf',
+        bytes: 3,
+      },
+    })
+    if (request?.multipartFile === undefined || !('stream' in request.multipartFile)) {
+      throw new Error('expected a streamed multipart file')
+    }
+    const chunks: number[] = []
+    for await (const chunk of request.multipartFile.stream) chunks.push(...chunk)
+    expect(chunks).toEqual([1, 2, 3])
+  })
+
+  it('accepts one unambiguous short sha256 handle from the model-visible file label', async () => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['addData']),
+      response: request => request.path === '/api/file/uploader'
+        ? { name: 'invoice.pdf', url: '/api/file/dowloadFile/corp-1/file-3' }
+        : { ok: true },
+    })
+    await mounted.browserPrompt()
+    const ref = appendUserFile(mounted, { digest: `02b31b31${'3'.repeat(56)}` })
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: '02b31b31',
+    })
+
+    expect(result.isError).toBe(false)
+    expect(mounted.readFileStream).toHaveBeenCalledWith(ref, expect.any(AbortSignal))
+  })
+
+  it('rejects an ambiguous short sha256 handle', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
+    await mounted.browserPrompt()
+    appendUserFile(mounted, { digest: `02b31b31${'3'.repeat(56)}`, name: 'first.pdf' })
+    appendUserFile(mounted, { digest: `02b31b31${'4'.repeat(56)}`, name: 'second.pdf' })
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: '02b31b31',
+    })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_ATTACHMENT_REQUIRED')
+    expect(resultText(result)).toContain('matches multiple attachments')
+    expect(mounted.readFileStream).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['create', ['editData'], 'addData'],
+    ['update', ['addData'], 'editData'],
+  ] as const)('requires %s uploads to have the matching write permission', async (writeKind, permissions, missing) => {
+    const mounted = await mountLowcode({ currentUser: currentUser(permissions) })
+    await mounted.browserPrompt()
+    const ref = appendUserImage(mounted, { name: 'receipt.png' })
+    mounted.requestAuthenticated.mockClear()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: writeKind,
+      attachment_id: ref.attachmentId,
+    })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_PERMISSION_REQUIRED')
+    expect(resultText(result)).toContain(`does not grant ${missing}`)
+    expect(mounted.readImage).not.toHaveBeenCalled()
+    expect(mounted.requestAuthenticated).not.toHaveBeenCalled()
+    expect(mounted.requests).toEqual([])
+  })
+
+  it('derives an image filename when the browser did not provide one', async () => {
+    const uploaded = { name: 'stored.png', url: '/api/file/dowloadFile/corp-1/file-2' }
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['editData']),
+      response: request => request.path === '/api/file/uploader' ? uploaded : { ok: true },
+    })
+    await mounted.browserPrompt()
+    const ref = appendUserImage(mounted)
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'update',
+      attachment_id: ref.attachmentId,
+    })
+
+    expect(result.isError).toBe(false)
+    expect(mounted.requests[0]).toMatchObject({
+      multipartFile: { name: 'image-111111111111.png' },
+    })
+  })
+
+  it.each([
+    [{}, 'JDCloud uploaded file name is invalid'],
+    [{ name: 'receipt.png', url: ' ' }, 'JDCloud uploaded file url is invalid'],
+  ])('rejects an invalid JDCloud upload response %#', async (uploaded, message) => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['addData']),
+      response: request => request.path === '/api/file/uploader' ? uploaded : { ok: true },
+    })
+    await mounted.browserPrompt()
+    const ref = appendUserImage(mounted, { name: 'receipt.png' })
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: ref.attachmentId,
+    })
+
+    expect(result.isError).toBe(true)
+    expect(resultText(result)).toContain(message)
+  })
+
+  it('rejects an attachment id that is not present in the current Session', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
+    await mounted.browserPrompt()
+    mounted.requestAuthenticated.mockClear()
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-clock',
+      write_kind: 'create',
+      attachment_id: `sha256:${'2'.repeat(64)}`,
+    })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_ATTACHMENT_REQUIRED')
+    expect(mounted.readFileStream).not.toHaveBeenCalled()
+    expect(mounted.readImage).not.toHaveBeenCalled()
+    expect(mounted.requestAuthenticated).not.toHaveBeenCalled()
   })
 
   it('translates permitted form, workflow, update, and delete operations to exact JDCloud payloads', async () => {

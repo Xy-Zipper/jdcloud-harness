@@ -6,7 +6,12 @@ import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** Load state of the current tenant's writable menus. */
 export type WritableMenuState =
   | { readonly phase: 'loading'; readonly menus: readonly [] }
-  | { readonly phase: 'ready'; readonly menus: readonly JdcloudWritableMenu[]; readonly corpId: string }
+  | {
+    readonly phase: 'ready'
+    readonly menus: readonly JdcloudWritableMenu[]
+    readonly corpId: string
+    readonly baseUrl: string
+  }
   | { readonly phase: 'error'; readonly menus: readonly [] }
 
 /** Per-Session picker hooks and the guarded reference insertion verb. */
