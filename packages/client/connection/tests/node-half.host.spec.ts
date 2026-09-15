@@ -278,6 +278,28 @@ describe('connection node half', () => {
     await dispose()
   })
 
+  it('can disable browser authentication without disabling the Host and Origin fence', async () => {
+    const { routes, connection, dispose } = await mounted({
+      browserAuthentication: false,
+      trustedHosts: ['harness.example'],
+    })
+    try {
+      expect(connection.authenticatedUrl('http://harness.example/')).toBe('http://harness.example/')
+      expect(connection.authorizeIndex(
+        fakeRequest({ host: 'harness.example' }, '/'),
+        fakeResponse().response,
+      )).toBe(true)
+      expect(connection.requestRejection(fakeRequest({ host: 'harness.example' }))).toBeUndefined()
+      expect(connection.requestRejection(fakeRequest({ host: 'untrusted.example' }))).toBe(403)
+
+      const allowed = fakeResponse()
+      await routes[0]!.handler(fakeRequest({ host: 'harness.example' }), allowed.response)
+      expect(allowed.state.status).toBe(404)
+    } finally {
+      await dispose()
+    }
+  })
+
   it('provides a disposable dedicated RPC channel', async () => {
     const ctx = new Context()
     const routes: WebRoute[] = []

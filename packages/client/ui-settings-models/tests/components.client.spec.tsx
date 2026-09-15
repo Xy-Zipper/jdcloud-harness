@@ -307,6 +307,32 @@ async function mountDeepSeekCard(overrides: Parameters<typeof scriptedFace>[0] =
 }
 
 describe('ModelsSection', () => {
+  it('shows active providers without edit actions in a remote browser', async () => {
+    const scripted = scriptedFace()
+    const ctx = ctxWith(scripted.face)
+    const controller = new ModelsSettingsStore(
+      ctx,
+      settingsSchema,
+      new SettingsDescribeMirror(ctx, 'memory'),
+    )
+    await controller.load()
+    render(<ModelsSection
+      controller={controller}
+      useSnapshot={bindSnapshotSelector(controller.store)}
+      operations={operationsWith(scripted.face)}
+      schema={settingsSchema}
+      t={t}
+      renderSlot={() => null}
+    />)
+
+    expect(screen.getByText(en.readOnly)).toBeTruthy()
+    expect(screen.getByText('DeepSeek')).toBeTruthy()
+    expect(screen.getByText('openai')).toBeTruthy()
+    expect(screen.queryByText('anthropic')).toBeNull()
+    expect(screen.queryByRole('button', { name: en.edit })).toBeNull()
+    expect(screen.queryByRole('button', { name: en.add })).toBeNull()
+  })
+
   it('hides both add actions when their settings namespaces are absent', async () => {
     const scripted = scriptedFace()
     scripted.face.settings.describe.mockResolvedValue(remoteOk({ writable: true, hasDocument: false, namespaces: [] }))
@@ -550,7 +576,7 @@ describe('ModelsSection', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('reuses the provider editor as a required credential-only onboarding form', async () => {
+  it('supports a required credential-only provider editor', async () => {
     let finishSet: ((response: { ok: true; value: undefined }) => void) | undefined
     const set = vi.fn(() => new Promise<{ ok: true; value: undefined }>((resolve) => {
       finishSet = resolve
@@ -572,18 +598,18 @@ describe('ModelsSection', () => {
       credentialOnly
       credentialRequired
       autoFocusCredential
-      cancelLabelKey="onboardingLater"
-      submitLabelKey="onboardingSave"
-      submitBusyLabelKey="onboardingSaving"
+      cancelLabelKey="cancel"
+      submitLabelKey="apply"
+      submitBusyLabelKey="applying"
       onClose={onClose}
     />)
 
     const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
-    const save = screen.getByText<HTMLButtonElement>(en.onboardingSave)
+    const save = screen.getByText<HTMLButtonElement>(en.apply)
     expect(document.activeElement).toBe(key)
     expect(key.required).toBe(true)
     expect(save.disabled).toBe(true)
-    expect(screen.getByText(en.onboardingLater)).toBeTruthy()
+    expect(screen.getByText(en.cancel)).toBeTruthy()
     expect(screen.queryByText(en.customized)).toBeNull()
     expect(screen.queryByLabelText(en.baseUrl)).toBeNull()
 
@@ -597,7 +623,7 @@ describe('ModelsSection', () => {
     expect(save.disabled).toBe(false)
     fireEvent.click(save)
 
-    expect(await screen.findByText(en.onboardingSaving)).toBeTruthy()
+    expect(await screen.findByText(en.applying)).toBeTruthy()
     expect(set).toHaveBeenCalledWith('DEEPSEEK_API_KEY', 'sk-onboarding')
     expect(mutate).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()

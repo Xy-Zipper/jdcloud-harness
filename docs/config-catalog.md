@@ -368,6 +368,8 @@ Requires: `credentials`
 export interface ConnectionConfig {
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
+  /** Require the launch-token exchange and signed browser cookie. Default: true. */
+  browserAuthentication?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -2839,7 +2841,7 @@ Source: [`packages/goal/tool-goal/src/index.ts:25`](../packages/goal/tool-goal/s
 
 ## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
 
-Requires: `agents` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
+Requires: `agents` · `attachments` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
 
 ```ts config-catalog
 /** Deployment-owned JDCloud result limits. */
@@ -2851,7 +2853,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:33`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:36`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 

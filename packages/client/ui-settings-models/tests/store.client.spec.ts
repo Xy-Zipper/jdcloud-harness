@@ -272,8 +272,8 @@ describe('edge joins', () => {
     expect(store.store.getSnapshot()).toMatchObject({ status: 'error', error: 'settings down' })
   })
 
-  it('reports a terminally unavailable settings mirror precisely', async () => {
-    const { ctx } = api()
+  it('lists active providers read-only when Host settings are unavailable to this browser', async () => {
+    const { ctx, seenRefs } = api()
     const store = new ModelsSettingsStore(
       ctx,
       settingsSchema,
@@ -281,9 +281,16 @@ describe('edge joins', () => {
     )
     await store.load()
     expect(store.store.getSnapshot()).toMatchObject({
-      status: 'error',
-      error: 'settings are unavailable in this browser',
+      status: 'ready',
+      error: null,
+      writable: false,
     })
+    expect(store.store.getSnapshot().rows.map(row => row.entry.provider)).toEqual([
+      'deepseek-official', 'openai', 'ghost',
+    ])
+    expect(store.store.getSnapshot().rows.every(row => row.configured && !row.removable)).toBe(true)
+    expect(store.store.getSnapshot().namespaces.size).toBe(0)
+    expect(seenRefs).toEqual([])
   })
 
   it('reuses a held settings view after its refresh fails', async () => {

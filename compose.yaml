@@ -4,6 +4,10 @@ services:
   jdcloud-harness:
     # The image is built from this private repository by the accompanying Dockerfile.
     image: jdcloud-harness:local
+    extra_hosts:
+      - "mi.kindoucloud.com:172.20.46.20"
+      - "kindoucloud.com:172.20.46.20"
+      - "beta.kindoucloud.com:172.20.46.20"
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,9 +18,9 @@ services:
       - node
       - /app/apps/cli/lib/bin.js
       - web
-      # Load the private JDCloud login and low-code features without an npm registry.
+      # JDCloud Login owns user identity for this deployment; the overlay keeps Host/Origin checks only.
       - --patch
-      - /app/packages/bundle/jdcloud-login/cordis.patch.yml
+      - /app/docker.no-browser-auth.patch.yml
       - --no-open
       # The API trust fence must accept the public domain or IP seen by browsers.
       - --trusted-host
@@ -24,13 +28,14 @@ services:
     environment:
       # Every browser user connected to this service shares settings.yaml below this directory.
       DSH_HOME: /var/lib/jdcloud-harness
-      # settings.yaml refers to this server-side environment variable and never exposes its value to browsers.
+      # Keep the deployment's unified key while satisfying the shipped DeepSeek routes.
       GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
+      DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       NODE_ENV: production
       TZ: ${TZ:-Asia/Hong_Kong}
     volumes:
-      # Persist the shared model configuration, profiles, sessions, and attachments.
-      - jdcloud_harness_data:/var/lib/jdcloud-harness
+      # Expose shared model configuration, profiles, sessions, and attachments on the host.
+      - ./data:/var/lib/jdcloud-harness:Z
       # Keep files generated during conversations outside the immutable application image.
       - jdcloud_harness_workspace:/workspace
     ports:
@@ -66,5 +71,4 @@ services:
       - 127.0.0.1:3080
 
 volumes:
-  jdcloud_harness_data:
   jdcloud_harness_workspace:

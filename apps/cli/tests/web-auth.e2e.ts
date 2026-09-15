@@ -64,15 +64,17 @@ function cleanEnvironment(root: string, dshHome: string): NodeJS.ProcessEnv {
   }
 }
 
-/** Start the public source CLI and wait for its authenticated readiness URL. */
-async function startWeb(root: string, dshHome: string, port: number): Promise<RunningWeb> {
-  const child = spawn(process.execPath, [
+/** Start the public source CLI and wait for its readiness URL. */
+async function startWeb(root: string, dshHome: string, port: number, patchFile?: string): Promise<RunningWeb> {
+  const args = [
     '--import', TSX_LOADER,
     DSH_SOURCE_BIN,
     'web',
+    ...(patchFile === undefined ? [] : ['--patch', patchFile]),
     '--no-open',
     '--port', String(port),
-  ], {
+  ]
+  const child = spawn(process.execPath, args, {
     cwd: root,
     env: cleanEnvironment(root, dshHome),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -204,6 +206,33 @@ describe('dsh web authentication through the real CLI', () => {
     } finally {
       if (second !== undefined) await stopWeb(second)
       if (first !== undefined) await stopWeb(first)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('allows the trusted Web origin without a token when browser authentication is disabled', {
+    timeout: 180_000,
+  }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-web-no-auth-real-cli-'))
+    const dshHome = join(root, '.dsh')
+    const port = await freePort()
+    let running: RunningWeb | undefined
+    try {
+      running = await startWeb(root, dshHome, port, join(REPO_ROOT, 'docker.no-browser-auth.patch.yml'))
+      expect(running.launchUrl).toBe(`http://127.0.0.1:${String(port)}/`)
+      expect((await fetch(running.launchUrl)).status).toBe(200)
+      expect((await describeSettings(port, `127.0.0.1:${String(port)}`)).status).toBe(200)
+      expect(await describeSettings(port, 'untrusted.example')).toEqual({
+        status: 403,
+        body: 'forbidden',
+      })
+    } catch (error) {
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)}\n${redact(running?.output() ?? '')}`,
+        { cause: error },
+      )
+    } finally {
+      if (running !== undefined) await stopWeb(running)
       await rm(root, { recursive: true, force: true })
     }
   })

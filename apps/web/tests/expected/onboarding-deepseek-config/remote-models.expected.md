@@ -1,0 +1,23 @@
+- dialog "设置":
+  - navigation:
+    - text: 设置
+    - button "通用设置":
+      - img
+      - text: 通用设置
+    - button "模型":
+      - img
+      - text: 模型
+    - button "插件":
+      - img
+      - text: 插件
+    - button "Agent 预设":
+      - img
+      - text: Agent 预设
+  - button "关闭":
+    - img
+    - text: 关闭
+  - heading "模型" [level=2]
+  - paragraph: 查看已配置的模型提供方；部署允许时可编辑其设置。
+  - paragraph: 模型设置由服务器统一管理，当前浏览器仅可查看。
+  - list:
+    - listitem: DeepSeek

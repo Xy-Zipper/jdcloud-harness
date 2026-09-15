@@ -2,9 +2,11 @@
  * Models settings page store: one snapshot joining the configurable-provider
  * directory (`llm/listProviders` joined with `llm/listConfigurableProviders`),
  * the settings namespaces (shared settings mirror),
- * and the referenced credentials (`credentials/describe`). The host stays the
- * single fact source — every mutation writes through the wire and the page
- * re-renders from the next describe, pushed or refetched.
+ * and the referenced credentials (`credentials/describe`). A non-loopback
+ * browser cannot read Host settings, so it receives a read-only projection of
+ * the active provider directory instead. The host stays the single fact source
+ * — every mutation writes through the wire and the page re-renders from the
+ * next describe, pushed or refetched.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -172,9 +174,9 @@ export class ModelsSettingsStore {
   /**
    * Refresh the whole page snapshot: the provider directory and the mirror's
    * settings answer in parallel, then one batched credential describe over
-   * every referenced ref. Provider failure or absence of an initial settings
-   * answer keeps the last good rows and surfaces an error; a failed settings
-   * refresh reuses the mirror's held view.
+   * every referenced ref. Provider failure surfaces an error. A browser that
+   * cannot access Host settings receives only active providers as read-only
+   * rows; a failed settings refresh reuses the mirror's held view.
    * @returns nothing; the snapshot carries the outcome.
    */
   async load(): Promise<void> {
@@ -189,7 +191,28 @@ export class ModelsSettingsStore {
     if (!declared.ok) { this.failLoad(generation, declared.error.message); return }
     const mirrored = this.describeFace.getSnapshot()
     if (mirrored.view === undefined) {
-      this.failLoad(generation, mirrored.error ?? 'settings are unavailable in this browser')
+      if (mirrored.status !== 'unavailable') {
+        this.failLoad(generation, mirrored.error ?? 'settings are unavailable in this browser')
+        return
+      }
+      const activeRows: ProviderRow[] = joinProviderDirectory(registered.value, declared.value)
+        .filter(entry => entry.active)
+        .map(entry => ({
+          entry,
+          configured: true,
+          removable: false,
+          apiKeyEnv: undefined,
+          credential: undefined,
+        }))
+      if (generation !== this.generation) return
+      this.store.update((s) => {
+        s.status = 'ready'
+        s.error = null
+        s.credentialError = null
+        s.writable = false
+        s.rows = activeRows
+        s.namespaces = new Map()
+      })
       return
     }
     const providers = joinProviderDirectory(registered.value, declared.value)
@@ -266,75 +289,4 @@ export function providerUsable(row: ProviderRow): boolean {
   if (!row.entry.active) return false
   if (row.apiKeyEnv === undefined) return true
   return row.credential?.configured === true
-}
-
-/** First-run onboarding readiness derived only from the shared Models join. */
-export type OnboardingReadiness =
-  | { kind: 'loading' }
-  | { kind: 'adapter-absent' }
-  | { kind: 'provider-ready' }
-  | { kind: 'credential-missing' }
-  | {
-    kind: 'unavailable'
-    reason:
-      | 'load-failed'
-      | 'provider-inactive'
-      | 'credentials-unavailable'
-      | 'settings-read-only'
-      | 'credential-read-only'
-  }
-
-/**
- * Project first-run readiness from the provider/settings/credential join used
- * by the Models page. The step exists to leave the user with a model to talk
- * to, so ANY usable provider ends it; only when none exists does the official
- * DeepSeek route — the one route the prompt can offer a key field for — decide
- * whether prompting can help. A missing official configurable-provider
- * declaration means the adapter is not repairable by navigating to Models.
- * @param state - current shared Models join snapshot.
- * @returns the onboarding state without reading a parallel fact source.
- */
-export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadiness {
-  if ((state.status === 'idle' || state.status === 'loading') && state.rows.length === 0) {
-    return { kind: 'loading' }
-  }
-  if (state.status === 'error') {
-    return {
-      kind: 'unavailable',
-      reason: 'load-failed',
-    }
-  }
-  if (state.rows.some(providerUsable)) return { kind: 'provider-ready' }
-  const row = state.rows.find(candidate =>
-    candidate.entry.provider === 'deepseek-official'
-    && candidate.entry.settingsNs === 'llm-deepseek'
-    && candidate.entry.settingsPath.length === 0)
-  if (row === undefined) return { kind: 'adapter-absent' }
-  if (!row.entry.active) {
-    return {
-      kind: 'unavailable',
-      reason: 'provider-inactive',
-    }
-  }
-  // Past the usable gate an active route names a reference it has no stored
-  // credential for, so the remaining questions are all about that credential.
-  if (state.credentialError !== null || row.credential === undefined) {
-    return {
-      kind: 'unavailable',
-      reason: 'credentials-unavailable',
-    }
-  }
-  if (!state.writable) {
-    return {
-      kind: 'unavailable',
-      reason: 'settings-read-only',
-    }
-  }
-  if (!row.credential.writable) {
-    return {
-      kind: 'unavailable',
-      reason: 'credential-read-only',
-    }
-  }
-  return { kind: 'credential-missing' }
 }

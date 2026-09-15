@@ -1,5 +1,5 @@
 ---
-description: "Models settings and product-onboarding plugin for the dsh web client: provider rows, API-key management, model lists, and the DeepSeek first-run dialogs."
+description: "Models settings for the dsh web client: provider rows, API-key management, model lists, and a read-only active-provider view for remote browsers."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-settings-models` is the Models settings page of the dsh web client: users configure API keys (stored write-only under the profile's credential reference), edit each provider's model list, and hand-declare custom pi-ai routes, with provider rows and one editor card at a time. The page joins the provider directory, the settings document, and the credential descriptions into one shared snapshot, so a row's state stays consistent across all three. It also walks first-run users through two ordered dialogs — a versioned internal-testing notice and the conditional official-DeepSeek credential step.
+`dsh-client-ui-settings-models` is the Models settings page of the dsh web client: loopback users configure API keys (stored write-only under the profile's credential reference), edit each provider's model list, and hand-declare custom pi-ai routes, with provider rows and one editor card at a time. The page joins the provider directory, the settings document, and credential descriptions into one shared snapshot. Remote browsers see the Host's active providers as a read-only list and never receive the settings document or credential state.
 
 ## Table of Contents
 
@@ -41,9 +41,9 @@ The collapsed 自定义设置 fold carries the curated extras: `baseURL` for bot
 
 The add flow is a card carrying the dormant-directory provider select — a bare-mounted `llm-pi-ai` offers its whole installed catalog before any route exists. **Add a custom provider** declares a route pi-ai does not ship; the create card asks for a unique **Provider ID**, an endpoint, a protocol, and at least one uniquely-identified model, because nothing can default those. The endpoint must be a parseable HTTP or HTTPS URL; localhost, IPv4 and IPv6 literals, and custom ports remain valid. A syntax error blocks both discovery and creation at the field, while a request failure remains a separate provider error. **Fetch available models** asks the `llm/discoverModels` Remote about the endpoint the form shows, so adding a provider is one pass instead of save-then-return; the reply opens a searchable picker rather than being written, and nothing is written until **Add selected**. Each selected candidate copies its id, display name, context window, and output-token cap into the editable row when disclosed, while an existing row retains its user-tuned values. Search matches model ids and optional display names without clearing hidden selections. **Select all** adds the visible results, while **Deselect all** clears the entire selection so hidden results cannot be adopted accidentally. A row is deletable only when the user layer alone carries it (removal restores the composition base), and its confirmation dialog names the provider.
 
-### First-run dialogs
+### Remote deployments
 
-After the versioned notice step completes, the DeepSeek step projects first-run readiness from the same joined snapshot. ANY provider the user can already reach ends it without rendering; only a user with none is asked for the official DeepSeek key. Configure later completes only this coordinator pass, and an absent adapter, inactive route, failed join, read-only deployment, or unusable capability completes the step without rendering — Models remains the diagnostic surface.
+A non-loopback browser cannot read or write Host settings. The page still lists the provider routes currently registered on the Host, marks the deployment read-only, and hides edit, add, delete, and credential-state controls. Deployment administrators configure model routes and credentials on the server.
 
 ### Extension slots
 
@@ -57,7 +57,7 @@ The section declares two seats for plugins distributed outside this repository, 
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The page never holds a full settings section: it holds only the REDACTED descriptor, so every edit lands as `settings.mutate` path ops against the stored section — a set per changed field, an unset per cleared one, and a single unset for a deleted provider row.
+On a loopback browser, the page never holds a full settings section: it holds only the REDACTED descriptor, so every edit lands as `settings.mutate` path ops against the stored section — a set per changed field, an unset per cleared one, and a single unset for a deleted provider row. On a remote browser, the settings mirror stays unavailable and the store joins only active provider routes into non-editable rows.
 
 ### Validation
 
@@ -66,10 +66,6 @@ A typed API key is judged on its own field: after trimming, it must be non-empty
 ### Concurrency and credentials
 
 Each settings write carries the card's current `revision`, so a concurrent write from another tab or an external `settings.yaml` edit is refused as `settings/conflict`. After settings commit, the card adopts the returned redacted user subtree and revision before storing the credential, so a failed credential stage retries only that stage. Deletion removes a configured, writable credential only when the profile names the page's derived `<ROUTE>_API_KEY` target, then unsets the profile; both operations are idempotent. Once loaded, the page subscribes to forwarded `settings/document-updated`, `credentials/reference-updated`, and `llm/adapters-updated` owner events, plus local `connection/reset`, so external edits converge without polling.
-
-### Onboarding coordinator
-
-The notice step owns its exact copy in `src/client/locales.ts` and its acknowledgement version in `src/onboarding-copy.ts`; on loopback it compares and writes `ui-onboarding.welcomeNoticeVersion` through the existing settings API, and only an explicit Continue records the current version. A non-loopback browser cannot use that Host-only namespace, so acknowledgement is process-local and the notice returns after reload. The DeepSeek step renders the existing `ProviderEditor` in credential-only mode inside the shared onboarding modal; `credentials.set` stays the only secret write, and no provider settings are changed.
 
 </details>
 
@@ -108,7 +104,7 @@ These limits define the editor's field coverage and the page's reach; they are c
 - **Credential cleanup is intentionally narrow** — deleting a row removes the configured, writable credential only when its reference is the exact `<ROUTE>_API_KEY` target this page derives. Custom references, environment credentials, and unidentifiable targets are retained because the row cannot prove ownership of them.
 - **Only pi-ai routes can be hand-declared** — the custom-provider card writes into `llm-pi-ai`, the one namespace whose profiles describe a whole provider. A `llm-deepseek` route is a composition fact, not something this page can create.
 - **Interrogation covers OpenAI-compatible and Anthropic Messages endpoints** — OpenAI protocols accept a standard `data` array or an enriched `models` map, while Anthropic uses its native model-listing route; every other protocol reports that it cannot be asked and its models are entered by hand.
-- **Undeclared live routes render nowhere** — a route registered without a configurable-provider declaration has no settings address; it stays visible in pickers but not on this page's rows.
+- **Undeclared live routes are not editable** — a route registered without a configurable-provider declaration has no settings address. It stays visible in pickers and in the remote read-only list, but the loopback Models editor has no row it can open for that route.
 
 <a id="dev-note"></a>
 ### Dev Note

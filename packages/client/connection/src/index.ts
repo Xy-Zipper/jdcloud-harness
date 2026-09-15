@@ -72,6 +72,8 @@ export const inject = ['credentials']
 export interface ConnectionConfig {
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
+  /** Require the launch-token exchange and signed browser cookie. Default: true. */
+  browserAuthentication?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -89,6 +91,7 @@ export interface ConnectionConfig {
 
 export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
+  browserAuthentication: z.boolean().default(true),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
@@ -103,6 +106,7 @@ export const Config: z<ConnectionConfig> = z.object({
  */
 export async function apply(ctx: Context, config?: ConnectionConfig): Promise<void> {
   const recovery = resolveConnectionConfig(config?.recovery)
+  const browserAuthentication = config?.browserAuthentication ?? true
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
@@ -114,7 +118,9 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const connection = new HostConnectionService(
     ctx,
     trustedHosts,
-    await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
+    browserAuthentication
+      ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
+      : undefined,
   )
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)

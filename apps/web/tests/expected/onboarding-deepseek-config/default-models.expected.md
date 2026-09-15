@@ -18,7 +18,7 @@
     - img
     - text: 关闭
   - heading "模型" [level=2]
-  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+  - paragraph: 查看已配置的模型提供方；部署允许时可编辑其设置。
   - list:
     - listitem:
       - text: DeepSeek

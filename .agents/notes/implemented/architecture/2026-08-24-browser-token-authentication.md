@@ -10,7 +10,7 @@ The Web Host runs tool-capable Sessions with the current operating-system user's
 
 ## Decision
 
-`dsh-client-connection` authenticates the complete Host API before dispatch. Every API Proxy method, Remote unary call, generic Connection channel, and Remote WebSocket stream requires the same browser session; endpoint ownership and method names do not alter authority. The existing Host/Origin checks run first and retain their DNS-rebinding and cross-site-request role, returning 403 when they fail. A trusted Host without a valid browser session receives 401. The browser-trust rules remain owned by the [carrier-level browser trust decision](2026-07-28-api-browser-trust-boundary.md).
+`dsh-client-connection` authenticates the complete Host API before dispatch by default. Every API Proxy method, Remote unary call, generic Connection channel, and Remote WebSocket stream uses the same browser-session policy; endpoint ownership and method names do not alter authority. The existing Host/Origin checks run first and retain their DNS-rebinding and cross-site-request role, returning 403 when they fail. A trusted Host without a valid browser session receives 401 while `browserAuthentication` is enabled. The explicit deployment opt-out is owned by the [configurable browser authentication decision](2026-09-15-configurable-browser-authentication.md). The browser-trust rules remain owned by the [carrier-level browser trust decision](2026-07-28-api-browser-trust-boundary.md).
 
 Each Host process generates a random launch token, retained by the root application context across Connection hot reloads. `dsh-web-app` prints and opens the normal root URL with that token in the query once per process. `frontend-static` asks Connection to authorize index responses: only `GET /?token=...` exchanges the process token for a cookie, then redirects to clean `/`; the token is not accepted on API paths or in an Authorization header. An obsolete token paired with a valid cookie redirects to clean `/`. Missing and invalid credentials receive one minimal 401 response. Static non-index assets remain public.
 
@@ -40,7 +40,7 @@ Unit coverage pins process-token retention across Connection reloads, one secret
 
 ## Consequences
 
-Possession of the browser cookie authorizes the complete tool-capable Host API, matching the authority the Web application exposes after Session creation. `Host` does not grant a higher method tier, and a method migration between API Proxy and Typert Remote cannot change its caller set.
+When browser authentication is enabled, possession of the browser cookie authorizes the complete tool-capable Host API, matching the authority the Web application exposes after Session creation. `Host` does not grant a higher method tier, and a method migration between API Proxy and Typert Remote cannot change its caller set.
 
 The persistent secret makes cookies survive restarts but gives a stolen cookie up to the configured absolute lifetime. Deleting the record and restarting the process is the global revocation mechanism; the active Connection intentionally avoids credential-provider work on each request. Omitting `Secure` preserves loopback HTTP and permits plaintext transmission if an operator makes the same cookie authority reachable over an unencrypted network. The startup URL contains a process credential and must be treated as sensitive output; runtime diagnostics do not repeat it.
 

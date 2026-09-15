@@ -1,0 +1,35 @@
+# Never copy local credentials or Harness user data into an image layer.
+.env
+.env.*
+!.env.example
+.dsh
+
+# Install Linux dependencies inside the builder instead of copying host artifacts.
+node_modules
+**/node_modules
+.pnpm-store
+
+# Rebuild generated artifacts inside the image.
+lib
+**/lib
+apps/web/dist
+.dsh-build
+dist
+dist-exe
+coverage
+.artifacts
+.release
+*.tsbuildinfo
+
+# Exclude editor, VCS, cache, and local test residue from the build context.
+.git
+.github
+.idea
+.vscode
+.cache
+.playwright-mcp
+.worktrees
+worktrees
+tmp
+.tmp
+*.log

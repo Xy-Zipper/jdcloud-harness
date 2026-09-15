@@ -321,11 +321,24 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         {configured.map((row) => {
           const target = targetOf(row)
           const namespace = state.namespaces.get(target.settingsNs)
-          /* v8 ignore next -- the join marks a row configured only when its namespace resolved */
-          if (namespace === undefined) return null
           const error = row.entry.error === undefined
             ? null
             : <p role="alert" className={styles['error']}>{row.entry.error}</p>
+          if (namespace === undefined) {
+            return (
+              <li key={row.entry.provider} className={styles['rowCard']}>
+                <div className={styles['rowHead']}>
+                  <span className={styles['rowIdentity']}>
+                    <span className={styles['rowName']}>{row.entry.displayName}</span>
+                    {row.entry.declared === true
+                      ? <span className={styles['rowTag']}>{t('customTag')}</span>
+                      : null}
+                  </span>
+                </div>
+                {error}
+              </li>
+            )
+          }
           if (needsSetup(row, anyUsable) && !dismissedSetup.has(row.entry.provider)) {
             // First-run posture: the provider exists but has no key — the
             // setup card IS its presence on the page, until the user closes it.

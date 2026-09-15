@@ -1,5 +1,5 @@
 ---
-description: "Settings shell, ownerless copy, and durable product-onboarding namespace for the dsh web client: the General section, trigger chrome, and onboarding ledger projection."
+description: "Settings shell and onboarding coordinator for the dsh web client: the General section, trigger chrome, and onboarding ledger projection."
 kind: "package-reference"
 ---
 
@@ -61,10 +61,6 @@ The shell is an explicit recovery consumer, so it injects Connection directly ra
 
 On a loopback page, the Client loads the provider's `hasDocument` capability through `settings/describe` and renders **Open configuration file** only when the Host confirms that a provider-owned local document can be prepared. The action calls the pathless, browser-authenticated `settings/openSettingsDocument` Remote; the Host resolves the provider path again, materializes an absent document, and hands it to a native text editor (`open -t` on macOS, bypassing a browser file association; the desktop file association on Linux and Windows; Windows association after `wslpath -w` translation on WSL). Open failures keep the action available and render a localized error. Reopening the dialog or reconnecting refreshes availability after a transient read failure or Host topology change. Non-loopback pages retain the Client policy that withholds this native action and its settings read.
 
-### Host half
-
-The Host half registers `ui-onboarding` in the user-settings seam. The welcome step contributed by ui-settings-models reads and writes its `welcomeNoticeVersion` through the existing public settings boundary; the shell itself remains policy-free.
-
 </details>
 
 -----
@@ -110,4 +106,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. The settings seam validates and publishes the durable onboarding section, while slot conflicts fail loud in the slot core. The local document action is browser state over typed RPC responses and is covered by store/component tests rather than a Cordis runtime relationship.
+**Runtime invariant:** No companion is published. The Host entry is inert, slot conflicts fail loud in the slot core, and the local document action is browser state over typed RPC responses covered by store/component tests rather than a Cordis runtime relationship.

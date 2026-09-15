@@ -51,3 +51,22 @@ npx vitest run packages/<group>/<package> \
 - `tools.ts` 的 `sessionAttachments` 只被 `jdcloud_lowcode_upload_file` 调用；
   测附件收集必须走上传工具，在 `create`/`update` 里 append 消息无效。
 - v8-to-istanbul 对 `if (C) return X` 的分支计数是 `[then, else]`。
+
+## 发布与部署（三条互不相关的轨道）
+
+1. **npm 包发布**：本地 `pnpm run release:dsh <major|minor|patch|x.y.z>` 写版本并提交 →
+   人工打 `dsh-v*` tag → GitHub Actions 手动跑 `release-publish.yml`。
+   版本必须落在仓库里；CI 只校验不写。发布按包查 registry，幂等，重跑安全。
+2. **生产部署**：`compose.yaml`（Caddy 反代 + harness 仅监听 loopback）。
+   ⚠️ **其引用的 `Dockerfile` 全仓从未存在过**，且缺 `.dockerignore` / `.env.example`
+   （compose 需要 `JDCLOUD_HARNESS_TRUSTED_HOST`、`GPT_API_KEY`）→ 该路径目前不可用。
+3. **其他**：文档站（GitHub Pages / Cloudflare Pages）、桌面（electron-builder）、
+   Python SDK（PyPI）、native addon（npm）。
+
+### 部署相关的硬约束
+- `dsh web` **显式拒绝 `--host 0.0.0.0`**（安全考虑），故必须靠反代暴露；
+  公网部署**必须**传 `--trusted-host`，否则 `/api` 的 host/origin 信任栅栏会拦掉浏览器请求。
+- 默认监听 `127.0.0.1:3080`。认证是浏览器会话（launch token → HMAC Cookie），不是 API token。
+- `pnpm run build` **不含 desktop**，桌面需另跑 `build:desktop`。
+- `build:official` 要求预先设置 `DSH_CLIENT_COMMIT_HASH` 与 `DSH_CLIENT_VERSION`。
+- Node `^22.19.0 || >=24.0.0`，pnpm `11.7.0`；native 是 C（`cc`/`musl-gcc`），无 Rust。

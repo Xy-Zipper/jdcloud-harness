@@ -370,6 +370,8 @@ export type Config = LocalConfig
 export interface ConnectionConfig {
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
+  /** Require the launch-token exchange and signed browser cookie. Default: true. */
+  browserAuthentication?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -2841,7 +2843,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
 
-需要：`agents` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
+需要：`agents` · `attachments` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
 
 ```ts config-catalog
 /** Deployment-owned JDCloud result limits. */
@@ -2853,7 +2855,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:31`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:36`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
