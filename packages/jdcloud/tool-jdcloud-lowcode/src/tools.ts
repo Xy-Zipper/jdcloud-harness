@@ -20,6 +20,7 @@ import type {
 } from './current-user.ts'
 import { buildFormData } from './table-schema.ts'
 import type { TableFieldInput } from './table-schema.ts'
+import { actionForPermission, permissionNotice, staleSnapshotNotice } from './user-notice.ts'
 
 /** Fully resolved output and pagination limits for the tool set. */
 export interface LowcodeToolConfig {
@@ -520,7 +521,8 @@ async function requireExecutionSnapshot(
   const snapshot = snapshots.get(agent)
   if (boundary === undefined || boundary.openTurnStartSeq === null || snapshot === undefined
     || boundary.lastTurn !== snapshot.turn) {
-    reject('JDCloud capabilities must be refreshed by a browser prompt in the current open turn', 'JDCLOUD_LOWCODE_SNAPSHOT_REQUIRED')
+    const notice = staleSnapshotNotice()
+    reject(notice.message, notice.code)
   }
   const status = await ctx.jdcloudAuthController.status()
   if (!status.authenticated) {
@@ -554,10 +556,8 @@ async function requireMenu(
 /** Enforce one JDCloud write grant before any modifying request is sent. */
 function requirePermission(menu: LowcodeMenuCapability, permission: LowcodeWritePermission): void {
   if (menu.agentPermissions.includes(permission)) return
-  reject(
-    `JDCloud function ${JSON.stringify(menu.fullName)} does not grant ${permission}`,
-    'JDCLOUD_LOWCODE_PERMISSION_REQUIRED',
-  )
+  const notice = permissionNotice(actionForPermission(permission))
+  reject(notice.message, notice.code)
 }
 
 type SessionAttachment =

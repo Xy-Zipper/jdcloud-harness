@@ -48,6 +48,8 @@ interface MountedLowcode {
   readonly readFileStream: ReturnType<typeof vi.fn>
   readonly readImage: ReturnType<typeof vi.fn>
   browserPrompt(turn?: number, step?: number): Promise<UserMessage[]>
+  prompt(text: string, turn?: number, step?: number): Promise<UserMessage[]>
+  preStepWith(messages: UserMessage[], turn?: number, step?: number): Promise<UserMessage[]>
   continuation(turn?: number, step?: number): Promise<UserMessage[]>
   call(name: string, argumentsValue: unknown): Promise<ToolExecutionResult>
 }
@@ -216,6 +218,17 @@ async function mountLowcode(options: {
         content: [{ type: 'text', text: '查询本周打卡数据' }],
         source: { kind: 'user', rpcId: `rpc-${String(turn)}-${String(step)}` } as never,
       })], turn, step)
+    },
+    /** Run one pre-step whose browser prompt carries explicit user text. */
+    async prompt(text: string, turn = 1, step = 1) {
+      return await preStep([createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user', rpcId: `rpc-${String(turn)}-${String(step)}` } as never,
+      })], turn, step)
+    },
+    /** Run one pre-step over caller-built messages, for source and block variants. */
+    async preStepWith(messages: UserMessage[], turn = 1, step = 1) {
+      return await preStep(messages, turn, step)
     },
     async continuation(turn = 1, step = 2) {
       return await preStep([], turn, step)
@@ -491,6 +504,78 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(mounted.requestAuthenticated).toHaveBeenCalledTimes(3)
   })
 
+  it('states the customer-facing refusal when a prompt asks for a write it cannot perform', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
+    const entered = await mounted.prompt('把没有简历的熊香玉的删了，另外修改一下廖文杰的部门')
+
+    const notices = entered.filter(message => message.source.kind === 'plugin'
+      && message.source.form === 'notice')
+      .map(message => message.content.map(block => block.type === 'text' ? block.text : '').join(''))
+    expect(notices).toContain('您当前暂无删除权限，请联系管理人员完成授权后再进行操作。')
+    expect(notices).toContain('您当前暂无修改权限，请联系管理人员完成授权后再进行操作。')
+    expect(notices).not.toContain('您当前暂无新增权限，请联系管理人员完成授权后再进行操作。')
+  })
+
+  it('states no refusal when the grant the prompt needs is present', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData', 'editData', 'deleteData']) })
+    const entered = await mounted.prompt('删除熊香玉并修改廖文杰的部门')
+
+    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+      .toEqual([])
+  })
+
+  it('states no refusal for a read-only prompt that only labels a menu containing write verbs', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([]) })
+    const entered = await mounted.prompt('查看 @[删除记录表](dsh-reference:jdcloud-lowcode-function/form-clock) 的数据')
+
+    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+      .toEqual([])
+  })
+
+  it('states no refusal for a non-browser message carrying write verbs', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([]) })
+    const entered = await mounted.preStepWith([createUserMessage({
+      content: [{ type: 'text', text: '删除这条记录' }],
+      source: { kind: 'plugin', plugin: 'other-plugin' } as never,
+    })], 1, 1)
+
+    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+      .toEqual([])
+  })
+
+  it('reads write verbs only from browser prompts inside a step that carries both message kinds', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([]) })
+    // One step can carry the Host-admitted browser prompt next to a message from
+    // another plugin. The browser prompt is inspected; the plugin message is
+    // skipped, so its write verb never becomes a refusal.
+    const entered = await mounted.preStepWith([
+      createUserMessage({
+        content: [{ type: 'text', text: '删除熊香玉这条记录' }],
+        source: { kind: 'user', rpcId: 'rpc-mixed-step' } as never,
+      }),
+      createUserMessage({
+        content: [{ type: 'text', text: '新增一条打卡记录' }],
+        source: { kind: 'plugin', plugin: 'other-plugin' } as never,
+      }),
+    ], 1, 1)
+
+    const notices = entered.filter(message => message.source.kind === 'plugin'
+      && message.source.form === 'notice')
+      .map(message => message.content.map(block => block.type === 'text' ? block.text : '').join(''))
+    expect(notices).toEqual(['您当前暂无删除权限，请联系管理人员完成授权后再进行操作。'])
+  })
+
+  it('states no refusal for a browser prompt whose only write verb sits in a non-text block', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([]) })
+    const entered = await mounted.preStepWith([createUserMessage({
+      content: [{ type: 'image', attachment: { attachmentId: 'sha256:1', mediaType: 'image/png', bytes: 1, width: 1, height: 1 } as never }],
+      source: { kind: 'user', rpcId: 'rpc-image-only' } as never,
+    })], 1, 1)
+
+    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+      .toEqual([])
+  })
+
   it('disposes its tools, prompt section, and browser-prompt listener with the plugin fiber', async () => {
     const mounted = await mountLowcode()
     expect(mounted.ctx.tools.schemas().map(schema => schema.name)).toEqual([
@@ -518,6 +603,13 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(guidance).toContain('before treating those fields as missing')
     expect(guidance).toContain('目前还缺少关键信息')
     expect(guidance).toContain('every described field, including required and optional fields')
+    expect(guidance).toContain('Every create, update, and delete call needs its own confirmation')
+    expect(guidance).toContain('one confirmation never authorizes a second call')
+    expect(guidance).toContain('Before update, show a before-and-after comparison naming the record id')
+    expect(guidance).toContain('Before delete, show a confirmation naming the record id')
+    expect(guidance).toContain('the fact that the deletion cannot be undone')
+    expect(guidance).toContain('restate what you are about to write as a short confirmation')
+    expect(guidance).toContain('never needs to display capability names, permission identifiers, endpoint paths')
     expect(guidance).toContain('conversation file or image')
     expect(guidance).toContain('jdcloud_lowcode_upload_file')
     expect(guidance).toContain('Conversation attachments are evidence until this upload succeeds')
@@ -587,10 +679,10 @@ describe('Host-authorized tool execution', () => {
   })
 
   it.each([
-    ['jdcloud_lowcode_create', { menu_id: 'form-clock', data: { title: 'x' } }, 'addData'],
-    ['jdcloud_lowcode_update', { menu_id: 'form-clock', record_id: 'row-1', data: { title: 'x' } }, 'editData'],
-    ['jdcloud_lowcode_delete', { menu_id: 'form-clock', record_id: 'row-1' }, 'deleteData'],
-  ])('rejects %s before any request when %s is absent', async (name, args, permission) => {
+    ['jdcloud_lowcode_create', { menu_id: 'form-clock', data: { title: 'x' } }, '新增'],
+    ['jdcloud_lowcode_update', { menu_id: 'form-clock', record_id: 'row-1', data: { title: 'x' } }, '修改'],
+    ['jdcloud_lowcode_delete', { menu_id: 'form-clock', record_id: 'row-1' }, '删除'],
+  ])('rejects %s before any request when the %s grant is absent', async (name, args, action) => {
     const mounted = await mountLowcode()
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
@@ -599,7 +691,7 @@ describe('Host-authorized tool execution', () => {
     const result = await mounted.call(name, args)
 
     expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_PERMISSION_REQUIRED')
-    expect(resultText(result)).toContain(`does not grant ${permission}`)
+    expect(resultText(result)).toContain(`您当前暂无${action}权限，请联系管理人员完成授权后再进行操作。`)
     expect(mounted.requestAuthenticated).not.toHaveBeenCalled()
     expect(mounted.requests).toEqual([])
   })
@@ -748,9 +840,9 @@ describe('Host-authorized tool execution', () => {
   })
 
   it.each([
-    ['create', ['editData'], 'addData'],
-    ['update', ['addData'], 'editData'],
-  ] as const)('requires %s uploads to have the matching write permission', async (writeKind, permissions, missing) => {
+    ['create', ['editData'], '新增'],
+    ['update', ['addData'], '修改'],
+  ] as const)('requires %s uploads to have the matching write permission', async (writeKind, permissions, action) => {
     const mounted = await mountLowcode({ currentUser: currentUser(permissions) })
     await mounted.browserPrompt()
     const ref = appendUserImage(mounted, { name: 'receipt.png' })
@@ -764,7 +856,7 @@ describe('Host-authorized tool execution', () => {
     })
 
     expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_PERMISSION_REQUIRED')
-    expect(resultText(result)).toContain(`does not grant ${missing}`)
+    expect(resultText(result)).toContain(`您当前暂无${action}权限，请联系管理人员完成授权后再进行操作。`)
     expect(mounted.readImage).not.toHaveBeenCalled()
     expect(mounted.requestAuthenticated).not.toHaveBeenCalled()
     expect(mounted.requests).toEqual([])

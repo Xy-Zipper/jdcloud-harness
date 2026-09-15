@@ -3,6 +3,10 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import {
+  AttachmentId,
+  type FileAttachmentRef,
+} from '@deepseek-ai/dsh-attachment'
 import type {
   JdcloudAuthenticatedRequest,
   JdcloudAuthStatus,
@@ -123,7 +127,12 @@ async function services(options: {
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
-  ctx.provide('attachments', { readImage: vi.fn() } as never)
+  ctx.provide('attachments', {
+    readImage: vi.fn(),
+    // A file upload streams the stored bytes; an empty stream is enough here
+    // because these tests assert routing, not payload contents.
+    readFileStream: vi.fn((_ref: FileAttachmentRef) => (async function* () { /* no chunks */ })()),
+  } as never)
 
   let statusValue: JdcloudAuthStatus = AUTHENTICATED
   let responder: RequestResponder = options.response ?? (() => ({ ok: true }))
@@ -737,6 +746,242 @@ describe('write-tool failures and table partial completion', () => {
       '/api/visualdev/base/fields/form-1',
       '/api/visualdev/form/create',
     ])
+  })
+
+  it('accepts well-formed attachment arrays and rejects malformed upload entries', async () => {
+    const fields = [
+      { enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files' },
+      { enCode: 'place', value: 'object', jdcloudKey: 'location', fullName: 'Place' },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/') ? fields : { ok: true },
+    })
+
+    // Each member must be an object carrying string `name` and `url`; a non-object
+    // member and a member with a non-string field are both out of contract.
+    const malformedFiles = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: {
+        files: [
+          { name: 'a.txt', url: 'https://example.test/a' },
+          'not-an-object',
+        ],
+      },
+    })
+    expect(errorCode(malformedFiles)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(malformedFiles)).toContain('Files (files) must be {name:string,url:string}[]')
+
+    const nonStringUrl = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: { files: [{ name: 'a.txt', url: 7 }] },
+    })
+    expect(errorCode(nonStringUrl)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(nonStringUrl)).toContain('Files (files) must be {name:string,url:string}[]')
+
+    // A location needs an object `lnglat`; a non-object one cannot be read as coordinates.
+    const badLnglat = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: { place: { address: 'Office', lnglat: 'not-an-object' } },
+    })
+    expect(errorCode(badLnglat)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(badLnglat))
+      .toContain('Place (place) must be {lnglat:{lng:number,lat:number},address:string}')
+
+    // A non-string address fails even when the coordinates are well formed.
+    const badAddress = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: { place: { address: 7, lnglat: { lng: 116.4, lat: 39.9 } } },
+    })
+    expect(errorCode(badAddress)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(badAddress))
+      .toContain('Place (place) must be {lnglat:{lng:number,lat:number},address:string}')
+
+    // The accepted shape still writes through.
+    const valid = await mounted.call('jdcloud_lowcode_update', {
+      menu_id: 'form-1',
+      record_id: 'row-1',
+      data: {
+        files: [{ name: 'a.txt', url: 'https://example.test/a' }],
+        place: { address: 'Office', lnglat: { lng: 116.4, lat: 39.9 } },
+      },
+    })
+    expect(valid.isError).toBe(false)
+  })
+
+  it('treats a required attachment as missing when no durable reference exists', async () => {
+    // `create` checks required values before component types, so the missing
+    // attachment is reported from the required pass rather than the type pass.
+    const fields = [
+      { enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files', required: true },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/') ? fields : { ok: true },
+    })
+
+    // A user message carrying only text contributes no attachment, and a nested
+    // `tool-result` block is walked without yielding one either.
+    mounted.agent.session.append('user/message', createUserMessage({
+      content: [
+        { type: 'text', text: 'please file this' },
+        { type: 'tool-result', toolCallId: ToolCallId('call-nested-empty'), content: [{ type: 'text', text: 'no attachment here' }] },
+      ],
+      source: { kind: 'user', rpcId: 'rpc-text-probe' } as never,
+    }), { surfaceOp: 'append' })
+
+    const result = await mounted.call('jdcloud_lowcode_create', { menu_id: 'form-1', data: {} })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_REQUIRED_FIELDS')
+    expect(resultText(result)).toContain('Files (files)')
+    // The nested tool-result contributed nothing, so upload was never attempted.
+    expect(mounted.requests.map(request => request.path))
+      .toEqual(['/api/visualdev/base/fields/form-1'])
+  })
+
+  it('resolves a session attachment by its exact id and by a unique sha256 prefix', async () => {
+    const fields = [{ enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files' }]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/')
+        ? fields
+        : request.path.includes('/upload')
+          ? { name: 'a.txt', url: 'https://example.test/a' }
+          : { ok: true },
+    })
+
+    const ref: FileAttachmentRef = {
+      attachmentId: AttachmentId('sha256:abcdef0123456789'),
+      name: 'a.txt',
+      bytes: 3,
+    }
+    mounted.agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'file', attachment: ref }],
+      source: { kind: 'user', rpcId: 'rpc-file-probe' } as never,
+    }), { surfaceOp: 'append' })
+
+    // An exact id resolves. An abbreviated prefix resolves too, but only at the
+    // two supported digest widths (8 or 64 hex characters).
+    const exact = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef0123456789',
+    })
+    expect(exact.isError).toBe(false)
+
+    const prefixed = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef01',
+    })
+    expect(prefixed.isError).toBe(false)
+  })
+
+  it('rejects a malformed file-upload response before trusting its fields', async () => {
+    const fields = [{ enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files' }]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/')
+        ? fields
+        : request.path.includes('/upload')
+          ? [{ name: 'a.txt', url: 7 }]
+          : { ok: true },
+    })
+
+    const ref: FileAttachmentRef = {
+      attachmentId: AttachmentId('sha256:abcdef0123456789'),
+      name: 'a.txt',
+      bytes: 3,
+    }
+    mounted.agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'file', attachment: ref }],
+      source: { kind: 'user', rpcId: 'rpc-file-probe' } as never,
+    }), { surfaceOp: 'append' })
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef0123456789',
+    })
+
+    // An array response is not a record, so it is rejected before its fields
+    // are read as an upload result.
+    expect(result.isError).toBe(true)
+    expect(resultText(result)).toContain('JDCloud file-upload response is invalid')
+  })
+
+  it('satisfies a required boolean field and uploads a file whose name carries no known media type', async () => {
+    const fields = [
+      { enCode: 'approved', value: 'boolean', jdcloudKey: 'custom', fullName: 'Approved', required: true },
+    ]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/')
+        ? fields
+        : request.path.includes('/upload')
+          ? { name: 'receipt', url: 'https://example.test/receipt' }
+          : { ok: true },
+    })
+
+    // A present boolean satisfies the required-value check, which is the one
+    // writeType whose check can succeed rather than falling through.
+    const created = await mounted.call('jdcloud_lowcode_create', {
+      menu_id: 'form-1',
+      data: { approved: true },
+    })
+    expect(created.isError).toBe(false)
+
+    // A file name with no extension resolves to no media type, so the upload
+    // falls back to a generic binary type instead of sending an empty one.
+    const ref: FileAttachmentRef = {
+      attachmentId: AttachmentId('sha256:abcdef0123456789'),
+      name: 'receipt',
+      bytes: 3,
+    }
+    mounted.agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'file', attachment: ref }],
+      source: { kind: 'user', rpcId: 'rpc-extensionless' } as never,
+    }), { surfaceOp: 'append' })
+
+    const uploaded = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef0123456789',
+    })
+    expect(uploaded.isError).toBe(false)
+  })
+
+  it('collects attachments across the whole Session transcript for an upload', async () => {
+    const fields = [{ enCode: 'files', value: 'array', jdcloudKey: 'uploadFz', fullName: 'Files' }]
+    const mounted = await toolHarness({
+      response: request => request.path.includes('/fields/')
+        ? fields
+        : request.path.includes('/upload')
+          ? { name: 'a.txt', url: 'https://example.test/a' }
+          : { ok: true },
+    })
+
+    const ref: FileAttachmentRef = {
+      attachmentId: AttachmentId('sha256:abcdef0123456789'),
+      name: 'a.txt',
+      bytes: 3,
+    }
+    // A transcript holds messages from every role, and a user message may nest
+    // a tool-result whose own content carries the attachment. Both shapes are
+    // walked: the non-user message is skipped, the nested result is descended.
+    mounted.agent.session.append('assistant/message', {
+      message: {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'working' }],
+        source: { kind: 'model', provider: 'test', model: 'test' },
+      },
+    } as never, { surfaceOp: 'append' })
+    mounted.agent.session.append('user/message', createUserMessage({
+      content: [
+        { type: 'text', text: 'here is the receipt' },
+        { type: 'tool-result', toolCallId: ToolCallId('call-nested-file'), content: [{ type: 'file', attachment: ref }] },
+      ],
+      source: { kind: 'user', rpcId: 'rpc-nested-file' } as never,
+    }), { surfaceOp: 'append' })
+
+    const result = await mounted.call('jdcloud_lowcode_upload_file', {
+      menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef0123456789',
+    })
+
+    // The nested file resolved, so the upload went through.
+    expect(result.isError).toBe(false)
   })
 
   it('rejects an update containing only empty automatic-number fields', async () => {
