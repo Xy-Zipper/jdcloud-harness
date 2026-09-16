@@ -26,9 +26,9 @@ kind: "package-reference"
 
 `login()` 使用原接口的 `client_id=admin`、`client_secret=123456`、`scope=all` 和 `grant_type=password` query 参数调用 `POST /api/oauth/login`。JSON body 只包含去除首尾空白的账号和 MD5 密码，不发送租户 id。收到 Token 后，controller 依次调用 `GET /api/system/corp/getCorpList` 与 `GET /api/oauth/currentUser`，要求两个响应指向同一租户，并一起保存规范化服务地址、Token、账号、当前租户、可用租户和 `userPermission.systemAdministrator === true` 的结果。
 
-`loginWithToken()` 会先删除已保存登录，规范化传入的绝对 HTTP(S) 服务地址，并依次通过 `GET /api/system/corp/getCorpList` 与 `GET /api/oauth/currentUser` 校验传入 Token。两个响应必须指向同一当前租户。中转成功后，Host 保存账号显示名、租户列表、管理员标记与 Token；无效或失败的中转信息会让 controller 保持未登录状态。调用方控制请求目的地，因此 Host 会把 Token 和校验请求发送到任意语法合法的 HTTP(S) 地址。
+`loginWithToken()` 会先删除已保存登录并规范化传入的绝对 HTTP(S) 服务地址。它从 `GET /api/system/corp/getCorpList` 读取中转 Token 的当前租户，调用 `GET /api/system/corp/switchCorp/{corpId}` 把 JDCloud 服务端上下文同步到该租户，再通过 `GET /api/oauth/currentUser` 确认结果。中转成功后，Host 保存账号显示名、租户列表、管理员标记与 Token；无效或失败的中转信息会让 controller 保持未登录状态。调用方控制请求目的地，因此 Host 会把 Token 和校验请求发送到任意语法合法的 HTTP(S) 地址。
 
-`switchCorp()` 只接受认证状态中返回的租户，使用已保存的 Token 调用 `GET /api/system/corp/switchCorp/{corpId}`，支持从 `data: corpId` 或 `data: { corpId }` 读取后端确认的租户 id，随后再次读取租户列表与当前用户。JDCloud 会在服务端刷新 Token 对应的租户上下文，因此 controller 保留已保存的 Token。切换成功会返回已确认租户及其管理员标记；普通失败保留当前登录，业务码 `600`、`601`、`602` 则删除过期登录。
+`switchCorp()` 只接受认证状态中返回的租户，使用已保存的 Token 调用 `GET /api/system/corp/switchCorp/{corpId}`，支持从 `data: corpId` 或 `data: { corpId }` 读取后端确认的租户 id，随后再次读取租户列表与当前用户。JDCloud 会在服务端刷新 Token 对应的租户上下文，因此 controller 保留已保存的 Token。切换成功会用所选租户的当前用户结果替换账号显示名与管理员标记；普通失败保留当前登录，业务码 `600`、`601`、`602` 则删除过期登录。
 
 Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 会使用已保存的 Token 调用租户列表与当前用户接口，并在放行 Prompt 前同步变化的租户列表或管理员标记。业务码 `600`、`601`、`602` 会删除登录记录，并以 Token 过期拒绝本次 Prompt。网络失败和其他业务码只拒绝本次提交，不删除登录状态。
 

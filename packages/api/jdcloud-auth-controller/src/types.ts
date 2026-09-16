@@ -87,6 +87,8 @@ export interface JdcloudWritableMenu {
 
 /** Current-tenant writable menus returned to the authenticated browser. */
 export interface JdcloudWritableMenuState {
+  /** Authenticated service address used to resolve service-relative menu icons. */
+  readonly baseUrl: string
   readonly corpId: string
   readonly menus: readonly JdcloudWritableMenu[]
 }

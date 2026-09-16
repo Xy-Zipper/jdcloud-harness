@@ -67,19 +67,15 @@ async function bench() {
   ctx.provide('locale', new LocaleRuntime(ctx))
   const writableMenus = vi.fn(() => Promise.resolve({
     ok: true as const,
-    value: { corpId: 'corp-current', menus: MENUS },
+    value: {
+      baseUrl: 'https://mi.kindoucloud.com',
+      corpId: 'corp-current',
+      menus: MENUS,
+    },
   }))
   const status = vi.fn<() => Promise<{ ok: true; value: JdcloudAuthStatus }>>(() => Promise.resolve({
     ok: true as const,
-    value: {
-      authenticated: true as const,
-      baseUrl: 'https://mi.kindoucloud.com',
-      username: 'user',
-      corpId: 'corp-current',
-      corpName: 'Current Tenant',
-      corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
-      systemAdministrator: false,
-    },
+    value: { authenticated: false, baseUrl: 'https://mi.kindoucloud.com' },
   }))
   let credentialListener: ((key: string) => void) | undefined
   ctx.provide('remote', {
@@ -160,7 +156,11 @@ describe('JDCloud low-code action browser plugin', () => {
 
     b.writableMenus.mockResolvedValueOnce({
       ok: true,
-      value: { corpId: 'corp-next', menus: MENUS },
+      value: {
+        baseUrl: 'https://mi.kindoucloud.com',
+        corpId: 'corp-next',
+        menus: MENUS,
+      },
     })
     await expect(b.source()?.codec?.serialize(reference.ref, AbortSignal.timeout(1000)))
       .rejects.toThrow('unavailable in the current tenant')
@@ -177,30 +177,15 @@ describe('JDCloud low-code action browser plugin', () => {
     await b.fiber.dispose()
   })
 
-  it('requires an authenticated matching status before publishing the menu projection', async () => {
+  it('uses one transfer-authenticated projection for menus and the custom-image origin', async () => {
     const b = await bench()
-    b.status.mockResolvedValueOnce({
-      ok: true,
-      value: { authenticated: false, baseUrl: 'https://mi.kindoucloud.com' },
+    expect(b.status).not.toHaveBeenCalled()
+    expect(b.injected.hooks.writableMenus.getSnapshot()).toMatchObject({
+      phase: 'ready',
+      baseUrl: 'https://mi.kindoucloud.com',
+      corpId: 'corp-current',
+      menus: MENUS,
     })
-    b.emitCredential('jdcloud-auth-controller/login')
-    await vi.waitFor(() => { expect(b.injected.hooks.writableMenus.getSnapshot().phase).toBe('error') })
-
-    b.status.mockResolvedValueOnce({
-      ok: true,
-      value: {
-        authenticated: true,
-        baseUrl: 'https://mi.kindoucloud.com',
-        username: 'user',
-        corpId: 'corp-next',
-        corpName: 'Next Tenant',
-        corps: [{ corpId: 'corp-next', corpName: 'Next Tenant' }],
-        systemAdministrator: false,
-      },
-    })
-    b.emitCredential('jdcloud-auth-controller/login')
-    await vi.waitFor(() => { expect(b.status).toHaveBeenCalledTimes(4) })
-    await vi.waitFor(() => { expect(b.injected.hooks.writableMenus.getSnapshot().phase).toBe('error') })
     await b.fiber.dispose()
   })
 })

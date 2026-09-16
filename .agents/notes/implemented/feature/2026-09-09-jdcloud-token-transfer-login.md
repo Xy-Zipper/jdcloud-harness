@@ -12,7 +12,7 @@ JDCloud users can enter Harness from another company page that already owns a JD
 
 The existing JDCloud login UI plugin owns the exact `/login/transfer` Host route and its Client root contribution. The Host route returns a no-store document with a nonce-restricted inline script that renames the incoming `token` parameter and starts a same-site navigation to the authenticated Web root. The internal values travel in the URL fragment, which carries them to Client code without sending the JDCloud Token in the root request or subresource referrers. The second navigation carries an existing Strict cookie without changing Connection authentication. The Client reads the internal parameters once and immediately replaces the visible URL with `/login/transfer` before validation. The transfer root has priority `-110`, above the account/password login root, and either reveals the application after success or offers an explicit return to account/password login after failure.
 
-The authentication controller owns transferred-token validation and storage. `loginWithToken()` deletes the previous login, accepts any normalized absolute HTTP(S) service address, calls `GET /api/oauth/currentUser` and `GET /api/system/corp/getCorpList`, requires both responses to name the same current tenant, and commits the Token only after all checks pass. `defaultBaseUrl` remains the initial account/password login value and does not restrict transfers.
+The authentication controller owns transferred-token validation and storage. `loginWithToken()` deletes the previous login, accepts any normalized absolute HTTP(S) service address, reads the Token's current tenant through `GET /api/system/corp/getCorpList`, synchronizes the server context through `GET /api/system/corp/switchCorp/{corpId}`, confirms that tenant through `GET /api/oauth/currentUser`, and commits the Token only after all checks pass. `defaultBaseUrl` remains the initial account/password login value and does not restrict transfers.
 
 ## Alternatives considered
 
@@ -27,6 +27,8 @@ The authentication controller owns transferred-token validation and storage. `lo
 **Mint a Harness browser cookie from a JDCloud Token.** Rejected because JDCloud login does not grant access to the local Harness process; Connection remains the independent browser-authentication owner.
 
 **Restrict transfers to configured service addresses.** Rejected because the integration accepts tenant environments selected by each source link without Host configuration updates.
+
+**Trust `currentUser` without synchronizing the tenant-list selection.** Rejected because a transferred Token can arrive from a tenant context that differs from the server context observed by `currentUser`; rejecting that difference prevents valid cross-tenant entry instead of activating the tenant reported by `getCorpList`.
 
 ## Consequences
 

@@ -40,9 +40,32 @@ npx vitest run packages/<group>/<package> \
 ```
 退出码 0 且无 `ERROR: Coverage` 行 = 通过。
 
+### Bash heredoc 会吃掉反斜杠
+`<<'PY' ... PY` 传给 Bash 工具时，脚本里的 `\` 会被换成 `/`：
+`re.search(r'baseUrl:\s*(\S+)')` 实际执行的是 `baseUrl:/s*(/S+)`，静默失配（返回 None）。
+**凡是脚本里带反斜杠（正则、转义），一律先用 Write 写成 `.py` 文件再执行**，
+不要用 heredoc。同理 `curl -o /tmp/x` 在 Git Bash 下与后续 `grep /tmp/x` 路径不一致，
+临时文件写到工作区内（如 `.workbuddy-ai/tmp/`）。
+
 ### 其他
 - `wmic.exe` / `reg.exe` 在沙箱程序黑名单中（lefthook 探测注册表会因此失败，属环境噪声）。
 - `~/.dsh/profiles/node_modules.lock` 陈旧时，重置删除计数器后手动删除即可。
+
+## JDCloud 平台事实（影响低代码功能）
+
+- `~/.dsh/.credentials.yaml` 里的 `token` 是 **YAML 折行标量**：
+  第 13 行是 `token: bearer`，第 14 行才是 JWT。取值时必须把续行用空格拼起来
+  （只取第一行会得到 `bearer`，接口返回 code 600「登录过期」）。
+- **`agentPermissions` 不是 `currentUser.menuList` 的节点字段**。
+  真实 `GET /api/oauth/currentUser` 的 `data` 只有 `menuList / userInfo / userPermission`，
+  138 个节点里一个 `agentPermissions` 都没有（换 3 个租户、带/不带 `?n=` 都一样）；
+  抽样表单 `GET /api/visualdev/base/{menuId}` 的 `formData` 里也没有。
+  门户前端显示它是**表单设计器属性**（"Agent 权限" 增/删/改，默认 `[]`，与 `hideRules` 同级），
+  运行时按钮显隐另走 `operationAuth` 数组（`getOpenBtn(e){return this.operationAuth.includes(e)}`）。
+  → `readJdcloudWritableMenus()` 的 `filter(menu => menu.agentPermissions.length > 0)`
+  在真实后端下恒为空，`LowcodeActionPicker` 因此恒不渲染。详见 `2026-09-16.md`。
+- 测试固件（`apps/web/tests/jdcloud-*.e2e.ts`）里的 `menuList`/`agentPermissions`
+  全是手写的，全仓没有真实响应录制快照，所以这类「字段在真实后端不存在」的问题 CI 测不出来。
 
 ## 测试约定
 

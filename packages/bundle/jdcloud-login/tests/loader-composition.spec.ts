@@ -174,6 +174,43 @@ describe('JDCloud login through a real Loader composition', () => {
     })
   })
 
+  it('synchronizes a transferred token to the tenant reported by the real controller composition', async () => {
+    const requestPaths: string[] = []
+    const fetcher = vi.fn((input: string | URL | Request): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      requestPaths.push(url.pathname)
+      switch (url.pathname) {
+        case '/api/system/corp/getCorpList':
+          return Promise.resolve(json(corpData()))
+        case '/api/system/corp/switchCorp/corp-current':
+          return Promise.resolve(json({ corpId: 'corp-current' }))
+        case '/api/oauth/currentUser':
+          return Promise.resolve(json({
+            userInfo: { userName: 'transfer-user', corpId: 'corp-current' },
+            userPermission: { systemAdministrator: true },
+          }))
+        default:
+          throw new Error(`unexpected JDCloud request: ${url.pathname}`)
+      }
+    })
+    const context = await bootComposition(fetcher)
+
+    await expect(context.jdcloudAuthController.loginWithToken({
+      baseUrl: 'https://kindoucloud.com',
+      token: 'bearer transferred-token',
+    }, AbortSignal.timeout(1_000))).resolves.toMatchObject({
+      authenticated: true,
+      username: 'transfer-user',
+      corpId: 'corp-current',
+      systemAdministrator: true,
+    })
+    expect(requestPaths).toEqual([
+      '/api/system/corp/getCorpList',
+      '/api/system/corp/switchCorp/corp-current',
+      '/api/oauth/currentUser',
+    ])
+  })
+
   it('checks the tenant before fetching current-user capabilities for one browser prompt', async () => {
     const requestPaths: string[] = []
     const fetcher = vi.fn((input: string | URL | Request): Promise<Response> => {

@@ -12,7 +12,7 @@ JDCloud 用户可能从已经持有 JDCloud Token 的公司页面进入 Harness�
 
 现有 JDCloud 登录 UI 插件拥有精确的 `/login/transfer` Host 路由及其 Client root contribution。Host 路由返回禁止缓存的文档，其中受 nonce 限制的内联脚本会重命名传入的 `token` 参数，并发起到已认证 Web 根路径的同站导航。内部值通过 URL fragment 传给 Client 代码，因此 JDCloud Token 不会进入根路径请求和子资源 Referer。第二次导航能够携带已有的 Strict cookie，同时不改变 Connection 认证。Client 只读取一次内部参数，并在校验前立即把可见 URL 替换为 `/login/transfer`。中转 root 的 priority 为 `-110`，高于账号密码登录 root；成功后显示应用，失败后提供返回账号密码登录的明确操作。
 
-认证 controller 负责中转 Token 的校验与保存。`loginWithToken()` 会删除旧登录、接受任意规范化的绝对 HTTP(S) 服务地址、调用 `GET /api/oauth/currentUser` 与 `GET /api/system/corp/getCorpList`，要求两个响应指向同一当前租户，并且只在全部校验通过后提交 Token。`defaultBaseUrl` 仍是账号密码登录的初始值，不限制中转地址。
+认证 controller 负责中转 Token 的校验与保存。`loginWithToken()` 会删除旧登录、接受任意规范化的绝对 HTTP(S) 服务地址、通过 `GET /api/system/corp/getCorpList` 读取 Token 当前租户、通过 `GET /api/system/corp/switchCorp/{corpId}` 同步服务端上下文，再通过 `GET /api/oauth/currentUser` 确认该租户，并且只在全部校验通过后提交 Token。`defaultBaseUrl` 仍是账号密码登录的初始值，不限制中转地址。
 
 ## Alternatives considered
 
@@ -27,6 +27,8 @@ JDCloud 用户可能从已经持有 JDCloud Token 的公司页面进入 Harness�
 **使用 JDCloud Token 签发 Harness 浏览器 cookie。** 未采用，因为 JDCloud 登录不授予本地 Harness 进程的访问权；Connection 仍独立负责浏览器认证。
 
 **只允许配置中的中转服务地址。** 未采用，因为该集成需要接受每个来源链接选择的租户环境，而无需更新 Host 配置。
+
+**不做租户同步，直接信任 `currentUser`。** 未采用，因为中转 Token 进入时所在租户上下文可能与 `currentUser` 观察到的服务端上下文不同；直接拒绝这种差异会阻止有效的跨租户进入，而不是激活 `getCorpList` 返回的租户。
 
 ## Consequences
 

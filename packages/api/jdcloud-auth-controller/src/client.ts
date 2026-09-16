@@ -366,7 +366,9 @@ export function readJdcloudLowcodeCapabilities(value: unknown): JdcloudLowcodeCa
  * @param value - Unwrapped JDCloud current-user response data.
  * @returns Current tenant id and type 3/4 menus carrying at least one supported write permission.
  */
-export function readJdcloudWritableMenus(value: unknown): JdcloudWritableMenuState {
+export function readJdcloudWritableMenus(
+  value: unknown,
+): Omit<JdcloudWritableMenuState, 'baseUrl'> {
   const root = requireRecord(value, 'JDCloud current-user response')
   const userInfo = requireRecord(Reflect.get(root, 'userInfo'), 'JDCloud current-user profile')
   const corpId = requireNonEmptyString(

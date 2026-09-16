@@ -134,11 +134,15 @@ export class JdcloudAuthController extends TypertRemoteService {
    */
   @Remote
   async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState> {
-    const currentUser = await this.requestAuthenticated<unknown>({
+    const auth = await this.readAuth()
+    if (auth === undefined) {
+      throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
+    }
+    const currentUser = await this.requestUsingAuth<unknown>(auth, {
       path: '/api/oauth/currentUser',
       method: 'GET',
     }, signal)
-    return readJdcloudWritableMenus(currentUser)
+    return { baseUrl: auth.baseUrl, ...readJdcloudWritableMenus(currentUser) }
   }
 
   /**
@@ -177,9 +181,9 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   /**
-   * Replace the stored login with a transferred token after Host-side validation.
+   * Replace the stored login after synchronizing a transferred token to its reported current tenant.
    * @param request - Absolute HTTP(S) service address and raw transfer token.
-   * @param signal - Caller cancellation for current-user and tenant validation.
+   * @param signal - Caller cancellation for tenant synchronization and current-user validation.
    * @returns Redacted authenticated state.
    */
   @Remote
@@ -201,6 +205,7 @@ export class JdcloudAuthController extends TypertRemoteService {
     let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
     try {
       corp = await client.getCorpList(token, operationSignal)
+      await client.switchCorp(token, corp.corpId, operationSignal)
       currentUser = await client.getCurrentUser(token, operationSignal)
       if (currentUser.corpId !== corp.corpId) {
         throw new Error('JDCloud transfer token returned inconsistent current tenants')
@@ -261,6 +266,7 @@ export class JdcloudAuthController extends TypertRemoteService {
       }
       return Promise.resolve(authRecord({
         ...latest,
+        username: currentUser.username,
         corpId: corp.corpId,
         corpName: corp.corpName,
         corps: corp.corps,
@@ -274,7 +280,7 @@ export class JdcloudAuthController extends TypertRemoteService {
     if (committed.version !== 4
       || committed.baseUrl !== auth.baseUrl
       || committed.token !== auth.token
-      || committed.username !== auth.username
+      || committed.username !== currentUser.username
       || !sameCorpState(committed, corp)) {
       throw new RemoteError('jdcloud/switch-failed', 'JDCloud login changed while switching tenant', { code: null })
     }
@@ -302,6 +308,15 @@ export class JdcloudAuthController extends TypertRemoteService {
     if (auth === undefined) {
       throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
     }
+    return this.requestUsingAuth(auth, request, signal)
+  }
+
+  /** Send one request with the authentication snapshot already selected by the caller. */
+  private async requestUsingAuth<T>(
+    auth: AuthPayload,
+    request: JdcloudAuthenticatedRequest,
+    signal: AbortSignal,
+  ): Promise<T> {
     try {
       return await new JdcloudClient(auth.baseUrl, this.fetcher)
         .requestAuthenticated<T>(auth.token, request, this.operationSignal(signal))

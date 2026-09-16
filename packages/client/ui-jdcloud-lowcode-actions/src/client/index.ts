@@ -56,26 +56,20 @@ export function apply(ctx: ClientContext): void {
   let request = 0
   let abort: AbortController | undefined
 
-  /** Refresh current-tenant menu data while discarding superseded replies. */
+  /** Refresh one authenticated menu projection while discarding superseded replies. */
   const refresh = async (): Promise<void> => {
     const current = ++request
     abort?.abort()
     const operation = new AbortController()
     abort = operation
     menuState.set({ phase: 'loading', menus: [] })
-    const [result, status] = await Promise.all([
-      ctx.remote.jdcloudAuth.writableMenus(operation.signal),
-      ctx.remote.jdcloudAuth.status(),
-    ])
+    const result = await ctx.remote.jdcloudAuth.writableMenus(operation.signal)
     if (current !== request || operation.signal.aborted) return
     menuState.set(result.ok
-      && status.ok
-      && status.value.authenticated
-      && status.value.corpId === result.value.corpId
       ? {
         phase: 'ready',
         corpId: result.value.corpId,
-        baseUrl: status.value.baseUrl,
+        baseUrl: result.value.baseUrl,
         menus: result.value.menus,
       }
       : { phase: 'error', menus: [] })

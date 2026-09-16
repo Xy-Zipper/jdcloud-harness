@@ -1169,8 +1169,8 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
-        description: 'Replace the stored login with a transferred token after Host-side validation.',
-        parameters: [{ name: 'request', description: 'Absolute HTTP(S) service address and raw transfer token.' }, { name: 'signal', description: 'Caller cancellation for current-user and tenant validation.' }],
+        description: 'Replace the stored login after synchronizing a transferred token to its reported current tenant.',
+        parameters: [{ name: 'request', description: 'Absolute HTTP(S) service address and raw transfer token.' }, { name: 'signal', description: 'Caller cancellation for tenant synchronization and current-user validation.' }],
         returns: 'Redacted authenticated state.',
       },
       {
@@ -4515,7 +4515,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'JdcloudMultipartFile',
-    declaration: 'export interface JdcloudMultipartFile {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n}',
+    declaration: 'export type JdcloudMultipartFile = {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n    readonly stream?: never;\n    readonly bytes?: never;\n} | {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data?: never;\n    readonly stream: AsyncIterable<Uint8Array>;\n    readonly bytes: number;\n};',
   },
   {
     name: 'JdcloudTokenLoginRequest',
