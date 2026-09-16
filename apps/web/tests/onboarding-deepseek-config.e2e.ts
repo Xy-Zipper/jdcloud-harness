@@ -222,7 +222,7 @@ describe.skipIf(MODE === 'record')('web e2e: remote Models directory', () => {
   it('keeps the fixture inventory closed', async () => {
     await assertFixtureInventory(
       SNAPSHOT_DIR,
-      ['models.expected.md', 'default-models.expected.md', 'remote-models.expected.md'],
+      ['welcome.expected.md', 'missing.expected.md', 'models.expected.md', 'default-models.expected.md'],
     )
   })
 })

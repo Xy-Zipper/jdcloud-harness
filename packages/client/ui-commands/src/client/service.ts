@@ -111,6 +111,19 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   }
 
   /**
+   * Register one reversible policy applied to Host and Client commands.
+   * @param filter - policy returning true when one command is available.
+   * @returns disposer removing the policy.
+   */
+  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void {
+    const dispose = this.ctx.effect(() => {
+      this.live.availabilityFilters.add(filter)
+      return () => { this.live.availabilityFilters.delete(filter) }
+    }, 'command.registerAvailabilityFilter()')
+    return () => { void dispose() }
+  }
+
+  /**
    * Register one client command contribution; effect disposer (rides the
    * caller's fiber). Duplicate names throw.
    * @param contribution - the contribution (descriptor + availability + popup spec).
@@ -147,16 +160,14 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   }
 
   /**
-   * Register one reversible policy over every command invocation path.
-   * @param filter - fresh per-session availability decision for one command name.
-   * @returns the disposer removing the policy.
+   * Close every open popup for a command whose options have become stale.
+   * Pending loads and confirmations lose their binding; drafts stay intact.
+   * @param name - command name without the leading slash.
    */
-  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void {
-    const dispose = this.ctx.effect(() => {
-      this.live.availabilityFilters.add(filter)
-      return () => { this.live.availabilityFilters.delete(filter) }
-    }, 'command.registerAvailabilityFilter()')
-    return () => { void dispose() }
+  dismiss(name: string): void {
+    for (const popup of this.live.popups.values()) {
+      if (popup.state.getSnapshot().command === name) popup.dismiss()
+    }
   }
 
   /**
@@ -271,11 +282,12 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
   /** Decision table, space column: hot-key sync check; only host leadingInput claims. */
   private matchSpace(session: ClientSessionContext, token: string): PickOutcome {
     if (!token.startsWith('/')) return undefined
-    const typedName = token.slice(1)
-    if (this.live.contributions.has(typedName)) return undefined // popup and action kinds never claim on space
-    const desc = this.directory.resolve(session.sessionId, typedName)
-    if (desc === undefined || desc.input === undefined || !this.isAvailable(desc.name, session)) return undefined
-    return { claim: this.leadingClaim(desc, session, typedName) }
+    const name = token.slice(1)
+    if (!this.isAvailable(name, session)) return undefined
+    if (this.live.contributions.has(name)) return undefined // popup and action kinds never claim on space
+    const desc = this.directory.resolve(session.sessionId, name)
+    if (desc === undefined || desc.input === undefined) return undefined
+    return { claim: this.leadingClaim(desc, session, token.slice(1)) }
   }
 
   /**
@@ -366,11 +378,6 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const actx = this.scopeFor(session.sessionId)
     if (actx === undefined) return
     this.popupFor(actx).open(name, ui, session, segment)
-  }
-
-  /** Apply every live cross-command policy before command-specific availability. */
-  private isAvailable(name: string, session: ClientSessionContext): boolean {
-    return [...this.live.availabilityFilters].every(filter => filter(name, session))
   }
 
   /**
@@ -492,5 +499,13 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     const sessions = this.ctx.get('sessions')
     if (sessions === undefined) throw new Error('ui-commands: sessions service unavailable')
     return sessions
+  }
+
+  /** Return whether every registered policy admits this command. */
+  private isAvailable(name: string, session: ClientSessionContext): boolean {
+    for (const filter of this.live.availabilityFilters) {
+      if (!filter(name, session)) return false
+    }
+    return true
   }
 }

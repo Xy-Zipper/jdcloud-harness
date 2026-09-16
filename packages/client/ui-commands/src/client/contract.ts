@@ -1,7 +1,7 @@
 /**
  * Frozen contract of the client command surface. Types only. The
  * CommandUiRuntime (`ctx.commandUi`) implements this face; business packages
- * consume `register` alone.
+ * consume its registration and dismissal operations.
  */
 import type { ComponentType } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -21,6 +21,8 @@ export interface SelectConfirmation {
 export interface SelectOption {
   readonly id: string
   readonly label: string
+  /** Optional short marker rendered as a superscript beside the label. */
+  readonly badge?: string
   readonly detail?: string
   readonly active?: boolean
   /** Optional in-page risk gate owned by the shared popup shell. */
@@ -101,6 +103,8 @@ export type CommandAvailabilityFilter = (name: string, session: ClientSessionCon
 
 /** The `ctx.commandUi` service face visible to business packages. */
 export interface CommandUiContract {
+  /** Register one reversible policy applied to every command invocation path. */
+  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void
   /**
    * Register one client command contribution; effect disposer. Duplicate
    * names throw at registration.
@@ -111,12 +115,8 @@ export interface CommandUiContract {
    * Duplicate names throw at registration.
    */
   decorate(decoration: CommandDecoration): () => void
-  /**
-   * Register one availability filter applied to Host and Client commands.
-   * Returning false removes the command from menus and leading-input claims,
-   * and refuses a typed invocation until the filter or its owner is disposed.
-   */
-  registerAvailabilityFilter(filter: CommandAvailabilityFilter): () => void
+  /** Close this command's open popups and confirmations without consuming composer drafts. */
+  dismiss(name: string): void
   /** Resolve the per-session popup controller for one session scope (wiring/overlay layer). */
   popupFor(actx: ClientContext): unknown
 }

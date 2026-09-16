@@ -1,5 +1,6 @@
 # Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with://n#   pnpm run verify-translation-pairing --write .tmp/diagnose-jdcloud-snapshot/.dsh/profiles/node_modules/@deepseek-ai/dsh-api-remotes/README.md
-README.md: c0de8b7f291132733e3ee1ef2c2fc02170f3948b
-README.zh.md: ec5784bdd6c8e2ddef9ab7db5e1d89e85ebe7736
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/api/remotes/README.md
+README.md: dbeb434c88a54a9b4162bc9d9a965f53f39560f5
+README.zh.md: a6a6af909c1603148c83b356f495f60629279c79

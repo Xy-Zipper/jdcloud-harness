@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-settings-general",
-  "description": "Settings shell and product onboarding coordinator: the General section, trigger/header chrome content, and settings dictionaries",
-  "version": "0.1.5-rc.2",
+  "description": "Settings ownerless-copy and product onboarding plugin: the General section, shell trigger/header chrome content, settings dictionaries, and the versioned welcome notice",
+  "version": "0.1.6-alpha.1",
   "publishConfig": {
     "access": "public"
   },

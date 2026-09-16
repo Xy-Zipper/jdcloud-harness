@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-jdcloud-login",
   "description": "Optional Web profile layer for JDCloud authentication and account UI",
-  "version": "0.1.5-alpha.2",
+  "version": "0.1.6-alpha.1",
   "publishConfig": {
     "access": "public"
   },

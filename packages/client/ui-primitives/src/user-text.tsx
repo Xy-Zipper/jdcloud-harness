@@ -123,11 +123,9 @@ export function projectUserText(
     if (tokenStart > cursor) pushPlain(cursor, tokenStart)
     const referenceKind = kind === 'session'
       ? 'session'
-      : kind === 'reference'
-        ? 'reference'
-        : label.startsWith('@')
-          ? label.replace(/^@"|"$/gu, '').endsWith('/') ? 'folder' : 'file'
-          : undefined
+      : label.startsWith('@')
+        ? label.replace(/^@"|"$/gu, '').endsWith('/') ? 'folder' : 'file'
+        : undefined
     const displayLabel = range.display
       !== undefined
       ? kind === 'reference' ? `@${range.display}` : range.display
@@ -135,11 +133,9 @@ export function projectUserText(
         ? label
         : referenceKind === 'session'
           ? label.slice(1)
-          : referenceKind === 'reference'
-            ? label
-            : label.slice(1).replace(/^"|"$/gu, '').split(/[\\/]/u).filter(Boolean).at(-1) ?? label.slice(1))
+          : label.slice(1).replace(/^"|"$/gu, '').split(/[\\/]/u).filter(Boolean).at(-1) ?? label.slice(1))
     const contents = <>
-      {referenceKind !== undefined && referenceKind !== 'reference' && (
+      {referenceKind !== undefined && (
         <ReferenceIcon kind={referenceKind} size={16} className={css.refIcon} />
       )}
       {displayLabel}

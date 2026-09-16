@@ -69,7 +69,11 @@ export function staleSnapshotNotice(): LowcodeUserNotice {
   }
 }
 
-/** Map one JDCloud write grant to the customer action it authorizes. */
+/**
+ * Map one JDCloud write grant to the customer action it authorizes.
+ * @param permission - write grant returned by the JDCloud capability snapshot.
+ * @returns customer action authorized by the grant.
+ */
 export function actionForPermission(permission: LowcodeWritePermission): LowcodeWriteAction {
   switch (permission) {
     case 'addData': return 'create'
