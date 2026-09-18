@@ -9,6 +9,7 @@ import { API_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
+import { BrowserSessionService } from './browser-session.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
@@ -42,6 +43,7 @@ export {
   serverResponseSchema,
 } from './rpc-schema.ts'
 export { HostConnectionService } from './rpc-host.ts'
+export { BrowserSessionService } from './browser-session.ts'
 
 export { API_PATH } from './api-path.ts'
 
@@ -74,6 +76,8 @@ export interface ConnectionConfig {
   recovery?: ConnectionRecoveryConfig
   /** Require the launch-token exchange and signed browser cookie. Default: true. */
   browserAuthentication?: boolean
+  /** Require an independent opaque browser cookie without Harness launch authentication. */
+  browserSession?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -92,6 +96,7 @@ export interface ConnectionConfig {
 export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
   browserAuthentication: z.boolean().default(true),
+  browserSession: z.boolean().default(false),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
@@ -107,6 +112,7 @@ export const Config: z<ConnectionConfig> = z.object({
 export async function apply(ctx: Context, config?: ConnectionConfig): Promise<void> {
   const recovery = resolveConnectionConfig(config?.recovery)
   const browserAuthentication = config?.browserAuthentication ?? true
+  const browserSession = config?.browserSession ?? false
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
@@ -121,6 +127,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     browserAuthentication
       ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
       : undefined,
+    browserSession ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays) : undefined,
   )
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)

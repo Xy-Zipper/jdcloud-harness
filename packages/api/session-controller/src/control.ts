@@ -17,6 +17,11 @@ import type {
   SessionQueuedItem,
 } from './types.ts'
 
+interface ScopeOwner {
+  currentScopeKey(): Promise<string | undefined>
+  owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+}
+
 /** Owns the Host-wide Session control stream. */
 export class SessionControlController {
   private readonly streams = new Set<ControlQueue>()
@@ -60,10 +65,12 @@ export class SessionControlController {
    */
   async *control(signal: AbortSignal): AsyncIterable<SessionControlFrame> {
     signal.throwIfAborted()
-    const queue = new ControlQueue()
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
+    const queue = new ControlQueue(owner, scopeKey)
     this.streams.add(queue)
     try {
-      yield { type: 'baseline', value: this.baseline() }
+      yield { type: 'baseline', value: await this.scopedBaseline() }
       yield* queue.iterate(signal)
     } finally {
       this.streams.delete(queue)
@@ -85,6 +92,23 @@ export class SessionControlController {
       jobs,
       projections: this.projectionBaseline(sessions),
     }
+  }
+
+  private async scopedBaseline(): Promise<SessionControlBaseline> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner === undefined) return this.baseline()
+    const sessions: Session[] = []
+    for (const session of this.ctx.sessions.list()) {
+      if (await owner.owns('session', String(session.id))) sessions.push(session)
+    }
+    const queues = Object.create(null) as Record<SessionId, readonly SessionQueuedItem[]>
+    const jobs = Object.create(null) as Record<SessionId, readonly SessionJob[]>
+    for (const session of sessions) {
+      const agent = this.ctx.agents.get(session.id)
+      queues[session.id] = agent?.session === session ? queueItems(agent) : []
+      jobs[session.id] = this.jobsFor(agent)
+    }
+    return { queues, jobs, projections: this.projectionBaseline(sessions) }
   }
 
   private projectionBaseline(
@@ -122,7 +146,7 @@ export class SessionControlController {
   }
 
   private broadcast(frame: SessionControlFrame): void {
-    for (const stream of this.streams) stream.push(frame)
+    for (const stream of this.streams) void stream.push(frame)
   }
 }
 
@@ -130,13 +154,35 @@ class ControlQueue {
   private readonly buffer = new Deque<SessionControlFrame>()
   private wake: (() => void) | undefined
   private done = false
+  private pending = Promise.resolve()
 
-  push(frame: SessionControlFrame): void {
+  constructor(
+    private readonly owner: ScopeOwner | undefined,
+    private readonly scopeKey: string | undefined,
+  ) {}
+
+  async push(frame: SessionControlFrame): Promise<void> {
     if (this.done) return
-    this.buffer.pushBack(frame)
-    const wake = this.wake
-    this.wake = undefined
-    wake?.()
+    if (this.owner === undefined || this.scopeKey === undefined) {
+      this.buffer.pushBack(frame)
+      const wake = this.wake
+      this.wake = undefined
+      wake?.()
+      return
+    }
+    this.pending = this.pending.then(async () => {
+      if (this.done) return
+      const owner = this.owner
+      const scopeKey = this.scopeKey
+      if (frame.type !== 'baseline'
+        && owner !== undefined && scopeKey !== undefined
+        && !(await owner.owns('session', String(frame.sessionId), scopeKey))) return
+      this.buffer.pushBack(frame)
+      const wake = this.wake
+      this.wake = undefined
+      wake?.()
+    })
+    await this.pending
   }
 
   end(): void {

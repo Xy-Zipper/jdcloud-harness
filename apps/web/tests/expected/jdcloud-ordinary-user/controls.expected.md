@@ -22,8 +22,6 @@
   - text: 选择工作区
   - img
 - textbox "选择工作区"
-- button "指令" [disabled]:
-  - img
-- button "添加附件" [disabled]:
+- button "添加文件或调用指令" [disabled]:
   - img
 - button "发送消息" [disabled]

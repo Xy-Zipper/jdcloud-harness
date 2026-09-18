@@ -1,0 +1,4 @@
+- textbox "描述你想要构建的内容, / 调用指令, @ 文件或对话"
+- button "添加文件或调用指令":
+  - img
+- button "发送消息" [disabled]

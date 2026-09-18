@@ -38,6 +38,10 @@ import { SessionAssistantStreamAccumulator } from './assistant-stream.ts'
 const DEFAULT_MAX_MESSAGES = 50
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+}
+
 /** Implements cold-safe history operations delegated by the Session Controller. */
 export class SessionHistoryController {
   private readonly closeFollowers = new Set<() => void>()
@@ -245,6 +249,8 @@ export class SessionHistoryController {
     withProjections: boolean,
   ): Promise<SessionObservation> {
     const sessionId = addressId(address)
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns('session', String(sessionId)))) rejectNotFound(address)
     try {
       const observation = await this.ctx.sessionQuery.observeSession(sessionId, {
         signal,

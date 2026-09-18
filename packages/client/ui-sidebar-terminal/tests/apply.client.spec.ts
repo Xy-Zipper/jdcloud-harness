@@ -169,6 +169,23 @@ it('shares pending and completed recovery across Session headers and opens each 
   }
 })
 
+it('does not query retained terminals while browser policy filters the terminal type', async () => {
+  const h = await mountPlugin()
+  const release = h.tabs.registerAvailabilityFilter(kind => kind !== 'terminal')
+  const sessionId = 'session' as SessionId
+  const recovery = h.entries[3]!.inject(sessionId) as TerminalRecoveryInjected
+  try {
+    await recovery.restore()
+    expect(h.terminals.recover).not.toHaveBeenCalled()
+    release()
+    await recovery.restore()
+    expect(h.terminals.recover).toHaveBeenCalledExactlyOnceWith(sessionId)
+  } finally {
+    release()
+    await h.dispose()
+  }
+})
+
 it('allows a failed Host lookup to be retried without marking the Session recovered', async () => {
   const h = await mountPlugin()
   const unavailable = new Error('Host unavailable')
@@ -182,6 +199,28 @@ it('allows a failed Host lookup to be retried without marking the Session recove
     await recovery.restore()
     expect(h.terminals.recover).toHaveBeenCalledTimes(2)
   } finally {
+    await h.dispose()
+  }
+})
+
+it('discards recovery completing after role downgrade and permits recovery after access returns', async () => {
+  const h = await mountPlugin()
+  const pending = Promise.withResolvers<WebTerminalInfo[]>()
+  h.terminals.recover.mockImplementationOnce(() => pending.promise)
+  const recovery = h.entries[3]!.inject('session' as SessionId) as TerminalRecoveryInjected
+  const completion = recovery.restore()
+  const release = h.tabs.registerAvailabilityFilter(kind => kind !== 'terminal')
+  try {
+    pending.resolve([terminalInfo('build')])
+    await completion
+    expect(h.openTabIn).not.toHaveBeenCalled()
+    release()
+    await recovery.restore()
+    expect(h.terminals.recover).toHaveBeenCalledTimes(2)
+  } finally {
+    pending.resolve([])
+    await completion
+    release()
     await h.dispose()
   }
 })

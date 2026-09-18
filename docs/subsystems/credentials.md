@@ -310,6 +310,34 @@ Store credentials, expose login commands, and validate each browser prompt.
  * @returns JDCloud response data without exposing the stored token.
  */
 async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>
+
+/**
+ * Return the deterministic tenant-user owner key for the current browser login.
+ * @returns The owner key, or undefined when no user login is active.
+ */
+async currentScopeKey(): Promise<string | undefined>
+
+/**
+ * Return whether the current login has system-administrator terminal access.
+ * @returns Whether the current login is a system administrator.
+ */
+async isCurrentAdministrator(): Promise<boolean>
+
+/**
+ * Claim a newly-created Session or Workspace for the current tenant-user.
+ * @param kind - The durable resource kind.
+ * @param id - The durable resource identifier.
+ */
+async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+
+/**
+ * Check whether a durable Session or Workspace belongs to the current tenant-user.
+ * @param kind - The durable resource kind.
+ * @param id - The durable resource identifier.
+ * @param expectedScopeKey - Optional owner key to check instead of the current login.
+ * @returns Whether the resource belongs to the selected tenant-user owner.
+ */
+async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
 ```
 
 Source: [`packages/api/jdcloud-auth-controller/src/index.ts`](../../packages/api/jdcloud-auth-controller/src/index.ts)

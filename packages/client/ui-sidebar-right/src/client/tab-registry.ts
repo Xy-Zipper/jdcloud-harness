@@ -225,6 +225,7 @@ export class SidebarRightTabRegistry {
   private readonly kinds = new Map<string, KindSlot>()
   private readonly ids = new Set<string>()
   private readonly listeners = new Set<() => void>()
+  private readonly availabilityFilters = new Set<(kind: string) => boolean>()
   private registrations = 0
   private cached: readonly SidebarRightTabDefinition[] = []
   private guideEntries: readonly SidebarRightGuideBox[] = []
@@ -273,6 +274,28 @@ export class SidebarRightTabRegistry {
       }
     }, `sidebarRight.tabs.register(${JSON.stringify(id)})`)
     return () => { void dispose() }
+  }
+
+  /**
+   * Filter page types from the browser's guide, tab rendering, and navigation.
+   * This does not authorize Host operations or remove already-open layout records.
+   * @param filter - whether a page kind is available in this browser.
+   * @returns disposer restoring the unfiltered page kinds.
+   */
+  registerAvailabilityFilter(filter: (kind: string) => boolean): () => void {
+    this.availabilityFilters.add(filter)
+    this.refresh()
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.availabilityFilters.delete(filter)
+      this.refresh()
+    }
+  }
+
+  private available(kind: string): boolean {
+    return [...this.availabilityFilters].every(filter => filter(kind))
   }
 
   /** Add a registration to its kind's slot, the higher band in force; `coexists` has already admitted it. */
@@ -328,10 +351,10 @@ export class SidebarRightTabRegistry {
   /**
    * The type in force for a kind.
    * @param kind - the type discriminator.
-   * @returns the type, or `undefined` when nothing registered it.
+   * @returns the type, or `undefined` when absent or filtered by browser policy.
    */
   get(kind: string): SidebarRightTabDefinition | undefined {
-    return this.kinds.get(kind)?.inForce.definition
+    return this.available(kind) ? this.kinds.get(kind)?.inForce.definition : undefined
   }
 
   /**
@@ -345,6 +368,7 @@ export class SidebarRightTabRegistry {
   candidates(address: string): readonly SidebarRightTabDefinition[] {
     const ranked: Ranked[] = []
     for (const { definition, band, matchers, order } of this.active()) {
+      if (!this.available(definition.kind)) continue
       let length = -1
       for (const matcher of matchers) {
         if (matcher.test(address) && matcher.pattern.length > length) length = matcher.pattern.length
@@ -400,7 +424,7 @@ export class SidebarRightTabRegistry {
   }
 
   private refresh(): void {
-    this.cached = this.active().map(entry => entry.definition)
+    this.cached = this.active().filter(entry => this.available(entry.definition.kind)).map(entry => entry.definition)
     this.guideEntries = this.cached
       .flatMap(definition => (definition.guide ?? []).map(entry => ({ ...entry, kind: definition.kind, providerId: definition.id })))
       .sort((left, right) => left.order - right.order)

@@ -62,6 +62,10 @@ interface OwnedSession {
   readonly allocations: Map<WebTerminalId, { handle: SubprocessTerminalHandle; info: WebTerminalInfo }>
 }
 
+interface JdcloudTerminalAdmission {
+  isCurrentAdministrator(): Promise<boolean>
+}
+
 /** Typed Remote control of transient Session-owned terminal processes. */
 export class TerminalController extends TypertRemoteService {
   static inject = ['subprocess', 'sandboxPolicy', 'sessionProjections', 'typert']
@@ -112,8 +116,9 @@ export class TerminalController extends TypertRemoteService {
    * @returns the Session workspace directory and terminal limits.
    */
   @Remote
-  environment(agent: Agent, signal: AbortSignal): TerminalEnvironment {
+  async environment(agent: Agent, signal: AbortSignal): Promise<TerminalEnvironment> {
     signal.throwIfAborted()
+    await this.requireAdministrator()
     const { sandboxPolicy } = this.execution(agent)
     return { cwd: sandboxPolicy.resolve({ session: agent.session }).workspaceRoot,
       maxInputBytes: this.config.maxInputBytes, maxCols: this.config.maxCols,
@@ -129,7 +134,12 @@ export class TerminalController extends TypertRemoteService {
   @Remote
   shells(agent: Agent, signal: AbortSignal): Promise<TerminalShell[]> {
     signal.throwIfAborted()
-    return discoverShells(this.execution(agent).subprocess, this.config.shell, this.config.shellCandidates, signal)
+    return this.requireAdministrator().then(() => discoverShells(
+      this.execution(agent).subprocess,
+      this.config.shell,
+      this.config.shellCandidates,
+      signal,
+    ))
   }
 
   /**
@@ -153,6 +163,7 @@ export class TerminalController extends TypertRemoteService {
    */
   @Remote
   async create(agent: Agent, request: TerminalCreateRequest, signal: AbortSignal): Promise<WebTerminalInfo> {
+    await this.requireAdministrator()
     this.lifetime.signal.throwIfAborted()
     if (!/^[\w-]{1,128}$/u.test(request.id)) throw new Error('Invalid terminal identity')
     this.dimensions(request.cols, request.rows)
@@ -193,7 +204,7 @@ export class TerminalController extends TypertRemoteService {
   @Remote({ mode: 'stream' })
   follow(agent: Agent, id: WebTerminalId, attachmentId: TerminalAttachmentId, signal: AbortSignal): AsyncIterable<TerminalFrame> {
     if (!/^[\w-]{1,128}$/u.test(attachmentId)) throw new Error('Invalid terminal attachment identity')
-    return this.terminal(agent, id).follow(attachmentId, signal)
+    return this.followAdministrator(agent, id, attachmentId, signal)
   }
 
   /**
@@ -206,6 +217,7 @@ export class TerminalController extends TypertRemoteService {
    */
   @Remote
   async write(agent: Agent, id: WebTerminalId, attachmentId: TerminalAttachmentId, data: string): Promise<void> {
+    await this.requireAdministrator()
     if (Buffer.byteLength(data, 'utf8') > this.config.maxInputBytes) throw new Error('Terminal input exceeds the configured limit')
     await this.terminal(agent, id).write(attachmentId, data)
   }
@@ -221,6 +233,7 @@ export class TerminalController extends TypertRemoteService {
    */
   @Remote
   async resize(agent: Agent, id: WebTerminalId, attachmentId: TerminalAttachmentId, cols: number, rows: number): Promise<void> {
+    await this.requireAdministrator()
     this.dimensions(cols, rows)
     await this.terminal(agent, id).resize(attachmentId, cols, rows)
   }
@@ -232,8 +245,9 @@ export class TerminalController extends TypertRemoteService {
    * @param title - nonempty display title, at most 120 characters.
    */
   @Remote
-  rename(agent: Agent, id: WebTerminalId, title: string): void {
+  async rename(agent: Agent, id: WebTerminalId, title: string): Promise<void> {
     if (title.trim().length === 0 || title.length > 120) throw new Error('Terminal title must contain 1–120 characters')
+    await this.requireAdministrator()
     this.terminal(agent, id).rename(title.trim())
   }
 
@@ -245,6 +259,7 @@ export class TerminalController extends TypertRemoteService {
    */
   @Remote
   async close(agent: Agent, id: WebTerminalId): Promise<void> {
+    await this.requireAdministrator()
     const owner = this.owner(agent)
     owner.closedIds.add(id)
     // create publishes the allocation before this wait settles; close owns it even if create then rejects.
@@ -270,6 +285,23 @@ export class TerminalController extends TypertRemoteService {
       agent.ctx.effect(() => async () => { await this.disposeOwner(agent.id, owned) }, 'terminal-controller.owner')
     }
     return owner
+  }
+
+  private async requireAdministrator(): Promise<void> {
+    const admission = this.ctx.get('jdcloudAuthController') as JdcloudTerminalAdmission | undefined
+    if (admission !== undefined && !await admission.isCurrentAdministrator()) {
+      throw new RemoteError('gateway/internal', 'JDCloud system-administrator permission is required for terminals', {})
+    }
+  }
+
+  private async *followAdministrator(
+    agent: Agent,
+    id: WebTerminalId,
+    attachmentId: TerminalAttachmentId,
+    signal: AbortSignal,
+  ): AsyncIterable<TerminalFrame> {
+    await this.requireAdministrator()
+    yield* this.terminal(agent, id).follow(attachmentId, signal)
   }
 
   private disposeOwner(id: SessionId, owner: OwnedSession): Promise<void> {
@@ -314,7 +346,7 @@ export class TerminalController extends TypertRemoteService {
   }
 
   private async spawn(agent: Agent, owner: OwnedSession, request: TerminalCreateRequest, signal: AbortSignal): Promise<BrowserTerminal> {
-    const environment = this.environment(agent, signal)
+    const environment = await this.environment(agent, signal)
     const { subprocess, sandboxPolicy } = this.execution(agent)
     const shell = request.shellPath === undefined
       ? await resolveShell(subprocess, this.config.shell, signal)

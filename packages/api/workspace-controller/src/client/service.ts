@@ -94,6 +94,7 @@ export class WorkspaceController extends Service implements IWorkspaces {
     this.list = model
   }
 
+
   async create(input: { path: string }): Promise<WorkspaceView> {
     const result = await this.model.create(input)
     if (!result.ok) throw new WorkspaceCreateError(result.error)

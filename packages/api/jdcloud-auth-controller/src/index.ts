@@ -1,7 +1,9 @@
 /** Host owner of JDCloud login state and prompt admission validation. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { createHash } from 'node:crypto'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
 import z from '@deepseek-ai/schemastery'
@@ -32,13 +34,14 @@ export {
   readJdcloudWritableMenus,
 } from './client.ts'
 
-const AUTH_KEY = credentialKey('jdcloud-auth-controller', 'login')
+const LEGACY_AUTH_KEY = credentialKey('jdcloud-auth-controller', 'login')
 
 interface LegacyAuthPayload {
   readonly version: 3
   readonly baseUrl: string
   readonly token: string
   readonly username: string
+  readonly userId?: string
   readonly corpId: string
   readonly corpName: string
   readonly corps: readonly JdcloudCorp[]
@@ -101,6 +104,22 @@ export class JdcloudAuthController extends TypertRemoteService {
           'jdcloud/administrator-required',
           'JDCloud system-administrator permission is required to select a model',
           { capability: 'model-selection' },
+        )
+      }
+      await next()
+    })
+    const commandEvents = ctx as unknown as {
+      on(event: 'commands/admission', listener: (
+        request: { readonly sessionId: string; readonly name: string; readonly rawInput: string },
+        next: () => Promise<void>,
+      ) => Promise<void>): unknown
+    }
+    commandEvents.on('commands/admission', async (request, next) => {
+      if (request.name === 'permission' && request.rawInput.trim() === 'danger-full-access' && !(await this.isCurrentAdministrator())) {
+        throw new RemoteError(
+          'jdcloud/administrator-required',
+          'JDCloud system-administrator permission is required for danger-full-access',
+          { capability: 'danger-full-access' },
         )
       }
       await next()
@@ -177,7 +196,7 @@ export class JdcloudAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.requestError('login', error)
     }
-    return this.commitLogin(baseUrl, token, request.username.trim(), corp, currentUser.systemAdministrator)
+    return this.commitLogin(baseUrl, token, currentUser.userId, request.username.trim(), corp, currentUser.systemAdministrator)
   }
 
   /**
@@ -188,7 +207,7 @@ export class JdcloudAuthController extends TypertRemoteService {
    */
   @Remote
   async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus> {
-    await this.ctx.credentials.deleteRecord(AUTH_KEY)
+    await this.ctx.credentials.deleteRecord(this.authKey())
     const token = request.token.trim()
     let baseUrl: string
     try {
@@ -213,7 +232,7 @@ export class JdcloudAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.requestError('login', error)
     }
-    return this.commitLogin(baseUrl, token, currentUser.username, corp, currentUser.systemAdministrator)
+    return this.commitLogin(baseUrl, token, currentUser.userId, currentUser.username, corp, currentUser.systemAdministrator)
   }
 
   /**
@@ -249,13 +268,13 @@ export class JdcloudAuthController extends TypertRemoteService {
       }
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
-        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        await this.ctx.credentials.deleteRecord(this.authKey())
         throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' })
       }
       throw this.requestError('switch', error)
     }
 
-    const updated = await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
+    const updated = await this.ctx.credentials.modifyRecord(this.authKey(), (current) => {
       if (current === undefined) return Promise.resolve(undefined)
       const latest = parseAuthRecord(current)
       if (latest.version !== 4
@@ -267,6 +286,7 @@ export class JdcloudAuthController extends TypertRemoteService {
       return Promise.resolve(authRecord({
         ...latest,
         username: currentUser.username,
+        userId: currentUser.userId,
         corpId: corp.corpId,
         corpName: corp.corpName,
         corps: corp.corps,
@@ -281,6 +301,7 @@ export class JdcloudAuthController extends TypertRemoteService {
       || committed.baseUrl !== auth.baseUrl
       || committed.token !== auth.token
       || committed.username !== currentUser.username
+      || committed.userId !== currentUser.userId
       || !sameCorpState(committed, corp)) {
       throw new RemoteError('jdcloud/switch-failed', 'JDCloud login changed while switching tenant', { code: null })
     }
@@ -293,7 +314,7 @@ export class JdcloudAuthController extends TypertRemoteService {
    */
   @Remote
   async logout(): Promise<JdcloudAuthStatus> {
-    await this.ctx.credentials.deleteRecord(AUTH_KEY)
+    await this.ctx.credentials.deleteRecord(this.authKey())
     return { authenticated: false, baseUrl: this.defaultBaseUrl }
   }
 
@@ -311,6 +332,56 @@ export class JdcloudAuthController extends TypertRemoteService {
     return this.requestUsingAuth(auth, request, signal)
   }
 
+  /**
+   * Return the deterministic tenant-user owner key for the current browser login.
+   * @returns The owner key, or undefined when no user login is active.
+   */
+  async currentScopeKey(): Promise<string | undefined> {
+    const auth = await this.readAuth()
+    if (auth === undefined || auth.userId === undefined) return undefined
+    return createHash('sha256').update(auth.baseUrl).update('\0').update(auth.corpId).update('\0').update(auth.userId).digest('hex')
+  }
+
+  /**
+   * Return whether the current login has system-administrator terminal access.
+   * @returns Whether the current login is a system administrator.
+   */
+  async isCurrentAdministrator(): Promise<boolean> {
+    const auth = await this.readAuth()
+    return auth?.systemAdministrator === true
+  }
+
+  /**
+   * Claim a newly-created Session or Workspace for the current tenant-user.
+   * @param kind - The durable resource kind.
+   * @param id - The durable resource identifier.
+   */
+  async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void> {
+    const scopeKey = await this.currentScopeKey()
+    if (scopeKey === undefined) return
+    await this.ctx.credentials.modifyRecord(this.ownerKey(kind, id), () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, scopeKey },
+    }))
+  }
+
+  /**
+   * Check whether a durable Session or Workspace belongs to the current tenant-user.
+   * @param kind - The durable resource kind.
+   * @param id - The durable resource identifier.
+   * @param expectedScopeKey - Optional owner key to check instead of the current login.
+   * @returns Whether the resource belongs to the selected tenant-user owner.
+   */
+  async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean> {
+    const scopeKey = expectedScopeKey ?? await this.currentScopeKey()
+    if (scopeKey === undefined) return false
+    const record = await this.ctx.credentials.readRecord(this.ownerKey(kind, id))
+    return record?.kind === 'grant'
+      && typeof record.payload === 'object'
+      && record.payload !== null
+      && Reflect.get(record.payload, 'version') === 1
+      && Reflect.get(record.payload, 'scopeKey') === scopeKey
+  }
+
   /** Send one request with the authentication snapshot already selected by the caller. */
   private async requestUsingAuth<T>(
     auth: AuthPayload,
@@ -322,7 +393,7 @@ export class JdcloudAuthController extends TypertRemoteService {
         .requestAuthenticated<T>(auth.token, request, this.operationSignal(signal))
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
-        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        await this.ctx.credentials.deleteRecord(this.authKey())
         throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' })
       }
       throw error
@@ -343,7 +414,7 @@ export class JdcloudAuthController extends TypertRemoteService {
         throw new Error('JDCloud prompt validation returned inconsistent current tenants')
       }
       if (!sameCorpState(auth, corp) || auth.systemAdministrator !== currentUser.systemAdministrator) {
-        await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
+        await this.ctx.credentials.modifyRecord(this.authKey(), (current) => {
           if (current === undefined) return Promise.resolve(undefined)
           const latest = parseAuthRecord(current)
           if (latest.version !== 4
@@ -357,13 +428,14 @@ export class JdcloudAuthController extends TypertRemoteService {
             corpId: corp.corpId,
             corpName: corp.corpName,
             corps: corp.corps,
+            userId: currentUser.userId,
             systemAdministrator: currentUser.systemAdministrator,
           }))
         })
       }
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
-        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        await this.ctx.credentials.deleteRecord(this.authKey())
         throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' })
       }
       throw this.requestError('validate', error)
@@ -378,6 +450,7 @@ export class JdcloudAuthController extends TypertRemoteService {
   private async commitLogin(
     baseUrl: string,
     token: string,
+    userId: string,
     username: string,
     corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>,
     systemAdministrator: boolean,
@@ -386,13 +459,14 @@ export class JdcloudAuthController extends TypertRemoteService {
       version: 4,
       baseUrl,
       token,
+      userId,
       username,
       corpId: corp.corpId,
       corpName: corp.corpName,
       corps: corp.corps,
       systemAdministrator,
     }
-    await this.ctx.credentials.modifyRecord(AUTH_KEY, () => Promise.resolve(authRecord(payload)))
+    await this.ctx.credentials.modifyRecord(this.authKey(), () => Promise.resolve(authRecord(payload)))
     return authenticatedStatus(payload)
   }
 
@@ -405,11 +479,30 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   private async readAuth(): Promise<AuthPayload | undefined> {
-    const record = await this.ctx.credentials.readRecord(AUTH_KEY)
+    const record = await this.ctx.credentials.readRecord(this.authKey())
     if (record === undefined) return undefined
     const auth = parseAuthRecord(record)
-    if (auth.version === 4) return auth
+    if (auth.version === 4) return auth.userId === undefined ? undefined : auth
     return this.upgradeLegacyAuth(auth)
+  }
+
+  /** Select one durable login record for the current browser, or the legacy test key outside HTTP. */
+  private authKey(): ReturnType<typeof credentialKey> {
+    const browserSession = this.ctx.get('browserSession')
+    if (browserSession === undefined) return LEGACY_AUTH_KEY
+    let browserId: string
+    try {
+      browserId = browserSession.currentIdRequired()
+    } catch {
+      return LEGACY_AUTH_KEY
+    }
+    const suffix = createHash('sha256').update(browserId).digest('hex')
+    return credentialKey('jdcloud-auth-controller', `login-${suffix}`)
+  }
+
+  private ownerKey(kind: 'session' | 'workspace', id: string): ReturnType<typeof credentialKey> {
+    const suffix = createHash('sha256').update(id).digest('hex')
+    return credentialKey('jdcloud-auth-controller', `owner-${kind}-${suffix}`)
   }
 
   /** Upgrade one version-3 login by reading the current tenant permission once. */
@@ -420,7 +513,7 @@ export class JdcloudAuthController extends TypertRemoteService {
         .getCurrentUser(auth.token, AbortSignal.timeout(this.requestTimeoutMs))
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
-        await this.ctx.credentials.deleteRecord(AUTH_KEY)
+        await this.ctx.credentials.deleteRecord(this.authKey())
         return undefined
       }
       throw error
@@ -431,9 +524,10 @@ export class JdcloudAuthController extends TypertRemoteService {
     const upgraded: AuthPayload = {
       ...auth,
       version: 4,
+      userId: currentUser.userId,
       systemAdministrator: currentUser.systemAdministrator,
     }
-    const record = await this.ctx.credentials.modifyRecord(AUTH_KEY, (current) => {
+    const record = await this.ctx.credentials.modifyRecord(this.authKey(), (current) => {
       if (current === undefined) return Promise.resolve(undefined)
       const latest = parseAuthRecord(current)
       if (latest.version !== 3 || !sameStoredLogin(latest, auth)) return Promise.resolve(undefined)
@@ -460,6 +554,7 @@ function parseAuthRecord(record: CredentialRecord): StoredAuthPayload {
   const corpId: unknown = Reflect.get(record.payload, 'corpId')
   const corpName: unknown = Reflect.get(record.payload, 'corpName')
   const corps: unknown = Reflect.get(record.payload, 'corps')
+  const userId: unknown = Reflect.get(record.payload, 'userId')
   const systemAdministrator: unknown = Reflect.get(record.payload, 'systemAdministrator')
   if ((version !== 3 && version !== 4)
     || typeof baseUrl !== 'string'
@@ -476,7 +571,10 @@ function parseAuthRecord(record: CredentialRecord): StoredAuthPayload {
     || !corps.some(corp => corp.corpId === corpId && corp.corpName === corpName)) {
     throw new Error('stored JDCloud authentication record is invalid')
   }
-  const common = { baseUrl: normalizeJdcloudBaseUrl(baseUrl), token, username, corpId, corpName, corps }
+  const common = {
+    baseUrl: normalizeJdcloudBaseUrl(baseUrl), token, username, corpId, corpName, corps,
+    ...(typeof userId === 'string' && userId.trim() !== '' ? { userId: userId.trim() } : {}),
+  }
   return version === 3
     ? { version, ...common }
     : { version, ...common, systemAdministrator: systemAdministrator as boolean }

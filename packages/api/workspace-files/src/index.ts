@@ -3,10 +3,10 @@
  * listings, and the filesystem-observation change feed, exposed as
  * `workspaceFiles`.
  *
- * File reads follow the composed filesystem's read access, including paths
- * outside the workspace. The selected Session header supplies the base for
- * relative paths, with the sandbox policy root as its no-cwd fallback, not a
- * read-containment restriction. Directory listings and change observations
+ * File reads use the selected Session header as the base for relative paths.
+ * Deployments without JDCloud ownership checks retain the composed filesystem
+ * read policy; an authenticated JDCloud browser is confined to its owned
+ * Session and Workspace roots. Directory listings and change observations
  * remain workspace-scoped. File-kind checks and configured read caps apply to
  * every preview; this service exposes no mutations.
  *
@@ -56,6 +56,10 @@ export interface WorkspaceFileScope {
   readonly sessionId: SessionId
   /** Session workspace root, or the deployment fallback when its header has no cwd. */
   readonly workspaceRoot: string
+}
+
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -402,6 +406,10 @@ export class WorkspaceFiles extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns('session', String(workspaceFileScope.sessionId)))) {
+      throw new RemoteError('workspace-file/not-found', `session "${workspaceFileScope.sessionId}" not found`, { path })
+    }
     const { workspaceRoot } = workspaceFileScope
     const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
     // Gate on the path itself before anything follows it.
@@ -431,11 +439,14 @@ export class WorkspaceFiles extends TypertRemoteService {
     path: string,
     signal: AbortSignal,
   ): Promise<{ target: FsTarget; info: FsInfo }> {
-    const { workspaceRoot, entry } = await this.inspect(workspaceFileScope, path, signal)
+    const { root, workspaceRoot, entry } = await this.inspect(workspaceFileScope, path, signal)
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const target = owner === undefined
+      ? await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+      : await this.confine(root, workspaceRoot, path, signal)
     const info = await this.ctx.fs.stat(target, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })

@@ -215,7 +215,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/api/jdcloud-auth-controller/src/index.ts:55`](../packages/api/jdcloud-auth-controller/src/index.ts)
+Source: [`packages/api/jdcloud-auth-controller/src/index.ts:58`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -312,7 +312,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/api/workspace-files/src/index.ts:69`](../packages/api/workspace-files/src/index.ts)
+Source: [`packages/api/workspace-files/src/index.ts:73`](../packages/api/workspace-files/src/index.ts)
 
 <a id="deepseek-aidsh-attachment-local"></a>
 
@@ -409,6 +409,8 @@ export interface ConnectionConfig {
   recovery?: ConnectionRecoveryConfig
   /** Require the launch-token exchange and signed browser cookie. Default: true. */
   browserAuthentication?: boolean
+  /** Require an independent opaque browser cookie without Harness launch authentication. */
+  browserSession?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -442,7 +444,7 @@ export interface ConnectionRecoveryConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:72`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:74`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -2755,7 +2757,7 @@ Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packa
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
 export interface Config {
-  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
+  /** Include the fixed JDCloud Harness identity before the deployment persona (default true). */
   includeHarnessIdentity?: boolean
   /** Include dynamic runtime-context snapshots in model history (default true). */
   includeRuntimeContext?: boolean

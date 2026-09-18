@@ -43,15 +43,24 @@ export const inject = ['remote', 'remote.workspace']
  */
 export function apply(ctx: Context): void {
   const model = new ClientWorkspaceModel(ctx.remote.workspace)
-  new WorkspaceController(ctx, model)
   const control = createWorkspaceStateStream(ctx.remote, {
     accept: model,
     carrierFailed: () => { model.handleCarrierFailure() },
     failed: (error) => { model.handleStreamFailure(error) },
   })
+  new WorkspaceController(ctx, model)
   control.start()
+  const remoteEvents = ctx.remote as unknown as {
+    $on(event: 'credentials/record-updated', listener: (key: string) => void): () => void
+  }
+  const offAuth = remoteEvents.$on('credentials/record-updated', (key) => {
+    if (key.startsWith('jdcloud-auth-controller/login')) control.restart()
+  })
   ctx.effect(
-    () => async () => { await control.dispose() },
+    () => async () => {
+      offAuth()
+      await control.dispose()
+    },
     'workspace-controller.client.control',
   )
 }

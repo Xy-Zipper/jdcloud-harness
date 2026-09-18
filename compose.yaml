@@ -11,6 +11,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # `.git` is excluded from the build context, so pass the source revision explicitly.
+        DSH_CLIENT_COMMIT_HASH: ${DSH_CLIENT_COMMIT_HASH:?Set DSH_CLIENT_COMMIT_HASH to `git rev-parse HEAD` before building}
     init: true
     restart: unless-stopped
     working_dir: /workspace
@@ -31,6 +34,8 @@ services:
       # Keep the deployment's unified key while satisfying the shipped DeepSeek routes.
       GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
+      # Seed the JDCloud login form through the Host controller at process startup.
+      JDCLOUD_DEFAULT_BASE_URL: ${JDCLOUD_DEFAULT_BASE_URL:-}
       NODE_ENV: production
       TZ: ${TZ:-Asia/Hong_Kong}
     volumes:

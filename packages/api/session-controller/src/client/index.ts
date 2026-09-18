@@ -116,11 +116,22 @@ export function apply(ctx: Context): void {
     failed: (error) => { console.error('[session-controller] control stream failed:', error) },
   })
   control.start()
+  const remoteEvents = ctx.remote as unknown as {
+    $on(event: 'credentials/record-updated', listener: (key: string) => void): () => void
+  }
+  const offAuth = remoteEvents.$on('credentials/record-updated', (key) => {
+    if (!key.startsWith('jdcloud-auth-controller/login')) return
+    control.restart()
+    void sessions.refresh()
+  })
   ctx.on('connection/reset', () => { sessions.handleConnected() })
   if (ctx.remote.$host.home !== undefined) sessions.handleConnected()
   ctx.typert.contexts.registerClient('agent', {
     identity: candidate => sessions.scopeOf(candidate),
     resolve: sessionId => sessions.resolveAgentScope(sessionId),
   })
-  ctx.effect(() => async () => { await control.dispose() }, 'session-controller.client.control')
+  ctx.effect(() => async () => {
+    offAuth()
+    await control.dispose()
+  }, 'session-controller.client.control')
 }

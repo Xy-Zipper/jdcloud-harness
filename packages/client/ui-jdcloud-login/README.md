@@ -29,7 +29,7 @@ The page occupies `root` at priority `-100`. A successful login removes that con
 
 While authenticated, the package occupies `sidebar.account`. The expanded sidebar shows the account and current tenant returned by the Host; the collapsed rail shows only the account icon. The account menu lists all available owned and joined tenants, highlights the current tenant, and switches to another tenant through `GET /api/system/corp/switchCorp/{corpId}` without showing the login page. Tenant rows scroll within a 240-pixel region while Sign out stays pinned. A failed switch preserves the current tenant and reports the error in the menu. Selecting Sign out deletes the Host credential and restores the login page.
 
-The authenticated status also carries `systemAdministrator`. A non-administrator shadows `sidebar.settings`, `conversation.input.model`, and `conversation.hero.agentPreset` at priority `-100`, and registers a `commandUi` availability filter that hides and refuses `/model`. Switching tenants reapplies the policy immediately. An administrator sees the underlying controls. A new ordinary-user Session therefore omits client-selected model and preset values and uses the Host `agentDefaultModel` selection; an existing Session keeps its durable model history.
+The authenticated status also carries `systemAdministrator`. A non-administrator shadows `sidebar.settings`, `conversation.input.model`, `conversation.input.permission`, and `conversation.hero.agentPreset` at priority `-100`; refuses `/model` and `/permission`; filters the `terminal` tab type from the guide, rendering, recovery, and direct browser navigation; and registers a new-Session initializer that runs `/permission workspace-write` before the Session is opened. If that command is unavailable or fails, the navigation fails closed. Switching tenants reapplies the policy immediately. An administrator sees the underlying controls and does not install the initializer. An existing Session keeps its durable model and permission selections.
 
 The package also fills `sidebar.brand.mark`, `sidebar.brand.name`, and `conversation.hero.brand.mark` at priority `-10`. The blue-to-cyan hexagonal J mark keeps the size requested by each host, and the login page reuses the same artwork. Lower priority wins for these single slots, so the JDCloud occupants replace generic or official brand entries while this plugin is active and reveal them again on teardown.
 
@@ -48,6 +48,7 @@ None.
 
 - The transfer link controls the HTTP(S) service address that receives its Token; the Host controller applies no destination allowlist.
 - It does not automatically retry a prompt rejected by authentication validation.
+- Administrator controls are a browser presentation policy, not Host authorization. A client that can call Host endpoints directly can bypass them, and Agent tools retain the access provided by the Session's effective permission preset.
 
 <a id="dev-note"></a>
 ### Dev Note

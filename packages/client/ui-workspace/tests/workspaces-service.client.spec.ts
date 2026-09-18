@@ -392,6 +392,46 @@ describe('UiWorkspaceService', () => {
       .rejects.toThrow('uiWorkspace.connectWorkspace: unknown workspace ghost')
   })
 
+  it('prepares reused and created blank Sessions before returning them', async () => {
+    const reused = sid('reused')
+    const b = bench({
+      sessions: sessionState([summary('reused', { blank: true, cwd: '/w/alpha' })], reused),
+      workspaces: workspaceState([
+        workspace('alpha', [reused]),
+        workspace('beta'),
+        workspace('gamma'),
+      ]),
+    })
+    b.sessions.create.mockImplementation(async options => sid(`fresh-${String(options?.workspaceId)}`))
+    const initialize = vi.fn(async (_sessionId: SessionId) => {})
+    const release = b.uiWorkspace.registerNewSessionInitializer(initialize)
+
+    await expect(Promise.all([
+      b.uiWorkspace.connectWorkspace(wid('alpha')),
+      b.uiWorkspace.connectWorkspace(wid('alpha')),
+    ])).resolves.toEqual([reused, reused])
+    expect(initialize).toHaveBeenCalledExactlyOnceWith(reused)
+
+    await expect(b.uiWorkspace.connectWorkspace(wid('beta'))).resolves.toBe(sid('fresh-beta'))
+    expect(initialize).toHaveBeenLastCalledWith(sid('fresh-beta'))
+
+    release()
+    await expect(b.uiWorkspace.connectWorkspace(wid('gamma'))).resolves.toBe(sid('fresh-gamma'))
+    expect(initialize).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not open a new Session when its preparation fails', async () => {
+    const b = bench({ workspaces: workspaceState([workspace('alpha')]) })
+    b.sessions.create.mockResolvedValue(sid('unsafe'))
+    b.uiWorkspace.registerNewSessionInitializer(async () => {
+      throw new Error('permission initialization failed')
+    })
+
+    await expect(b.uiWorkspace.openWorkspace(wid('alpha')))
+      .rejects.toThrow('permission initialization failed')
+    expect(b.sessions.open).not.toHaveBeenCalled()
+  })
+
   it('targets an explicit, current-session, then recent Workspace and reports failed starts', async () => {
     const current = summary('current', { cwd: '/w/current-home', updatedAt: 1 })
     const recent = summary('recent', { cwd: '/w/recent-home', updatedAt: 2 })

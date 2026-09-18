@@ -369,6 +369,11 @@ export class CommandRuntime extends TypertRemoteService {
     const command = this.view(agent).get(parsed.name)
     if (command === undefined) return undefined
     if (signal.aborted) throw abortError(signal)
+    await this.ctx.waterfall(
+      'commands/admission',
+      { sessionId: agent.session.id, name: parsed.name, rawInput: parsed.rawInput },
+      () => Promise.resolve(),
+    )
     const commandId = this.mintCommandId()
     this.appendLifecycle(agent.session, 'command/run', {
       commandId,

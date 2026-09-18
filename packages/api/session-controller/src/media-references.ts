@@ -1,7 +1,8 @@
 /**
  * Authenticated GET/HEAD /api/file reads bounded file responses through
- * the composed filesystem provider. Paths and MIME types do not restrict access;
- * the connection service authenticates requests before this handler.
+ * the composed filesystem provider. JDCloud-authenticated requests are
+ * restricted to roots owned by the current tenant-user; generic deployments
+ * retain the connection service's existing filesystem policy.
  * @module @deepseek-ai/dsh-api-session-controller/media-references
  */
 
@@ -9,7 +10,7 @@ import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-attachment'
-import { FsError, type FileSystem } from '@deepseek-ai/dsh-fs'
+import { FsError, type FileSystem, type FsTarget } from '@deepseek-ai/dsh-fs'
 import mime from 'mime-types'
 
 const BASE_HEADERS = {
@@ -19,7 +20,12 @@ const BASE_HEADERS = {
   'Content-Security-Policy': "sandbox; default-src 'none'",
 }
 
-async function serveFile(request: Request, fs: FileSystem, maxBytes: number): Promise<Response> {
+async function serveFile(
+  request: Request,
+  fs: FileSystem,
+  maxBytes: number,
+  allowedRoots?: readonly FsTarget[],
+): Promise<Response> {
   const fail = (status: number, text: string): Response =>
     new Response(request.method === 'HEAD' ? null : text, { status, headers: BASE_HEADERS })
   const path = new URL(request.url).searchParams.get('path')
@@ -27,6 +33,9 @@ async function serveFile(request: Request, fs: FileSystem, maxBytes: number): Pr
   if (path.includes('\0') || !isAbsolute(path)) return fail(400, 'absolute path required')
   try {
     const target = await fs.resolve(path, { signal: request.signal })
+    if (allowedRoots !== undefined && !allowedRoots.some(root => fs.contains(root, target))) {
+      return fail(403, 'workspace access denied')
+    }
     const mediaType = mime.lookup(target.displayPath) || 'application/octet-stream'
     const headers: Record<string, string> = {
       ...BASE_HEADERS,
@@ -71,7 +80,44 @@ export const SessionMediaReferences = {
       path: '/api/file',
       methods: ['GET', 'HEAD'],
       requestBody: 'buffered',
-      fetch: request => serveFile(request, ctx.fs, maxBytes),
+      fetch: async request => serveFile(request, ctx.fs, maxBytes, await authorizedRoots(ctx)),
     }), 'session-controller: /api/file')
   },
+}
+
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+}
+
+interface WorkspaceLike {
+  readonly id: string
+  readonly path: string
+}
+
+interface SessionLike {
+  readonly id: string
+  readonly header: { readonly cwd?: string }
+}
+
+/** Resolve roots visible to the current tenant-user; absent auth keeps generic deployments unchanged. */
+async function authorizedRoots(ctx: Context): Promise<readonly FsTarget[] | undefined> {
+  const owner = ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+  if (owner === undefined) return undefined
+  const roots: FsTarget[] = []
+  const fs = ctx.fs
+  const registry = ctx.get('workspaceRegistry') as { list(): readonly WorkspaceLike[] } | undefined
+  if (registry !== undefined) {
+    for (const workspace of registry.list()) {
+      if (await owner.owns('workspace', String(workspace.id))) roots.push(await fs.resolve(workspace.path))
+    }
+  }
+  const sessions = ctx.get('sessions') as { list(): readonly SessionLike[] } | undefined
+  if (sessions !== undefined) {
+    for (const session of sessions.list()) {
+      if (session.header.cwd !== undefined && await owner.owns('session', String(session.id))) {
+        roots.push(await fs.resolve(session.header.cwd))
+      }
+    }
+  }
+  return roots
 }

@@ -37,6 +37,8 @@ export interface JdcloudCorpState {
 
 /** Account and tenant identity returned by `/api/oauth/currentUser`. */
 export interface JdcloudCurrentUserIdentity {
+  /** Stable JDCloud user identity used for data ownership. */
+  readonly userId: string
   /** Account label shown in the Harness sidebar. */
   readonly username: string
   /** Current tenant selected by the transferred token. */
@@ -532,11 +534,11 @@ function readCurrentUserIdentity(value: unknown): JdcloudCurrentUserIdentity {
   if (typeof corpId !== 'string' || corpId.trim() === '') {
     throw new Error('JDCloud current-user response has no current tenant')
   }
-  const labels = [
-    Reflect.get(userInfo, 'userName'),
-    Reflect.get(userInfo, 'realName'),
-    Reflect.get(userInfo, 'id'),
-  ]
+  const userId = Reflect.get(userInfo, 'id')
+  if (typeof userId !== 'string' && typeof userId !== 'number' || String(userId).trim() === '') {
+    throw new Error('JDCloud current-user response has no stable user id')
+  }
+  const labels = [Reflect.get(userInfo, 'userName'), Reflect.get(userInfo, 'realName'), userId]
   const username = labels.find((label): label is string => typeof label === 'string' && label.trim() !== '')
   if (username === undefined) throw new Error('JDCloud current-user response has no account name')
   const userPermission: unknown = Reflect.get(value, 'userPermission')
@@ -544,5 +546,5 @@ function readCurrentUserIdentity(value: unknown): JdcloudCurrentUserIdentity {
     && userPermission !== null
     && !Array.isArray(userPermission)
     && Reflect.get(userPermission, 'systemAdministrator') === true
-  return { username: username.trim(), corpId: corpId.trim(), systemAdministrator }
+  return { userId: String(userId).trim(), username: username.trim(), corpId: corpId.trim(), systemAdministrator }
 }

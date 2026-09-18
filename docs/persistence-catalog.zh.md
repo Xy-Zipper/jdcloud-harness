@@ -334,7 +334,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/interaction/commands/src/types.ts:112`](../packages/interaction/commands/src/types.ts)
+来源：[`packages/interaction/commands/src/types.ts:123`](../packages/interaction/commands/src/types.ts)
 
 <a id="commandrun--log-only"></a>
 
@@ -354,7 +354,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'command/run': { commandId: CommandId; name: string; args?: string; source: CommandSource }
 ```
 
-来源：[`packages/interaction/commands/src/types.ts:105`](../packages/interaction/commands/src/types.ts)
+来源：[`packages/interaction/commands/src/types.ts:116`](../packages/interaction/commands/src/types.ts)
 
 ### `compaction/*`
 
@@ -1769,7 +1769,7 @@ SHA-256: `0f46153645c297846a3fad3911636659ca4717a5e7d71c9f50bffacd312115ef`
 
 SHA-256: `ada310bf0bdb8fed51f3b56ea63f6ea6b18bbd587f04fccb63a14ab0b2a24e05`
 
-来源：[`packages/core/session/src/types.ts:189`](../packages/core/session/src/types.ts) · [`packages/interaction/commands/src/types.ts:75`](../packages/interaction/commands/src/types.ts) · [`packages/interaction/commands/src/types.ts:79`](../packages/interaction/commands/src/types.ts) · [`packages/llm/llm/src/message.ts:103`](../packages/llm/llm/src/message.ts) · [`packages/session/session-title/src/types.ts:35`](../packages/session/session-title/src/types.ts)
+来源：[`packages/core/session/src/types.ts:189`](../packages/core/session/src/types.ts) · [`packages/interaction/commands/src/types.ts:76`](../packages/interaction/commands/src/types.ts) · [`packages/interaction/commands/src/types.ts:80`](../packages/interaction/commands/src/types.ts) · [`packages/llm/llm/src/message.ts:103`](../packages/llm/llm/src/message.ts) · [`packages/session/session-title/src/types.ts:35`](../packages/session/session-title/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -2383,7 +2383,7 @@ SHA-256: `15196447222782e773eb943c92b18316ce96b9af0f0cfddb6e57ba8274ecc5ff`
 
 SHA-256: `5b6fb1f226ff56402db08a6aae82af76100b14056271875f69ec526a1ae05d51`
 
-来源：[`packages/interaction/commands/src/types.ts:112`](../packages/interaction/commands/src/types.ts)
+来源：[`packages/interaction/commands/src/types.ts:123`](../packages/interaction/commands/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -2423,7 +2423,7 @@ SHA-256: `37184378c6439257d105c4e2022d80fc9c3a3f7c7f6ac661b00bc9f18d871006`
 
 SHA-256: `a853902cfab417b8f08aa51ad6855fea46f34ed4588a74e47403035111d0fb86`
 
-来源：[`packages/interaction/commands/src/types.ts:105`](../packages/interaction/commands/src/types.ts)
+来源：[`packages/interaction/commands/src/types.ts:116`](../packages/interaction/commands/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|

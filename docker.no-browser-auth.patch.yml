@@ -1,5 +1,6 @@
 # The deployment delegates user identity to JDCloud Login and keeps only the Host/Origin fence.
 - id: connection
-  config:
-    browserAuthentication: false
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    config:
+      browserAuthentication: false
+      browserSession: true
+      trustedHosts: !!js ctx.webRuntime.trustedHosts

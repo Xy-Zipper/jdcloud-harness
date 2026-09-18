@@ -203,6 +203,26 @@ Source: [`packages/interaction/commands/src/index.ts`](../../packages/interactio
 
 ### `commands/*` events
 
+<a id="commandsadmission--waterfall"></a>
+
+#### `commands/admission` — waterfall
+
+Admit one resolved browser command before its lifecycle event is logged or its handler runs.
+
+```ts cordis-catalog
+/**
+ * Admit one resolved browser command before its lifecycle event is logged or
+ * its handler runs.
+ * @mode waterfall
+ * @param request - the resolved command invocation.
+ */
+'commands/admission'( request: { readonly sessionId: SessionId; readonly name: string; readonly rawInput: string }, next: () => Promise<void>, ): Promise<void>
+```
+
+Types: [SessionId](core.md)
+
+Source: [`packages/interaction/commands/src/types.ts`](../../packages/interaction/commands/src/types.ts)
+
 <a id="commandschange--emit"></a>
 
 #### `commands/change` — emit

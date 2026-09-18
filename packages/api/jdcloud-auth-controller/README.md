@@ -34,6 +34,8 @@ Before Session Controller persists attachments or delivers a browser prompt, the
 
 Before Session Controller changes a Session model, the controller reads the stored administrator flag through `api-session/model-selection-admission`. Missing login returns `jdcloud/auth-required`; a non-administrator returns `jdcloud/administrator-required` without changing the Session or deployment default model.
 
+In the JDCloud deployment, login records are keyed by an opaque browser session. The stable owner identity is the external `userInfo.id` together with the normalized service address and current tenant id; usernames are display labels only. A browser must log in independently, while browsers using the same tenant and user share newly-owned Sessions and Workspaces. Records without an owner are ignored.
+
 The browser can read `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }` for an authenticated login; the token never crosses the Remote wire. Version-3 records are upgraded once through `currentUser` before use. `logout()` deletes the complete credential record. Passwords exist only for the duration of the login call and are never stored by this package.
 
 The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and receive only the current tenant id plus type `3` forms and type `4` workflows that carry at least one recognized `addData`, `editData`, or `deleteData` grant. Each returned menu contains its id, name, resolved parent path, type, optional icon string, and recognized write grants. The method uses the stored Host login and never returns profile fields, the service address, or the Token.

@@ -196,7 +196,7 @@ Typed Remote control of transient Session-owned terminal processes.
  * @param signal - request cancellation.
  * @returns the Session workspace directory and terminal limits.
  */
-@Remote environment(agent: Agent, signal: AbortSignal): TerminalEnvironment
+@Remote async environment(agent: Agent, signal: AbortSignal): Promise<TerminalEnvironment>
 
 /**
  * Discover installed shells in the Session's execution environment.
@@ -259,7 +259,7 @@ Typed Remote control of transient Session-owned terminal processes.
  * @param id - terminal identity.
  * @param title - nonempty display title, at most 120 characters.
  */
-@Remote rename(agent: Agent, id: WebTerminalId, title: string): void
+@Remote async rename(agent: Agent, id: WebTerminalId, title: string): Promise<void>
 
 /**
  * Close an identity to future creation and kill its process range; repeated closes succeed.

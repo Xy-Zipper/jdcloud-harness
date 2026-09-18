@@ -12,6 +12,7 @@ import { bridge } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
+import type { BrowserSessionService } from './browser-session.ts'
 import type {
   ConnectionIndexRequest,
   ConnectionIndexResponse,
@@ -71,6 +72,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth | undefined,
+    private readonly browserSession: BrowserSessionService | undefined = undefined,
   ) {
     super(ctx, 'connection')
   }
@@ -96,12 +98,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
   /** Apply the Host/Origin fence, then browser authentication when configured. */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
     if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
-    return this.browserAuth === undefined || this.browserAuth.isAuthenticated(request) ? undefined : 401
+    if (this.browserAuth !== undefined && !this.browserAuth.isAuthenticated(request)) return 401
+    return this.browserSession === undefined || this.browserSession.accepts(request) ? undefined : 401
   }
 
   /** Authenticate an index request, or allow it when browser authentication is disabled. */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
-    return this.browserAuth?.authorizeIndex(request, response) ?? true
+    if (this.browserAuth !== undefined) return this.browserAuth.authorizeIndex(request, response)
+    return this.browserSession?.authorizeIndex(request, response) ?? true
   }
 
   /** Add this process's launch token when browser authentication is enabled. */
@@ -125,13 +129,16 @@ export class HostConnectionService extends Service implements HostConnectionHand
       fetch: (request) => {
         const pathname = new URL(request.url).pathname
         const route = this.fetchRoutes.get(pathname)
-        if (route?.methods.has(request.method) === true) return route.fetch(request)
+        if (route?.methods.has(request.method) === true) {
+          return this.browserSession?.run(request, () => route.fetch(request)) ?? route.fetch(request)
+        }
         const endpoint = endpointFromPath(channel, pathname)
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
           return Promise.resolve(new Response('not found', { status: 404 }))
         }
-        return interceptor.fetchHandler.fetch(request)
+        return this.browserSession?.run(request, () => interceptor.fetchHandler.fetch(request))
+          ?? interceptor.fetchHandler.fetch(request)
       },
     }
   }
@@ -161,7 +168,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     handler: ConnectionRpcHandler,
   ): () => Promise<void> {
     assertChannel(channel)
-    const fetchHandler = rpcFetchHandler(channel, handler)
+    const fetchHandler = rpcFetchHandler(channel, handler, this.browserSession)
     const route: WebRoute = {
       kind: 'prefix',
       path: channel,
@@ -192,7 +199,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
     const interceptor: ConnectionRpcInterceptor = {
       matches,
-      fetchHandler: rpcFetchHandler(channel, handler),
+      fetchHandler: rpcFetchHandler(channel, handler, this.browserSession),
     }
     return owner.effect(() => {
       if (this.interceptors.has(channel)) {
@@ -209,6 +216,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
 function rpcFetchHandler(
   channel: string,
   handler: ConnectionRpcHandler,
+  browserSession?: BrowserSessionService,
 ): ConnectionFetchHandler {
   return {
     requestBodyMode: () => 'buffered',
@@ -244,7 +252,8 @@ function rpcFetchHandler(
       }
 
       try {
-        const result = await handler(endpoint, message.payload, request.signal)
+        const result = await (browserSession?.run(request, () => handler(endpoint, message.payload, request.signal))
+          ?? handler(endpoint, message.payload, request.signal))
         return fullResponse(message.rpcId, result)
       } catch (error) {
         return new Response(`handler failure: ${String(error)}`, { status: 500 })

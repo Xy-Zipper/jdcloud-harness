@@ -83,6 +83,10 @@ export interface SessionControllerInternals {
   readonly canOpenPath?: () => boolean
 }
 
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+}
+
 /** Host service backing the generated `ctx.remote.session` namespace. */
 export class SessionController extends TypertRemoteService {
   static inject = [
@@ -189,7 +193,7 @@ export class SessionController extends TypertRemoteService {
    * @returns the live Agent or the stable Session-domain failure.
    */
   resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult> {
-    return this.agents.resolveAgent(sessionId)
+    return this.assertOwned(sessionId).then(() => this.agents.resolveAgent(sessionId))
   }
 
   /**
@@ -202,16 +206,25 @@ export class SessionController extends TypertRemoteService {
     sessionId: SessionId,
     signal?: AbortSignal,
   ): Promise<SessionInspection> {
-    const attached = this.ctx.sessions.get(sessionId)
-    if (attached !== undefined) {
-      return Promise.resolve({
-        meta: attached.header,
-        inheritedEventCount: attached.inheritedEventCount,
-        // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
-        events: attached.snapshotEvents(),
-      })
+    return this.assertOwned(sessionId).then(() => {
+      const attached = this.ctx.sessions.get(sessionId)
+      if (attached !== undefined) {
+        return {
+          meta: attached.header,
+          inheritedEventCount: attached.inheritedEventCount,
+          // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
+          events: attached.snapshotEvents(),
+        }
+      }
+      return inspectApiSession(this.ctx, sessionId, signal)
+    })
+  }
+
+  private async assertOwned(sessionId: SessionId): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns('session', String(sessionId)))) {
+      throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
     }
-    return inspectApiSession(this.ctx, sessionId, signal)
   }
 
   /**

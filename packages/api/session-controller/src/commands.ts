@@ -21,7 +21,7 @@ import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
-import type { Workspace } from '@deepseek-ai/dsh-workspace'
+import { WorkspaceId, type Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   ApiSessionAgentController,
   ApiSessionCwdConflict,
@@ -58,6 +58,11 @@ interface SessionReadState {
   readonly events: readonly SessionEvent[]
 }
 
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+  claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+}
+
 type PromptContentCandidate =
   | SessionPromptRequest['content'][number]
   | Extract<SessionUpdateQueueRequest['action'], { readonly kind: 'edit' }>['content'][number]
@@ -91,6 +96,7 @@ export class SessionCommandController {
     const sessionId = request.sessionId ?? brandString<SessionId>(`session-${randomUUID()}`)
     let workspace: Workspace | undefined
     if (request.workspaceId !== undefined) {
+      await this.assertOwned('workspace', request.workspaceId, 'workspace')
       workspace = this.ctx.workspaceRegistry.get(request.workspaceId)
       if (workspace === undefined) {
         throw new RemoteError('workspace/not-found', `workspace "${request.workspaceId}" not found`, {
@@ -110,6 +116,7 @@ export class SessionCommandController {
     } catch (error) {
       this.rejectCreation(sessionId, error)
     }
+    await this.claimOwned('session', String(sessionId))
     if (workspace !== undefined) {
       try {
         await workspace.attachSession(sessionId)
@@ -205,6 +212,7 @@ export class SessionCommandController {
    * @returns the new Session identity.
    */
   async fork(request: SessionForkRequest): Promise<SessionForkValue> {
+    await this.assertOwned('session', String(request.sessionId), 'session')
     let atSeq: ReturnType<typeof SessionSeq> | undefined
     try {
       atSeq = request.atSeq === undefined ? undefined : SessionSeq(request.atSeq)
@@ -282,6 +290,7 @@ export class SessionCommandController {
         {},
       )
     }
+    await this.claimOwned('session', String(childId))
     if (workspace !== undefined) {
       try {
         await workspace.attachSession(childId)
@@ -519,6 +528,7 @@ export class SessionCommandController {
   }
 
   private async resolveAgent(sessionId: SessionId): Promise<Agent> {
+    await this.assertOwned('session', String(sessionId), 'session')
     const found = await this.agents.resolveAgent(sessionId)
     if ('error' in found) throw found.error
     return found.agent
@@ -547,6 +557,7 @@ export class SessionCommandController {
   }
 
   private async readSessionState(sessionId: SessionId): Promise<SessionReadState> {
+    await this.assertOwned('session', String(sessionId), 'session')
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined) {
       // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
@@ -554,6 +565,21 @@ export class SessionCommandController {
     }
     const inspected = await inspectApiSession(this.ctx, sessionId)
     return { id: inspected.meta.id, header: inspected.meta, events: inspected.events }
+  }
+
+  private async assertOwned(kind: 'session' | 'workspace', id: string, _label: string): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns(kind, id))) {
+      if (kind === 'session') {
+        throw new RemoteError('session/not-found', `session "${id}" not found`, { sessionId: id as SessionId })
+      }
+      throw new RemoteError('workspace/not-found', `workspace "${id}" not found`, { workspaceId: WorkspaceId(id) })
+    }
+  }
+
+  private async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    await owner?.claimOwned(kind, id)
   }
 
   private async forkWorkspace(source: SessionHeader): Promise<Workspace | undefined> {

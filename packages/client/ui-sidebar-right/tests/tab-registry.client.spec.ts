@@ -28,6 +28,21 @@ function ranked(registry: SidebarRightTabRegistry, address: string): string[] {
 }
 
 describe('SidebarRightTabRegistry — recognition', () => {
+  it('omits disallowed page types from guide, tabs, and direct page opens until policy is released', () => {
+    const registry = new SidebarRightTabRegistry(new Context())
+    registry.register(typeFor('terminal', [], { guide: [{ id: 'new', order: 1, title: () => 'Terminal' }] }))
+    const updates = vi.fn()
+    registry.subscribe(updates)
+    const release = registry.registerAvailabilityFilter(kind => kind !== 'terminal')
+    expect(registry.get('terminal')).toBeUndefined()
+    expect(registry.entries()).toEqual([])
+    expect(registry.guide()).toEqual([])
+    expect(() => registry.claim('sidebar://terminal', 'terminal')).toThrow()
+    release()
+    expect(registry.get('terminal')?.kind).toBe('terminal')
+    expect(registry.guide()).toHaveLength(1)
+    expect(updates).toHaveBeenCalledTimes(2)
+  })
   it('rejects default-page resolution when the selected kind is not registered', () => {
     expect(() => defaultSeed(new SidebarRightTabRegistry(new Context())))
       .toThrow('default tab kind "guide" is not registered')

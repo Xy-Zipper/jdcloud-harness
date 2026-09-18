@@ -23,6 +23,10 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+}
+
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
@@ -130,6 +134,7 @@ export class ApiSessionList {
     const items: SessionSummary[] = []
     const cold: SessionHeader[] = []
     for (const record of records) {
+      if (!await this.owned(record.header.id)) continue
       const live = this.ctx.sessions.get(record.header.id)
       if (live !== undefined) {
         items.push(this.summaryFor(live))
@@ -177,9 +182,10 @@ export class ApiSessionList {
     try {
       const visible = await provider.listSessions(signal)
       signal.throwIfAborted()
-      const visibleIds = new Set(visible
-        .filter(record => record.header.cwd !== undefined)
-        .map(record => record.header.id))
+      const visibleIds = new Set<SessionId>()
+      for (const record of visible) {
+        if (record.header.cwd !== undefined && await this.owned(record.header.id)) visibleIds.add(record.header.id)
+      }
       if (visibleIds.size === 0) return { items: [], hasMore: false }
       const authorized: SessionSearchItem[] = []
       const acceptedIds = new Set<SessionId>()
@@ -291,6 +297,11 @@ export class ApiSessionList {
       )
       return undefined
     }
+  }
+
+  private owned(id: SessionId): Promise<boolean> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    return owner === undefined ? Promise.resolve(true) : owner.owns('session', String(id))
   }
 }
 

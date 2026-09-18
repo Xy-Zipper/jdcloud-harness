@@ -411,6 +411,8 @@ export interface ConnectionConfig {
   recovery?: ConnectionRecoveryConfig
   /** Require the launch-token exchange and signed browser cookie. Default: true. */
   browserAuthentication?: boolean
+  /** Require an independent opaque browser cookie without Harness launch authentication. */
+  browserSession?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -2757,7 +2759,7 @@ export interface Config {
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
 export interface Config {
-  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
+  /** Include the fixed JDCloud Harness identity before the deployment persona (default true). */
   includeHarnessIdentity?: boolean
   /** Include dynamic runtime-context snapshots in model history (default true). */
   includeRuntimeContext?: boolean

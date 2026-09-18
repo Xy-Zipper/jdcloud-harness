@@ -24,6 +24,7 @@ async function bench(authenticated = false, administrator = true) {
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.agentPreset': { kind: 'single', scope: 'root' },
       'conversation.input.model': { kind: 'single', scope: 'session' },
+      'conversation.input.permission': { kind: 'single', scope: 'session' },
       'sidebar.account': { kind: 'single', scope: 'root' },
       'sidebar.brand.mark': { kind: 'single', scope: 'root' },
       'sidebar.brand.name': { kind: 'single', scope: 'root' },
@@ -86,8 +87,43 @@ async function bench(authenticated = false, administrator = true) {
   ctx.provide('remote', remote as never)
   ctx.provide('remote.jdcloudAuth', remote.jdcloudAuth as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
+  const tabFilters = new Set<(kind: string) => boolean>()
+  const terminal = { id: 'test/terminal', kind: 'terminal', title: () => 'Terminal' }
+  let visibleTerminal: typeof terminal | undefined = terminal
+  const refreshTabs = () => {
+    visibleTerminal = [...tabFilters].every(filter => filter('terminal')) ? terminal : undefined
+  }
+  const tabs = {
+    registerAvailabilityFilter(filter: (kind: string) => boolean) {
+      tabFilters.add(filter)
+      refreshTabs()
+      return () => { tabFilters.delete(filter); refreshTabs() }
+    },
+    get(kind: string) {
+      return kind === 'terminal' ? visibleTerminal : undefined
+    },
+    guide() {
+      return this.get('terminal') === undefined ? [] : [{ id: 'new', kind: 'terminal' }]
+    },
+  }
+  ctx.provide('sidebarRightTabs', tabs as never)
+  const sessionCommand = vi.fn(async (_line: string) => ({ ok: true as const, value: { matched: true } }))
+  let sessionBinding: { session: { command: typeof sessionCommand } } | undefined = {
+    session: { command: sessionCommand },
+  }
+  const newSessionInitializers = new Set<(sessionId: never) => Promise<void>>()
+  ctx.provide('sessions', {
+    binding: () => sessionBinding,
+  } as never)
+  ctx.provide('uiWorkspace', {
+    registerNewSessionInitializer(initializer: (sessionId: never) => Promise<void>) {
+      newSessionInitializers.add(initializer)
+      return () => { newSessionInitializers.delete(initializer) }
+    },
+  } as never)
   const commandFilters = new Set<CommandAvailabilityFilter>()
   ctx.provide('commandUi', {
+    dismiss: vi.fn(),
     registerAvailabilityFilter(filter: CommandAvailabilityFilter) {
       commandFilters.add(filter)
       return () => { commandFilters.delete(filter) }
@@ -96,6 +132,8 @@ async function bench(authenticated = false, administrator = true) {
   return {
     ctx,
     slots,
+    tabs,
+    sessionCommand,
     status,
     login,
     loginWithToken,
@@ -104,8 +142,14 @@ async function bench(authenticated = false, administrator = true) {
     setAdministrator(value: boolean) {
       currentAdministrator = value
     },
+    setSessionBinding(value: { session: { command: typeof sessionCommand } } | undefined) {
+      sessionBinding = value
+    },
     commandAvailable(name: string) {
       return [...commandFilters].every(filter => filter(name, { sessionId: 'session-test' as never }))
+    },
+    async initializeNewSession() {
+      for (const initializer of newSessionInitializers) await initializer('session-new' as never)
     },
     expire() {
       currentAuthenticated = false
@@ -172,7 +216,10 @@ describe('JDCloud login browser plugin', () => {
   it('declares its browser services', () => {
     expect(hostInject).toEqual(['webServer'])
     expect(clientInject).toEqual(['remote'])
-    expect(uiInject).toEqual(['remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi'])
+    expect(uiInject).toEqual([
+      'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
+      'sessions', 'uiWorkspace',
+    ])
   })
 
   it('hides administrator controls and /model for an ordinary tenant', async () => {
@@ -183,14 +230,60 @@ describe('JDCloud login browser plugin', () => {
     await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
 
     for (const name of [
-      'sidebar.settings', 'conversation.input.model', 'conversation.hero.agentPreset',
+      'sidebar.settings', 'conversation.input.model', 'conversation.input.permission', 'conversation.hero.agentPreset',
     ] as const) {
       expect(b.slots.entries(name)[0]?.options.priority).toBe(-100)
     }
     expect(b.commandAvailable('model')).toBe(false)
+    expect(b.commandAvailable('permission')).toBe(false)
+    expect(b.tabs.guide()).toHaveLength(0)
+    expect(b.tabs.get('terminal')).toBeUndefined()
     expect(b.commandAvailable('plan')).toBe(true)
+    await b.initializeNewSession()
+    expect(b.sessionCommand).toHaveBeenCalledExactlyOnceWith('/permission workspace-write')
     await fiber.dispose()
     expect(b.commandAvailable('model')).toBe(true)
+    expect(b.commandAvailable('permission')).toBe(true)
+    expect(b.tabs.get('terminal')?.kind).toBe('terminal')
+    b.sessionCommand.mockClear()
+    await b.initializeNewSession()
+    expect(b.sessionCommand).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['rejects a failed permission command', { ok: false, error: { code: 'command/failed', message: 'blocked' } }],
+    ['rejects an unmatched permission command', { ok: true, value: { matched: false } }],
+  ] as const)('%s before opening a new Session', async (_name, result) => {
+    const b = await bench(true, false)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const loginEntry = b.slots.entries('root').find(candidate => candidate.component === LoginPage)
+    await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
+    b.sessionCommand.mockResolvedValueOnce(result as never)
+    await expect(b.initializeNewSession()).rejects.toThrow()
+    await fiber.dispose()
+  })
+
+  it('does not register the ordinary-user initializer for an administrator', async () => {
+    const b = await bench(true, true)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const loginEntry = b.slots.entries('root').find(candidate => candidate.component === LoginPage)
+    await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
+    await b.initializeNewSession()
+    expect(b.sessionCommand).not.toHaveBeenCalled()
+    await fiber.dispose()
+  })
+
+  it('fails closed when the new Session binding is unavailable', async () => {
+    const b = await bench(true, false)
+    const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installJdcloudLoginUi })
+    await fiber.await()
+    const loginEntry = b.slots.entries('root').find(candidate => candidate.component === LoginPage)
+    await ((loginEntry?.inject as (() => JdcloudLoginInjected) | undefined)?.().initialize())
+    b.setSessionBinding(undefined)
+    await expect(b.initializeNewSession()).rejects.toThrow(/cannot resolve Session/)
+    await fiber.dispose()
   })
 
   it('updates administrator controls when tenant permissions change', async () => {
@@ -206,14 +299,21 @@ describe('JDCloud login browser plugin', () => {
     await account?.switchCorp('corp-next')
     expect(b.slots.entries('sidebar.settings')).toHaveLength(0)
     expect(b.slots.entries('conversation.input.model')).toHaveLength(0)
+    expect(b.slots.entries('conversation.input.permission')).toHaveLength(0)
     expect(b.slots.entries('conversation.hero.agentPreset')).toHaveLength(0)
     expect(b.commandAvailable('model')).toBe(true)
+    expect(b.commandAvailable('permission')).toBe(true)
+    expect(b.tabs.get('terminal')?.kind).toBe('terminal')
 
     b.setAdministrator(false)
     const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
     await ((updatedEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.().switchCorp('corp-current'))
     expect(b.slots.entries('sidebar.settings')[0]?.options.priority).toBe(-100)
     expect(b.commandAvailable('model')).toBe(false)
+    expect(b.commandAvailable('permission')).toBe(false)
+    expect(b.tabs.get('terminal')).toBeUndefined()
+    await b.initializeNewSession()
+    expect(b.sessionCommand).toHaveBeenCalledExactlyOnceWith('/permission workspace-write')
     await fiber.dispose()
   })
 
@@ -418,6 +518,8 @@ describe('JDCloud login browser plugin', () => {
     })
     await expect(accountInjected?.logout()).resolves.toEqual({ ok: true })
     expect(b.logout).toHaveBeenCalledOnce()
+    expect(b.tabs.get('terminal')).toBeUndefined()
+    expect(b.commandAvailable('permission')).toBe(false)
     expect(b.slots.entries('sidebar.account').some(candidate => candidate.component === AccountSeat)).toBe(false)
     expect(b.slots.entries('root').some(candidate => candidate.component === LoginPage)).toBe(true)
     await fiber.dispose()

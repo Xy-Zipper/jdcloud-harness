@@ -3,7 +3,7 @@
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'jdcloud/auth-required': { readonly reason: 'missing' | 'expired' }
-    'jdcloud/administrator-required': { readonly capability: 'model-selection' }
+    'jdcloud/administrator-required': { readonly capability: 'model-selection' | 'terminal' | 'danger-full-access' }
     'jdcloud/auth-failed': { readonly code: number | null }
     'jdcloud/switch-failed': { readonly code: number | null }
     'jdcloud/validation-failed': { readonly code: number | null }

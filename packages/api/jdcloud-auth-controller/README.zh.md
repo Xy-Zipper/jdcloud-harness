@@ -34,6 +34,8 @@ Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 
 
 Session Controller 修改 Session 模型前，controller 通过 `api-session/model-selection-admission` 读取已保存的管理员标记。缺少登录时返回 `jdcloud/auth-required`；非管理员返回 `jdcloud/administrator-required`，且不修改 Session 或部署默认模型。
 
+在 JDCloud 部署中，登录记录按不透明的浏览器会话键保存。稳定归属由外部 `userInfo.id`、规范化服务地址和当前租户 ID 共同决定；用户名只用于显示。每台浏览器必须独立登录，同一租户和用户在不同电脑登录后可共享新创建的 Session 与 Workspace；没有归属记录的旧数据会被忽略。
+
 登录后，浏览器可以读取 `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }`；Token 永不经过 Remote wire。版本 3 record 会在使用前通过一次 `currentUser` 升级。`logout()` 会删除完整 credential record。密码只在登录调用期间存在，本包不会保存密码。
 
 浏览器可以调用 `writableMenus()` 刷新 `/api/oauth/currentUser`，并且只接收当前租户 id，以及至少拥有一项已识别 `addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程。每个返回菜单包含其 id、名称、解析后的父级路径、类型、可选图标字符串与已识别写授权。该方法使用 Host 中保存的登录信息，永不返回资料字段、服务地址或 Token。

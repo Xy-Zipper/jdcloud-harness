@@ -43,7 +43,7 @@ function currentUserData(
   username = 'user',
 ) {
   return {
-    userInfo: { userName: username, corpId },
+    userInfo: { id: `id-${username}`, userName: username, corpId },
     userPermission: { systemAdministrator },
   }
 }
@@ -175,9 +175,9 @@ describe('minimal JDCloud HTTP client', () => {
   })
 
   it.each([
-    [{ userInfo: { corpId: 'corp-a', userName: ' account ' } }, { username: 'account', corpId: 'corp-a', systemAdministrator: false }],
-    [{ userInfo: { corpId: 'corp-a', realName: 'Real Name' } }, { username: 'Real Name', corpId: 'corp-a', systemAdministrator: false }],
-    [{ userInfo: { corpId: 'corp-a', id: 'user-id' }, userPermission: { systemAdministrator: true } }, { username: 'user-id', corpId: 'corp-a', systemAdministrator: true }],
+    [{ userInfo: { id: 'user-id', corpId: 'corp-a', userName: ' account ' } }, { userId: 'user-id', username: 'account', corpId: 'corp-a', systemAdministrator: false }],
+    [{ userInfo: { id: 'user-id', corpId: 'corp-a', realName: 'Real Name' } }, { userId: 'user-id', username: 'Real Name', corpId: 'corp-a', systemAdministrator: false }],
+    [{ userInfo: { corpId: 'corp-a', id: 'user-id' }, userPermission: { systemAdministrator: true } }, { userId: 'user-id', username: 'user-id', corpId: 'corp-a', systemAdministrator: true }],
   ])('reads the transferred-token identity from currentUser', async (data, expected) => {
     const fetcher = vi.fn(() => Promise.resolve(json({ code: 200, msg: 'ok', data })))
     const client = new JdcloudClient('https://kindoucloud.com', fetcher)
@@ -392,6 +392,7 @@ describe('JDCloud authentication controller', () => {
         version: 4,
         baseUrl: 'https://beta.kindoucloud.com',
         token: 'bearer token',
+        userId: 'id-user',
         username: 'user',
         corpId: 'corp-beta',
         corpName: 'Beta Tenant',
@@ -455,7 +456,7 @@ describe('JDCloud authentication controller', () => {
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: 'corp-a' }))
       .mockResolvedValueOnce(json({
         code: 200, msg: 'ok', data: {
-          userInfo: { realName: 'Transferred User', corpId: 'corp-a' },
+          userInfo: { id: 'transfer-user', realName: 'Transferred User', corpId: 'corp-a' },
           userPermission: { systemAdministrator: false },
         },
       }))
@@ -934,6 +935,7 @@ describe('JDCloud authentication controller', () => {
         version: 4,
         baseUrl: 'https://kindoucloud.com',
         token: 'another token',
+        userId: 'other-id',
         username: 'other-user',
         corpId: 'other-corp',
         corpName: 'Other Tenant',

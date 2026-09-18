@@ -78,10 +78,16 @@ export function apply(ctx: Context): void {
     name: 'conversation.session.header.actions', id, locale: namespace,
     inject: (sessionId): TerminalRecoveryInjected => ({
       restore: () => {
+        // An unavailable tab must not recover retained processes into the browser UI.
+        if (ctx.sidebarRightTabs.get('terminal') === undefined) return Promise.resolve()
         let pending = recovered.get(sessionId)
         if (pending === undefined) {
           pending = ctx.webTerminals.recover(sessionId).then((terminals) => {
             if (disposed) return
+            if (ctx.sidebarRightTabs.get('terminal') === undefined) {
+              recovered.delete(sessionId)
+              return
+            }
             for (const info of terminals) ctx.sidebarRight.openTabIn(sessionId, 'terminal', {
               params: { terminalId: info.id },
             })

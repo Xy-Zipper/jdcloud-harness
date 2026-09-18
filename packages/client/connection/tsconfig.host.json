@@ -9,6 +9,7 @@
     "src/api-path.ts",
     "src/api-request-trust.ts",
     "src/browser-auth.ts",
+    "src/browser-session.ts",
     "src/http-bridge.ts",
     "src/index.ts",
     "src/loopback-hostname.ts",

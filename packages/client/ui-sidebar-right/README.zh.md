@@ -77,6 +77,8 @@ tab 类型分两阶段注册，随包发布的引导类型走的正是别的包�
 1. **类型**——`ctx.sidebarRightTabs.register({ id, kind, patterns?, priority?, canOpen?, title, guide? })`，一份没有运行时钩子的静态声明，返回 disposer。`id` 是这个实现在 tab 系统里的身份，在全部注册中唯一（包名是天然取值；随包引导页是 `@deepseek-ai/dsh-client-ui-sidebar-right/guide`）：一旦 extension 可以接管 builtin 的 kind，kind 就不再唯一，所以实现要自己命名，同一 `id` 的第二次注册会 throw。资源类型给出 `patterns`，即作用于 `dsh-resource://` 地址的 glob：含 `:` 的匹配整个地址（`dsh-resource://file/**`）；不含的匹配 URI 路径的任意深度且忽略大小写（`*.md`），不是 URI 的地址不匹配任何这类模式。页类型——引导页、文件树——不给出模式，按 kind 打开。`canOpen(address)` 否决一次命中。`title(address)` 是 tab chip 的文字，在 tab 打开时捕获。`guide` 列出引导页的入口框；选中一个即把贡献它的类型作为页打开。一个 `kind` 最多承载一份 `builtin` 与一份 `extension` 注册（extension 生效；它离开后 builtin 恢复）；kind 上的其它任何撞名都 throw。`id` 同时也是该类型正文与标题注册时用的 key，因此 extension 与它接管的 builtin 各占一个格位，席位渲染生效的那个。
 2. **正文**——`ctx.slots.register({ name: 'sidebar.right.pane.tab', key: definition.id }, Body)` 通过框架注入的 `useTabInfo()` 读取 `{ sidebar, panel, tab }`。`sidebar` 提供开合与全屏信息，`panel.id` 命名所在格，`tab` 包含原记录字段、`visible`、`navigation`、`signal` 和 `actions`。这些字段不再作为平铺owner props传入；类型自己的store仍使用 `useStore`/`actions`。可选标题注册及引导替换共享该hook；未注册标题时使用打开时保存的文本。
 
+`ctx.sidebarRightTabs.registerAvailabilityFilter(filter)` 对页面 kind 应用可撤销的浏览器策略。被拒绝的 kind 不会出现在注册表查询、引导页、标签页渲染和直接导航中，但其注册仍然保留。该过滤器不授权 Host 操作，也不删除已有布局记录。
+
 由哪个类型打开资源遵循编辑器解析器的惯例：`patterns` 命中的类型先按 `priority` 档排序——`extension`（产品外的类型，最高档，也是未命名时的默认）、`builtin`、`fallback`（任何更具体的类型都应胜过的通用查看器）——再按命中模式的长度，再按注册顺序；`canOpen` 会剔除候选。各档是字符串字面量，因此别的包里的类型不需要从这里做运行时导入。`candidates(address)` 返回排序，`claim(address, kind?)` 返回决定；指定 `kind` 时跳过它的 glob 但保留它的 `canOpen`。
 
 另有两个席位扩展已有之物：`sidebar.right.tab.guide`（chain）替换引导 tab 的正文而不替换 tab，`sidebar.right.tab.menu.item`（list）在套件自己的布局动作之后向 tab 菜单追加内容级动作。目前没有面向格级动作或折叠态控件的席位，因为还没有东西需要它。

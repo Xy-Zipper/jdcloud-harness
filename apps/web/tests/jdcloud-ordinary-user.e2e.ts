@@ -8,6 +8,7 @@ import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type {} from '@deepseek-ai/dsh-client-modules'
+import type {} from '@deepseek-ai/dsh-permission-presets'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
@@ -21,9 +22,10 @@ import {
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/jdcloud-ordinary-user', import.meta.url))
 const ORDINARY_USER_EXPECTED = join(SNAPSHOT_DIR, 'controls.expected.md')
+const SESSION_CONTROLS_EXPECTED = join(SNAPSHOT_DIR, 'session-controls.expected.md')
 const LOWCODE_ACTIONS_EXPECTED = join(SNAPSHOT_DIR, 'lowcode-actions.expected.md')
-const JDCLOUD_BUNDLE_PATCH = fileURLToPath(
-  new URL('../../../packages/bundle/jdcloud-login/cordis.patch.yml', import.meta.url),
+const JDCLOUD_PERMISSION_OVERLAY = fileURLToPath(
+  new URL('./jdcloud-ordinary-user-permission.overlay.yml', import.meta.url),
 )
 const JDCLOUD_BUNDLE_MANIFEST = fileURLToPath(
   new URL('../../../packages/bundle/jdcloud-login/package.json', import.meta.url),
@@ -116,7 +118,7 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
   beforeAll(async () => {
     jdcloud = await startJdcloudServer()
     scaffold = await launchWebScaffold({
-      extraOverlayPath: JDCLOUD_BUNDLE_PATCH,
+      extraOverlayPath: JDCLOUD_PERMISSION_OVERLAY,
       extraInstallAnchors: [JDCLOUD_BUNDLE_MANIFEST],
     })
     expect(scaffold.ctx.clientModules.graph().entries.map(entry => entry.id)).toContain(
@@ -161,6 +163,9 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     const serverDefault = scaffold.ctx.agentDefaultModel.currentSelection()
     await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
     expect(await page.getByRole('button', { name: /^选择模型/ }).count()).toBe(0)
+    expect(await page.locator('button[aria-label^="访问模式"]').count()).toBe(0)
+    const sessionControls = await captureStableAria(page, '[data-composer-card]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(SESSION_CONTROLS_EXPECTED, sessionControls, MODE)
     expect(tripwire.pageErrors).toEqual([])
     await expect.poll(() => jdcloud.requests.slice(), { timeout: 10_000 }).toEqual([
       'POST /api/oauth/login',
@@ -220,6 +225,12 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
 
     const agent = scaffold.ctx.agents.list()[0]
     if (agent === undefined) throw new Error('connected JDCloud workspace did not create an Agent')
+    expect(scaffold.ctx.sessionProjections.snapshot(agent.session).values.permissions)
+      .toMatchObject({ currentValue: 'workspace-write' })
+    const events = agent.session.snapshotEvents()
+    expect(events.some(event => event.type === 'permission/preset' && event.data.preset === 'danger-full-access')).toBe(true)
+    expect(events.some(event => event.type === 'permission/preset' && event.data.preset === 'workspace-write')).toBe(true)
+    expect(events.some(event => event.type === 'command/run' && event.data.name === 'permission')).toBe(true)
     expect(agent.session.snapshotEvents().some(event => event.type === 'model/selection')).toBe(false)
     expect(
       scaffold.ctx.sessionProjections.snapshot(agent.session).values.modelSelection?.next
@@ -244,6 +255,7 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'controls.expected.md',
       'lowcode-actions.expected.md',
+      'session-controls.expected.md',
     ])
   })
 })

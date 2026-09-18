@@ -8,6 +8,7 @@
  */
 
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { CommandDefinitionId, CommandId } from './brand.ts'
 import type { EncodedImageAttachment } from '@deepseek-ai/dsh-attachment/types'
 
@@ -80,6 +81,16 @@ export type CommandSource = CommandSourceMap[keyof CommandSourceMap]
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    /**
+     * Admit one resolved browser command before its lifecycle event is logged or
+     * its handler runs.
+     * @mode waterfall
+     * @param request - the resolved command invocation.
+     */
+    'commands/admission'(
+      request: { readonly sessionId: SessionId; readonly name: string; readonly rawInput: string },
+      next: () => Promise<void>,
+    ): Promise<void>
     /**
      * A command was registered or unregistered. This is an unfiltered registry
      * notification because a global or scoped change may affect any UI view.

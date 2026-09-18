@@ -25,6 +25,11 @@ import type {
   WorkspaceValue,
 } from './types.ts'
 
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+  claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+}
+
 /** Implements Workspace mutations against the authoritative registry. */
 export class WorkspaceCommands {
   private operationTail = Promise.resolve()
@@ -42,9 +47,11 @@ export class WorkspaceCommands {
       try {
         const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
         if (existing !== undefined) {
+          await this.assertOwned(existing.id)
           return { workspace: workspaceView(existing), created: false }
         }
         const workspace = await this.ctx.workspaceRegistry.create(request.path)
+        await this.claimOwned(String(workspace.id))
         return { workspace: workspaceView(workspace), created: true }
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error
@@ -69,7 +76,7 @@ export class WorkspaceCommands {
       return Promise.reject(new RemoteError('gateway/bad-request', 'Workspace rename requires a non-blank title', {}))
     }
     return this.enqueue(async () => {
-      const workspace = this.requireWorkspace(request.workspaceId)
+      const workspace = await this.requireWorkspace(request.workspaceId)
       if (title !== workspace.title) {
         if (this.ctx.workspaceRegistry.list().some(candidate =>
           candidate.id !== workspace.id && candidate.title === title)) {
@@ -125,7 +132,7 @@ export class WorkspaceCommands {
    * @returns the updated Workspace projection.
    */
   async insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue> {
-    const workspace = this.requireWorkspace(request.workspaceId)
+    const workspace = await this.requireWorkspace(request.workspaceId)
     try {
       await workspace.insertSessionBefore(request.sessionId, request.beforeSessionId)
     } catch (error) {
@@ -173,10 +180,21 @@ export class WorkspaceCommands {
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
 
-  private requireWorkspace(workspaceId: WorkspaceId): Workspace {
+  private async requireWorkspace(workspaceId: WorkspaceId): Promise<Workspace> {
+    await this.assertOwned(workspaceId)
     const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
     if (workspace === undefined) throw workspaceNotFound(workspaceId)
     return workspace
+  }
+
+  private async assertOwned(workspaceId: WorkspaceId): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns('workspace', String(workspaceId)))) throw workspaceNotFound(workspaceId)
+  }
+
+  private async claimOwned(workspaceId: string): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    await owner?.claimOwned('workspace', workspaceId)
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

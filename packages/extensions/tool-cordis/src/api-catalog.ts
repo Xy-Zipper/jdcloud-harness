@@ -1171,6 +1171,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Fixed API path, method, and one optional JSON or multipart-file body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
         returns: 'JDCloud response data without exposing the stored token.',
       },
+      {
+        signature: 'async currentScopeKey(): Promise<string | undefined>',
+        description: 'Return the deterministic tenant-user owner key for the current browser login.',
+        parameters: [],
+        returns: 'The owner key, or undefined when no user login is active.',
+      },
+      {
+        signature: 'async isCurrentAdministrator(): Promise<boolean>',
+        description: 'Return whether the current login has system-administrator terminal access.',
+        parameters: [],
+        returns: 'Whether the current login is a system administrator.',
+      },
+      {
+        signature: 'async claimOwned(kind: \'session\' | \'workspace\', id: string): Promise<void>',
+        description: 'Claim a newly-created Session or Workspace for the current tenant-user.',
+        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }],
+      },
+      {
+        signature: 'async owns(kind: \'session\' | \'workspace\', id: string, expectedScopeKey?: string): Promise<boolean>',
+        description: 'Check whether a durable Session or Workspace belongs to the current tenant-user.',
+        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }, { name: 'expectedScopeKey', description: 'Optional owner key to check instead of the current login.' }],
+        returns: 'Whether the resource belongs to the selected tenant-user owner.',
+      },
     ],
   },
   {
@@ -2590,7 +2613,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Typed Remote control of transient Session-owned terminal processes.',
     methods: [
       {
-        signature: '@Remote environment(agent: Agent, signal: AbortSignal): TerminalEnvironment',
+        signature: '@Remote async environment(agent: Agent, signal: AbortSignal): Promise<TerminalEnvironment>',
         description: 'Read the Session working directory and terminal limits without resolving a shell.',
         parameters: [{ name: 'agent', description: 'Session owner supplied by the Gateway.' }, { name: 'signal', description: 'request cancellation.' }],
         returns: 'the Session workspace directory and terminal limits.',
@@ -2632,7 +2655,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'after the resize completes.',
       },
       {
-        signature: '@Remote rename(agent: Agent, id: WebTerminalId, title: string): void',
+        signature: '@Remote async rename(agent: Agent, id: WebTerminalId, title: string): Promise<void>',
         description: 'Rename a terminal without changing its shell.',
         parameters: [{ name: 'agent', description: 'Session owner supplied by the Gateway.' }, { name: 'id', description: 'terminal identity.' }, { name: 'title', description: 'nonempty display title, at most 120 characters.' }],
       },
@@ -3400,6 +3423,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'One authorization attempt has finished and released its key.',
     description: 'One authorization attempt has finished and released its key. Fires for every terminal outcome, failures included, so a surface watching a key it did not start (a second browser tab) learns the attempt is over.',
     parameters: [{ name: 'key', description: 'the credential record the finished attempt was authorizing.' }, { name: 'settlement', description: 'how it ended, including the `failed` case its caller sees as a thrown error.' }],
+  },
+  {
+    name: 'commands/admission',
+    mode: 'waterfall',
+    signature: '\'commands/admission\'( request: { readonly sessionId: SessionId; readonly name: string; readonly rawInput: string }, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one resolved browser command before its lifecycle event is logged or its handler runs.',
+    description: 'Admit one resolved browser command before its lifecycle event is logged or its handler runs.',
+    parameters: [{ name: 'request', description: 'the resolved command invocation.' }],
   },
   {
     name: 'commands/change',

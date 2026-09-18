@@ -890,6 +890,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'conversation.composer.bar\' (client-ui-conversation), so it exists while that entry is mounted',
     occupants: [
+      'client-ui-jdcloud-login HiddenAdministratorControl',
       'client-ui-permission-presets PermissionSelect',
     ],
     replaceRisk: 'shadows-shipped-ui',

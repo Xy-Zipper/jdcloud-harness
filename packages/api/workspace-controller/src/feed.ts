@@ -15,6 +15,11 @@ import type {
   WorkspaceView,
 } from './types.ts'
 
+interface ScopeOwner {
+  currentScopeKey(): Promise<string | undefined>
+  owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+}
+
 /**
  * Project one authoritative Workspace entity into its Remote value.
  * @param workspace - authoritative registry entity.
@@ -81,15 +86,31 @@ export class WorkspaceFeed {
    */
   async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
     signal.throwIfAborted()
-    const follower = new WorkspaceFollower()
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
+    const follower = new WorkspaceFollower(owner, scopeKey)
     this.followers.add(follower)
     try {
-      yield { type: 'baseline', value: this.baseline() }
+      yield { type: 'baseline', value: await this.scopedBaseline() }
       yield* follower.read(signal)
     } finally {
       this.followers.delete(follower)
       follower.close()
     }
+  }
+
+  private async scopedBaseline(): Promise<WorkspaceBaseline> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner === undefined) return this.baseline()
+    const items = []
+    for (const workspace of this.ctx.workspaceRegistry.list()) {
+      if (await owner.owns('workspace', String(workspace.id))) items.push(workspaceView(workspace))
+    }
+    const archivedSessionIds: string[] = []
+    for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
+      if (await owner.owns('session', String(sessionId))) archivedSessionIds.push(String(sessionId))
+    }
+    return { items, archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'] }
   }
 
   private changed(change: DomainChanged): void {
@@ -131,7 +152,7 @@ export class WorkspaceFeed {
   }
 
   private publish(frame: Exclude<WorkspaceFollowFrame, { readonly type: 'baseline' }>): void {
-    for (const follower of this.followers) follower.push(frame)
+    for (const follower of this.followers) void follower.push(frame)
   }
 }
 
@@ -143,12 +164,42 @@ class WorkspaceFollower {
   private readonly frames = new Deque<WorkspaceFollowFrame>()
   private waiting: (() => void) | undefined
   private closed = false
+  private pending = Promise.resolve()
 
-  push(frame: WorkspaceFollowFrame): void {
+  constructor(
+    private readonly owner: ScopeOwner | undefined,
+    private readonly scopeKey: string | undefined,
+  ) {}
+
+  async push(frame: WorkspaceFollowFrame): Promise<void> {
     /* v8 ignore next -- closed followers are removed before later publication can reach them. */
     if (this.closed) return
-    this.frames.pushBack(frame)
-    this.waiting?.()
+    this.pending = this.pending.then(async () => {
+      if (this.closed) return
+      if (this.owner !== undefined && this.scopeKey !== undefined) {
+        if (frame.type === 'upsert' && !(await this.owner.owns('workspace', String(frame.workspace.workspaceId), this.scopeKey))) return
+        if (frame.type === 'remove' && !(await this.owner.owns('workspace', String(frame.workspaceId), this.scopeKey))) return
+        if (frame.type === 'order') {
+          const workspaceIds = []
+          for (const id of frame.workspaceIds) {
+            if (await this.owner.owns('workspace', String(id), this.scopeKey)) workspaceIds.push(id)
+          }
+          frame = { type: 'order', workspaceIds }
+        }
+        if (frame.type === 'archived') {
+          const archivedSessionIds = []
+          for (const id of frame.archivedSessionIds) {
+            if (await this.owner.owns('session', String(id), this.scopeKey)) archivedSessionIds.push(id)
+          }
+          frame = { type: 'archived', archivedSessionIds }
+        }
+      }
+      /* oxlint-disable-next-line no-unnecessary-condition -- close() may run while queued ownership checks await. */
+      if (this.closed) return
+      this.frames.pushBack(frame)
+      this.waiting?.()
+    })
+    await this.pending
   }
 
   close(): void {

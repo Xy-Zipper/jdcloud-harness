@@ -31,7 +31,7 @@ Double-click the terminal's tab title to rename it. **Take control** makes the c
 
 Closing or replacing a terminal tab removes it immediately and ends its process in the background. A cleanup failure shows a small notification with **Retry**; retrying does not reopen the tab. Collapsing, switching tabs or Sessions, floating and fullscreen presentation preserve the process.
 
-Displaying a Session after a page reload reopens its retained Host terminals as new tabs. A recovery failure offers **Retry terminal recovery**. A recovered process that disappears reports an error instead of starting another shell. The [sidebar layout remains memory-only](../../client/ui-sidebar-right/README.md#state).
+Displaying a Session after a page reload reopens its retained Host terminals as new tabs when the browser's tab-type policy permits `terminal`. A recovery failure offers **Retry terminal recovery**. A recovered process that disappears reports an error instead of starting another shell. The [sidebar layout remains memory-only](../../client/ui-sidebar-right/README.md#state).
 
 The terminal background, default text, cursor, and selection follow the DSH theme, including system preference and theme-token overrides. Theme changes preserve the running shell, output, and application OSC color overrides. Reset commands restore colors to the current DSH defaults. xterm adjusts text toward 4.5:1 contrast; the cursor keeps at least 3:1 contrast against its cell background, including Vim colorschemes.
 

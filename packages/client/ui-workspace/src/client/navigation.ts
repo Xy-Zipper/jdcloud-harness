@@ -15,6 +15,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
   /**
+   * Register preparation that must finish before a reusable or newly created blank Session is returned.
+   * @param initializer - preparation for one new-conversation Session.
+   * @returns disposer that stops applying the preparation to later Sessions.
+   */
+  registerNewSessionInitializer(initializer: (sessionId: SessionId) => Promise<void>): () => void
+  /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param sessionId - listed or retained Session to display.
    */
@@ -94,6 +100,7 @@ export class DirectoryBrowseError extends Error {
 /** Implements Workspace archive and directory UI operations. */
 class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
+  private readonly newSessionInitializers = new Set<(sessionId: SessionId) => Promise<void>>()
   private readonly lifetime = new AbortController()
 
   /**
@@ -112,6 +119,17 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     ctx.effect(() => this.watchNavigation(), 'ui-workspace: Workspace navigation policy')
   }
 
+  /** Register one ordered new-conversation preparation step. */
+  registerNewSessionInitializer(initializer: (sessionId: SessionId) => Promise<void>): () => void {
+    this.newSessionInitializers.add(initializer)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.newSessionInitializers.delete(initializer)
+    }
+  }
+
   async connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId> {
     const workspace = this.workspaces.list.getSnapshot().items
       .find(item => item.workspaceId === workspaceId)
@@ -121,19 +139,33 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const inflight = this.connecting.get(workspaceId)
     if (inflight !== undefined) return inflight
 
+    const attempt = this.resolveWorkspaceSession(workspace)
+      .finally(() => { this.connecting.delete(workspaceId) })
+    this.connecting.set(workspaceId, attempt)
+    return attempt
+  }
+
+  /** Resolve and prepare the blank Session used by one new-conversation flow. */
+  private async resolveWorkspaceSession(workspace: WorkspaceView): Promise<SessionId> {
     const archived = this.workspaces.list.getSnapshot().archivedSessionIds
     const sessions = this.sessions.list.getSnapshot()
     for (const id of sessions.ids) {
       const summary = sessions.byId[id]
       if (summary !== undefined && summary.blank && summary.cwd === workspace.path
         && workspace.sessionIds.includes(summary.id)
-        && !archived.includes(summary.id)) return summary.id
+        && !archived.includes(summary.id)) {
+        await this.initializeNewSession(summary.id)
+        return summary.id
+      }
     }
+    const sessionId = await this.sessions.create({ workspaceId: workspace.workspaceId })
+    await this.initializeNewSession(sessionId)
+    return sessionId
+  }
 
-    const attempt = this.sessions.create({ workspaceId })
-      .finally(() => { this.connecting.delete(workspaceId) })
-    this.connecting.set(workspaceId, attempt)
-    return attempt
+  /** Run each initializer in registration order before exposing the Session to navigation. */
+  private async initializeNewSession(sessionId: SessionId): Promise<void> {
+    for (const initializer of this.newSessionInitializers) await initializer(sessionId)
   }
 
   openSession(sessionId: SessionId): void {

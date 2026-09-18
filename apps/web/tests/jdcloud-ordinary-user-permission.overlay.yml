@@ -1,0 +1,34 @@
+# Exercise the JDCloud browser initializer against a Host whose new Sessions
+# would otherwise start with full access.
+- insert:
+    - id: jdcloud-auth-controller
+      name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'
+      config:
+        defaultBaseUrl: !!js process.env.JDCLOUD_DEFAULT_BASE_URL
+        requestTimeoutMs: 15000
+    - id: tool-jdcloud-lowcode
+      name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
+    - id: ui-jdcloud-login
+      name: '@deepseek-ai/dsh-client-ui-jdcloud-login'
+    - id: ui-jdcloud-lowcode-actions
+      name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+- id: approval
+  config:
+    policy: never
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+    defaultPreset: danger-full-access
