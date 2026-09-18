@@ -446,7 +446,7 @@ describe('Session file uploads', () => {
     )
     const queued = followup.mock.calls[0]?.[0] as UserMessage
     agent.inbox.append('next-turn', queued)
-    expect(controller.updateQueue({
+    expect(await controller.updateQueue({
       sessionId: SESSION,
       itemId: queued.id,
       action: { kind: 'remove' },
