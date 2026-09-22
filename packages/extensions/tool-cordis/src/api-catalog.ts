@@ -3409,9 +3409,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Durable workspace registry. Startup waits for `sessionPersistence`, builds one canonical-cwd header index, and completes the one-time history bootstrap before the service becomes active. The persistence dependency is mandatory so an unavailable peer can never be mistaken for an empty history and commit the initialized marker.',
     methods: [
       {
-        signature: 'async create(path: string, title?: string): Promise<Workspace>',
-        description: 'Create or reuse a workspace for an existing directory. The fully qualified path is canonicalized through `fs.realpath`; a relative, nonexistent, or non-directory path rejects. Repeated calls for the same canonical path return the existing entity without changing its title. A newly created workspace is prepended to the durable registry order. Different canonical paths may share a display title.',
-        parameters: [{ name: 'path', description: 'Existing directory to own, in a fully qualified path spelling.' }, { name: 'title', description: 'Display title used only when a new record is created.' }],
+        signature: 'async create(path: string, title?: string, options?: WorkspaceCreateOptions): Promise<Workspace>',
+        description: 'Create or reuse a workspace for an existing directory. The fully qualified path is canonicalized through `fs.realpath`; a relative, nonexistent, or non-directory path rejects. Repeated calls for the same canonical path return the existing entity without changing its title unless duplicate registration is requested. A newly created workspace is prepended to the durable registry order. Owner-scoped registrations may share a canonical path.',
+        parameters: [{ name: 'path', description: 'Existing directory to own, in a fully qualified path spelling.' }, { name: 'title', description: 'Display title used only when a new record is created.' }, { name: 'options', description: 'Whether to permit another record for the canonical path.' }],
         returns: 'the existing or newly durable workspace.',
       },
       {
@@ -3452,9 +3452,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async resolveByPath(path: string): Promise<Workspace | undefined>',
-        description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
+        description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; this returns the first match when owner-scoped registrations share a directory.',
         parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
         returns: 'the workspace owning the canonical path, when one exists.',
+      },
+      {
+        signature: 'async resolveAllByPath(path: string): Promise<readonly Workspace[]>',
+        description: 'Resolve every workspace registered for a canonical directory path without creating or mutating a workspace.',
+        parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
+        returns: 'matching workspaces in registry order.',
       },
     ],
   },

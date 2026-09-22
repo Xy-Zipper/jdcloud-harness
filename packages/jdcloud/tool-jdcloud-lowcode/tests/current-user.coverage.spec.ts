@@ -72,7 +72,7 @@ describe('current-user wire validation coverage', () => {
             id: 'form',
             fullName: 'Form',
             type: 3,
-            agentPermissions: ['addData', 1, 'unknown', 'addData', 'editData', 'deleteData'],
+            agentPermissions: ['readData', 'addData', 1, 'unknown', 'readData', 'addData', 'editData', 'deleteData'],
           },
           { id: 'flow', parentId: null, fullName: 'Flow', type: 4, children: null },
           { id: 'board', parentId: '', fullName: 'Board', type: 6, children: [] },
@@ -90,7 +90,7 @@ describe('current-user wire validation coverage', () => {
           fullName: 'Form',
           path: 'Folder / Form',
           type: 3,
-          agentPermissions: ['addData', 'editData', 'deleteData'],
+          agentPermissions: ['readData', 'addData', 'editData', 'deleteData'],
         },
         {
           menuId: 'flow',

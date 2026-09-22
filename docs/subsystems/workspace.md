@@ -16,7 +16,7 @@ Source: [`packages/workspace/workspace/src/types.ts`](../../packages/workspace/w
 type WorkspaceId = Branded<'WorkspaceId'>
 ```
 
-`WorkspaceId` is a [branded id](core.md#branded-ids). Path identity is separate: `realpathNormalize` (`fs.realpath`; trailing slashes, `..`, and symlinks resolved) is the one uniqueness canon — workspace paths are stored canonicalized, uniqueness is string equality of canonical paths (a symlink to an owned directory collides), and attach-time session cwd checks go through the same canon.
+`WorkspaceId` is a [branded id](core.md#branded-ids). Path identity is separate: `realpathNormalize` (`fs.realpath`; trailing slashes, `..`, and symlinks resolved) is the storage canon — workspace paths are stored canonicalized, owner-scoped registrations may share a canonical path, and attach-time session cwd checks go through the same canon.
 
 ## The workspace entity
 
@@ -117,7 +117,7 @@ Ownership truth is the record's ordered `sessionIds`, never derived from session
 
 ## The registry: `ctx.workspaceRegistry`
 
-`WorkspaceRegistry` ([signatures](#ctxworkspaceregistry--workspaceregistry)) owns registration and resolution. `create(path, title?)` requires a fully qualified path, canonicalizes it, rejects a nonexistent path (the original `ENOENT`) or a non-directory, returns the existing entity unchanged when the canonical path is already owned, and otherwise creates a record with `title ?? defaultWorkspaceTitle(path)` prepended to the durable registry order (different canonical paths may share a display title, and a path with no final segment uses its root spelling). `get(id)` and the ordered `list()` are synchronous cache reads; `resolveByPath(path)` applies the same fully qualified realpath canon without creating. `delete(id)` removes only the registration, order entry, and session account — the directory, user files, live sessions, and persisted logs are never touched, so those sessions become Ungrouped ([decision](../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md)); unknown ids return `false`. Create and delete persist a pending-mutation marker before their two writes (record + order) can diverge; startup resolves exactly the marked mutation — by deleting the marked table row, which completes an interrupted delete and rolls back an interrupted create (the registration is re-creatable, so rollback is the safe direction) — and an unmarked order/table mismatch fails loud as corruption.
+`WorkspaceRegistry` ([signatures](#ctxworkspaceregistry--workspaceregistry)) owns registration and resolution. `create(path, title?, options?)` requires a fully qualified path, canonicalizes it, rejects a nonexistent path (the original `ENOENT`) or a non-directory; without `allowDuplicatePath` it returns the existing entity unchanged, while owner-scoped callers may create another record for the same canonical path. New records use `title ?? defaultWorkspaceTitle(path)` and are prepended to the durable registry order. `get(id)` and the ordered `list()` are synchronous cache reads; `resolveByPath(path)` returns the first canonical match and `resolveAllByPath(path)` returns every match without creating. `delete(id)` removes only the registration, order entry, and session account — the directory, user files, live sessions, and persisted logs are never touched, so those sessions become Ungrouped ([decision](../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md)); unknown ids return `false`. Create and delete persist a pending-mutation marker before their two writes (record + order) can diverge; startup resolves exactly the marked mutation — by deleting the marked table row, which completes an interrupted delete and rolls back an interrupted create (the registration is re-creatable, so rollback is the safe direction) — and an unmarked order/table mismatch fails loud as corruption.
 
 Sessions get their cwd at create time from whoever creates them, not from this registry — the API gateway resolves a new session's cwd from the chosen workspace's `path` (falling back to an explicit or default cwd), creates the session so the cwd lands in its immutable [`SessionHeader`](persistence.md#sessionheader--metadata-beside-the-log), then calls `attachSession`, which re-validates that stored header cwd against the workspace path. On the first successful start, the registry bootstraps history from persisted headers alone (`id`, `cwd`, `createdAt` — never event bodies), grouping sessions with a valid canonical cwd into per-directory workspaces, newest first; the initialized marker is written last so an interrupted bootstrap resumes safely. The bootstrap is one-time: cwd-less legacy sessions stay Ungrouped, and sessions created afterwards join a workspace only through `attachSession`.
 
@@ -439,14 +439,15 @@ Durable workspace registry. Startup waits for `sessionPersistence`, builds one c
  * Create or reuse a workspace for an existing directory. The fully qualified
  * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
  * non-directory path rejects. Repeated calls for the same canonical path
- * return the existing entity without changing its title.
+ * return the existing entity without changing its title unless duplicate
+ * registration is requested.
  * A newly created workspace is prepended to the durable registry order.
  * Different canonical paths may share a display title.
  * @param path - Existing directory to own, in a fully qualified path spelling.
  * @param title - Display title used only when a new record is created.
  * @returns the existing or newly durable workspace.
  */
-async create(path: string, title?: string): Promise<Workspace>
+async create(path: string, title?: string, options?: WorkspaceCreateOptions): Promise<Workspace>
 
 /**
  * Look up a workspace by id.
@@ -505,12 +506,19 @@ unarchiveSession(sessionId: SessionId): Promise<void>
 
 /**
  * Resolve by canonical directory path without creating or mutating a
- * workspace. A missing path rejects during `realpath`; an existing unowned
- * directory returns `undefined`.
+ * workspace. A missing path rejects during `realpath`; `resolveByPath` returns
+ * the first match when owner-scoped registrations share a directory.
  * @param path - Existing directory path in a fully qualified spelling.
  * @returns the workspace owning the canonical path, when one exists.
  */
 async resolveByPath(path: string): Promise<Workspace | undefined>
+
+/**
+ * Resolve every workspace registered for a canonical directory path.
+ * @param path - Existing directory path in a fully qualified spelling.
+ * @returns matching workspaces in registry order.
+ */
+async resolveAllByPath(path: string): Promise<readonly Workspace[]>
 ```
 
 Types: [SessionId](core.md)

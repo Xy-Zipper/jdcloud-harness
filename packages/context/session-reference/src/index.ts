@@ -70,6 +70,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+/** Optional JDCloud owner lookup used when the host composes tenant isolation. */
+interface ScopeOwner {
+  currentScopeKey(): Promise<string | undefined>
+  owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+}
+
 interface PreparedSource {
   snapshot: SessionSurfaceSnapshot
   input: Required<SessionReferenceInput>
@@ -200,9 +206,14 @@ export class SessionReferenceResolver extends TypertRemoteService {
     const needle = query.toLocaleLowerCase()
     const targetCwd = agent.session.header.cwd
     assertNotCancelled(signal)
-    const records = (await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal))
-      .filter(record => record.header.id !== agent.id)
-      .map((record, index) => ({ record, index }))
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
+    const records = await this.visibleRecords(
+      await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal),
+      agent.id,
+      owner,
+      scopeKey,
+    )
     const labelled = records.map(({ record, index }) => ({ record, index, ...this.projectedLabels(record) }))
     return labelled.filter(({ record, label, displayTitle }) => {
       if (needle === '') return true
@@ -314,6 +325,8 @@ export class SessionReferenceResolver extends TypertRemoteService {
     const inputs = normalizeReferences(agent.id, references, this.config.maxReferences)
     if (inputs.length === 0) return { content: acceptedContent }
     assertNotCancelled(signal)
+    await this.assertVisibleReferences(inputs)
+    assertNotCancelled(signal)
     const maxReferenceBytes = await this.referenceBudget(agent, signal)
     assertNotCancelled(signal)
     let prepared: PreparedSource[]
@@ -382,6 +395,37 @@ export class SessionReferenceResolver extends TypertRemoteService {
     if (info.context === undefined) return DEFAULT_MAX_REFERENCE_BYTES
     // Context capacity is in tokens; four bytes/token is a sizing heuristic, not token counting.
     return Math.max(DEFAULT_MAX_REFERENCE_BYTES, Math.floor(info.context.contextWindow * 4 * this.config.referenceContextFraction))
+  }
+
+  /** Filter discovery rows by the opening tenant-user identity when the host provides one. */
+  private async visibleRecords(
+    records: readonly SessionRecord[],
+    targetId: SessionId,
+    owner: ScopeOwner | undefined,
+    scopeKey: string | undefined,
+  ) {
+    const visible: SessionRecord[] = []
+    for (const record of records) {
+      if (record.header.id === targetId) continue
+      if (owner !== undefined && (scopeKey === undefined
+        || !(await owner.owns('session', String(record.header.id), scopeKey)))) continue
+      visible.push(record)
+    }
+    return visible.map((record, index) => ({ record, index }))
+  }
+
+  /** Refuse manually written references to sessions outside the caller's tenant-user scope. */
+  private async assertVisibleReferences(inputs: readonly Required<SessionReferenceInput>[]): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner === undefined) return
+    const scopeKey = await owner.currentScopeKey()
+    for (const input of inputs) {
+      if (scopeKey !== undefined && await owner.owns('session', String(input.sessionId), scopeKey)) continue
+      throw new SessionReferenceError(
+        'referenced session is unavailable to the current tenant user',
+        'SESSION_REFERENCE_READ_FAILED',
+      )
+    }
   }
 
   private renderSources(sources: readonly PreparedSource[], maxReferenceBytes: number): RenderedSource[] {

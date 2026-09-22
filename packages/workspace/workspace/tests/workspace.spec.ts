@@ -786,7 +786,7 @@ describe('header-validated membership projection', () => {
     expect(workspace.sessionIds).not.toContain('cwd-only')
   })
 
-  it('rejects duplicate candidate ownership, duplicate paths, and initialized order drift', async () => {
+  it('rejects duplicate candidate ownership and initialized order drift', async () => {
     const first = await makeDir('corrupt-first')
     const second = await makeDir('corrupt-second')
     const firstId = '00000000-0000-4000-8000-000000000002'
@@ -801,7 +801,8 @@ describe('header-validated membership projection', () => {
       [[firstId, record(first, [])], [secondId, record(first, [])]],
       { initialized: true, workspaceIds: [WorkspaceId(firstId), WorkspaceId(secondId)] },
     )
-    await expect(harness({ pool: duplicatePath })).rejects.toThrow(/claimed/)
+    const duplicatePathResult = await harness({ pool: duplicatePath })
+    expect(duplicatePathResult.registry.list().map(workspace => workspace.path)).toEqual([first, first])
 
     const orphan = storedPool(
       [[firstId, record(first, [])], [secondId, record(second, [])]],

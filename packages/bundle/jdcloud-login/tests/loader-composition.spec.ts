@@ -186,7 +186,7 @@ describe('JDCloud login through a real Loader composition', () => {
           return Promise.resolve(json({ corpId: 'corp-current' }))
         case '/api/oauth/currentUser':
           return Promise.resolve(json({
-            userInfo: { userName: 'transfer-user', corpId: 'corp-current' },
+            userInfo: { id: 'transfer-user-id', userName: 'transfer-user', corpId: 'corp-current' },
             userPermission: { systemAdministrator: true },
           }))
         default:
@@ -275,7 +275,7 @@ describe('JDCloud login through a real Loader composition', () => {
       signal,
     }, admission)
     const prompt = createUserMessage({
-      content: [{ type: 'text', text: '查询这周打卡数据' }],
+      content: [{ type: 'text', text: '查询这周打卡数据 @[打卡记录](dsh-reference:jdcloud-lowcode-function/form-1)' }],
       source: { kind: 'user', rpcId: 'browser-prompt-1' } as never,
     })
     const decision = await agentEvents(context, agent).waterfall(

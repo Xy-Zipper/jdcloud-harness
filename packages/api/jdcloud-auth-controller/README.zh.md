@@ -38,7 +38,7 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 
 登录后，浏览器可以读取 `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }`；Token 永不经过 Remote wire。版本 3 record 会在使用前通过一次 `currentUser` 升级。`logout()` 会删除完整 credential record。密码只在登录调用期间存在，本包不会保存密码。
 
-浏览器可以调用 `writableMenus()` 刷新 `/api/oauth/currentUser`，并且只接收当前租户 id，以及至少拥有一项已识别 `addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程。每个返回菜单包含其 id、名称、解析后的父级路径、类型、可选图标字符串与已识别写授权。该方法使用 Host 中保存的登录信息，永不返回资料字段、服务地址或 Token。
+浏览器可以调用 `writableMenus()` 刷新 `/api/oauth/currentUser`，并且只接收当前租户 id，以及至少拥有一项已识别 `readData`、`addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程。每个返回菜单包含其 id、名称、解析后的父级路径、类型、可选图标字符串与全部已识别数据授权。该方法使用 Host 中保存的登录信息，永不返回资料字段、服务地址或 Token。
 
 Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` 请求固定的 `/api/...` 路径。controller 会在内部读取当前 credential、添加 authorization header、应用 `requestTimeoutMs`，并只返回成功响应中的 `data`，不会返回 Token。该方法接受 JSON `GET`、`POST`、`PUT` 和 `DELETE` 请求，或在 `file` 字段中携带一个文件的 `POST` multipart 请求；multipart 文件可以携带 Host 持有的字节，也可以携带长度明确的异步字节流，controller 转发后者时不会缓冲完整文件。JSON 与 multipart body 互斥，`GET` 会绕过缓存。业务码 `600`、`601`、`602` 会删除登录并转换为 `jdcloud/auth-required`，其他业务错误保留登录状态。
 
@@ -66,7 +66,6 @@ Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartF
 - `requestAuthenticated()` 仅供 Host 使用，并接受 JSON 或一个 multipart `file` part；它不是浏览器代理或通用 multipart 客户端。
 - 中转服务地址在通过 HTTP(S) URL 校验后不受限制，因此链接可以让 Host 向任意服务器披露其携带的 Token，并请求私有网络地址。
 - 登录接口沿用 JDCloud 上游要求的 MD5 wire 行为；它不是密码存储方案。
-- 保存的登录状态属于该 controller 实例的 Host 全局状态，不按浏览器用户隔离。
 
 <a id="dev-note"></a>
 ### 开发备注

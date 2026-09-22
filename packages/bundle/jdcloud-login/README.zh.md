@@ -35,6 +35,8 @@ JDCLOUD_DEFAULT_BASE_URL=https://example.com
 
 `JDCLOUD_DEFAULT_BASE_URL` 是账号密码登录的初始地址。Token 中转链接可以传入任意语法合法的绝对 HTTP(S) 服务地址；Host 不使用白名单，并会把传入的 Token 发送到该目的地。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
 
+该 bundle 会关闭 Harness 浏览器启动 token，并启用 HttpOnly 浏览器会话 cookie。因此登录记录按浏览器隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。
+
 对于空白新对话，可写功能 row 会展示至少拥有一项数据写权限的 type `3` 表单与 type `4` 流程。点击一次会插入一个结构化功能标签并关闭面板；删除标签后面板恢复。对于每个已提交用户 Prompt，低代码工具 row 会注入能力快照，并提供由 Host 执行时强制校验当前权限的数据工具。
 
 <a id="model-experience"></a>

@@ -452,9 +452,10 @@ export type ScheduledToolDispatch =
   | { kind: 'final-result'; result: ToolExecutionResult }
 
 /**
- * Symbol-keyed scheduler view that keeps pre/post policy ordered while
- * overlapping dispatch. Ordinary callers use {@link ToolRuntime.execute};
- * this is not a plugin extension point.
+ * Stable-keyed scheduler view that keeps pre/post policy ordered while
+ * overlapping dispatch. A string key keeps the view available when the
+ * profile loads duplicate package instances. Ordinary callers use
+ * {@link ToolRuntime.execute}; this is not a plugin extension point.
  * @internal
  */
 export interface ToolRuntimeScheduler {
@@ -472,7 +473,7 @@ export interface ToolRuntimeScheduler {
  * Scheduler entry point omitted from the generated named service API.
  * @internal
  */
-export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol('@deepseek-ai/dsh-tools.scheduler')
+export const TOOL_RUNTIME_SCHEDULER = '@deepseek-ai/dsh-tools.scheduler' as const
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'

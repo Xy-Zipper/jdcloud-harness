@@ -61,7 +61,7 @@ export class SessionControlController {
     const queue = new ControlQueue(owner, scopeKey)
     this.streams.add(queue)
     try {
-      yield { type: 'baseline', value: await this.scopedBaseline() }
+      yield { type: 'baseline', value: await this.scopedBaseline(owner, scopeKey) }
       yield* queue.iterate(signal)
     } finally {
       this.streams.delete(queue)
@@ -82,12 +82,15 @@ export class SessionControlController {
     }
   }
 
-  private async scopedBaseline(): Promise<SessionControlBaseline> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+  private async scopedBaseline(
+    owner: ScopeOwner | undefined,
+    scopeKey: string | undefined,
+  ): Promise<SessionControlBaseline> {
     if (owner === undefined) return this.baseline()
+    if (scopeKey === undefined) return { jobs: {}, projections: {} }
     const sessions: Session[] = []
     for (const session of this.ctx.sessions.list()) {
-      if (await owner.owns('session', String(session.id))) sessions.push(session)
+      if (await owner.owns('session', String(session.id), scopeKey)) sessions.push(session)
     }
     const jobs = Object.create(null) as Record<SessionId, readonly SessionJob[]>
     for (const session of sessions) {

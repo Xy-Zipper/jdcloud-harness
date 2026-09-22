@@ -36,7 +36,7 @@ kind: "package-reference"
 
 每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的普通根 URL；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `/`。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。HTTP 载体不在根路径交换之外接受 query token，也不接受 Authorization header token。
 
-需要独立浏览器登录且不使用 Harness 启动令牌认证的部署可以启用 `browserSession`。它签发 HttpOnly 的 `dsh-user-session` cookie，将浏览器身份带入每个请求，并让 Host 服务按浏览器保存登录状态，而不是使用进程级单条记录。
+当部署自己的访问控制替代 Harness 启动令牌时，设置 `browserAuthentication: false`。根页面随后无需令牌即可打开，但 Connection 仍会签发并要求独立的 `dsh-user-session` cookie，避免 Host 状态回退到进程级共享登录。Host/Origin 校验仍然生效，对不可信或跨站请求返回 403；缺少浏览器身份时返回 401。需要独立浏览器登录的部署也可以显式启用 `browserSession`，让 Host 服务按浏览器保存登录状态，而不是使用进程级单条记录。
 
 cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；`BrowserAuth` 在 Connection 激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。cookie 携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在确定性名称与签名 payload 中同时绑定规范化 hostname 和 port。它是 host-only、`Path=/`、`HttpOnly`、`SameSite=Strict`；随附服务器使用 loopback HTTP，因此刻意不设置 `Secure`。
 

@@ -16,7 +16,7 @@
 type WorkspaceId = Branded<'WorkspaceId'>
 ```
 
-`WorkspaceId` 是[品牌化 id](core.zh.md#branded-ids)。路径标识与之分离：`realpathNormalize`（`fs.realpath`；尾部斜杠、`..` 与符号链接全部解析）是唯一的一套唯一性规范——工作区路径以规范化形式存储，唯一性即规范路径的字符串相等（指向已被拥有目录的符号链接会与之冲突），attach 时的会话 cwd 检查也走同一套规范。
+`WorkspaceId` 是[品牌化 id](core.zh.md#branded-ids)。路径标识与之分离：`realpathNormalize`（`fs.realpath`；尾部斜杠、`..` 与符号链接全部解析）是存储规范——工作区路径以规范化形式存储，不同所有者范围的记录可以共享规范路径，attach 时的会话 cwd 检查也走同一套规范。
 
 ## 工作区实体
 
@@ -117,7 +117,7 @@ interface Workspace {
 
 ## 注册表：`ctx.workspaceRegistry`
 
-`WorkspaceRegistry`（[签名](#ctxworkspaceregistry--workspaceregistry)）拥有注册与解析。`create(path, title?)` 要求完全限定路径并将其规范化，拒绝不存在的路径（原样传出原始 `ENOENT`）或非目录；当规范路径已被拥有时原样返回既有实体；否则创建一条标题为 `title ?? defaultWorkspaceTitle(path)` 的记录并前插到持久的注册表顺序中（不同规范路径可以共享同一显示标题，没有最终路径段时使用根路径拼写）。`get(id)` 与有序的 `list()` 是同步缓存读取；`resolveByPath(path)` 应用同一套完全限定 realpath 规范但不创建。`delete(id)` 只移除注册记录、顺序条目和会话账本——目录、用户文件、实时会话和已持久化日志一概不动，因此这些会话变为 Ungrouped（[决策](../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md)）；未知 id 返回 `false`。create 与 delete 会在其两次写入（记录 + 顺序）可能分叉之前先持久写入一个待定变更标记；启动时恰好解决被标记的那次变更——通过删除被标记的表行：这会补完被中断的 delete，并回滚被中断的 create（注册可以重建，因此回滚是安全方向）——而没有标记的顺序/表不一致则作为损坏大声失败。
+`WorkspaceRegistry`（[签名](#ctxworkspaceregistry--workspaceregistry)）拥有注册与解析。`create(path, title?, options?)` 要求完全限定路径并将其规范化，拒绝不存在的路径（原样传出原始 `ENOENT`）或非目录；未设置 `allowDuplicatePath` 时，规范路径已存在则原样返回既有实体；所有者范围调用方可以为同一规范路径创建另一条记录。新记录标题为 `title ?? defaultWorkspaceTitle(path)` 并前插到持久的注册表顺序中。`get(id)` 与有序的 `list()` 是同步缓存读取；`resolveByPath(path)` 返回第一条规范匹配，`resolveAllByPath(path)` 返回全部匹配但不创建。`delete(id)` 只移除注册记录、顺序条目和会话账本——目录、用户文件、实时会话和已持久化日志一概不动，因此这些会话变为 Ungrouped（[决策](../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md)）；未知 id 返回 `false`。create 与 delete 会在其两次写入（记录 + 顺序）可能分叉之前先持久写入一个待定变更标记；启动时恰好解决被标记的那次变更——通过删除被标记的表行：这会补完被中断的 delete，并回滚被中断的 create（注册可以重建，因此回滚是安全方向）——而没有标记的顺序/表不一致则作为损坏大声失败。
 
 会话的 cwd 在创建时由创建者赋予，而不是由本注册表赋予——API 网关从所选工作区的 `path` 解析新会话的 cwd（回退到显式或默认 cwd），先创建会话使 cwd 落入其不可变的 [`SessionHeader`](persistence.zh.md#sessionheader--metadata-beside-the-log)，再调用 `attachSession`，后者会把已存储的 header cwd 与工作区路径重新校验一遍。首次成功启动时，注册表仅凭已持久化的 header（`id`、`cwd`、`createdAt`——绝不读事件正文）引导历史：把规范 cwd 有效的会话按目录分组为工作区，最新的排在最前；「已初始化」标记最后写入，因此被中断的引导可以安全续跑。引导只发生这一次：没有 cwd 的历史遗留会话保持 Ungrouped，此后创建的会话只能通过 `attachSession` 加入工作区。
 
@@ -439,14 +439,15 @@ Durable workspace registry. Startup waits for `sessionPersistence`, builds one c
  * Create or reuse a workspace for an existing directory. The fully qualified
  * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
  * non-directory path rejects. Repeated calls for the same canonical path
- * return the existing entity without changing its title.
+ * return the existing entity without changing its title unless duplicate
+ * registration is requested.
  * A newly created workspace is prepended to the durable registry order.
  * Different canonical paths may share a display title.
  * @param path - Existing directory to own, in a fully qualified path spelling.
  * @param title - Display title used only when a new record is created.
  * @returns the existing or newly durable workspace.
  */
-async create(path: string, title?: string): Promise<Workspace>
+async create(path: string, title?: string, options?: WorkspaceCreateOptions): Promise<Workspace>
 
 /**
  * Look up a workspace by id.
@@ -505,12 +506,19 @@ unarchiveSession(sessionId: SessionId): Promise<void>
 
 /**
  * Resolve by canonical directory path without creating or mutating a
- * workspace. A missing path rejects during `realpath`; an existing unowned
- * directory returns `undefined`.
+ * workspace. A missing path rejects during `realpath`; `resolveByPath` returns
+ * the first match when owner-scoped registrations share a directory.
  * @param path - Existing directory path in a fully qualified spelling.
  * @returns the workspace owning the canonical path, when one exists.
  */
 async resolveByPath(path: string): Promise<Workspace | undefined>
+
+/**
+ * Resolve every workspace registered for a canonical directory path.
+ * @param path - Existing directory path in a fully qualified spelling.
+ * @returns matching workspaces in registry order.
+ */
+async resolveAllByPath(path: string): Promise<readonly Workspace[]>
 ```
 
 Types: [SessionId](core.zh.md)

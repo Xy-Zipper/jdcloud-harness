@@ -78,6 +78,32 @@ async function nextFrame(
 }
 
 describe('WorkspaceController commands', () => {
+  it('creates a tenant-scoped registration when another tenant already owns the path', async () => {
+    const { controller, ctx, root } = await harness()
+    const path = stageDir(root, 'shared-path')
+    const owned = new Set<string>()
+    ctx.provide('jdcloudAuthController', {
+      owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(owned.has(id)),
+      claimOwned: (_kind: 'session' | 'workspace', id: string) => {
+        owned.add(id)
+        return Promise.resolve()
+      },
+    } as never)
+
+    const first = await controller.create({ path })
+    owned.clear()
+    const second = await controller.create({ path })
+    owned.clear()
+    owned.add(second.workspace.workspaceId)
+    const reused = await controller.create({ path })
+
+    expect(first.created).toBe(true)
+    expect(second.created).toBe(true)
+    expect(second.workspace.workspaceId).not.toBe(first.workspace.workspaceId)
+    expect(reused).toMatchObject({ created: false, workspace: { workspaceId: second.workspace.workspaceId } })
+    expect(ctx.workspaceRegistry.list().map(workspace => workspace.path)).toEqual([path, path])
+  })
+
   it('serializes concurrent path adoption and preserves an existing title', async () => {
     const { controller, root } = await harness()
     const path = stageDir(root, 'alpha')
@@ -317,6 +343,26 @@ describe('WorkspaceController follow', () => {
 
     abort.abort()
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('keeps the opening tenant scope for its baseline', async () => {
+    const { ctx, root } = await harness()
+    await ctx.workspaceRegistry.create(stageDir(root, 'tenant-workspace'))
+    const scopes: (string | undefined)[] = []
+    ctx.provide('jdcloudAuthController', {
+      currentScopeKey: () => Promise.resolve('tenant-at-open'),
+      owns: (_kind: 'session' | 'workspace', _id: string, scopeKey?: string) => {
+        scopes.push(scopeKey)
+        return Promise.resolve(scopeKey === 'tenant-at-open')
+      },
+    } as never)
+
+    const iterator = new WorkspaceFeed(ctx).follow(new AbortController().signal)[Symbol.asyncIterator]()
+    await expect(nextFrame(iterator)).resolves.toMatchObject({
+      type: 'baseline', value: { items: [{ title: 'tenant-workspace' }] },
+    })
+    expect(scopes).toEqual(['tenant-at-open'])
+    await iterator.return?.()
   })
 
   it('ignores unrelated domain writes and closes active followers on disposal', async () => {

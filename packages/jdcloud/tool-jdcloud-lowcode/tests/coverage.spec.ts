@@ -58,14 +58,14 @@ const SNAPSHOT: LowcodeCapabilitySnapshot = {
       fullName: 'Clock Form',
       path: 'Attendance / Clock Form',
       type: 3,
-      agentPermissions: ['addData', 'editData', 'deleteData'],
+      agentPermissions: ['readData', 'addData', 'editData', 'deleteData'],
     },
     {
       menuId: 'flow-1',
       fullName: 'Leave Flow',
       path: 'Attendance / Leave Flow',
       type: 4,
-      agentPermissions: ['addData', 'editData', 'deleteData'],
+      agentPermissions: ['readData', 'addData', 'editData', 'deleteData'],
     },
   ],
 }
@@ -80,7 +80,7 @@ function currentUser(): Record<string, unknown> {
       parentId: '-1',
       fullName: 'Clock Form',
       type: 3,
-      agentPermissions: ['addData', 'editData', 'deleteData'],
+      agentPermissions: ['readData', 'addData', 'editData', 'deleteData'],
     }],
   }
 }
@@ -223,7 +223,7 @@ async function preStep(
 /** Build one admitted browser message. */
 function browserMessage(): UserMessage {
   return createUserMessage({
-    content: [{ type: 'text', text: 'read JDCloud data' }],
+    content: [{ type: 'text', text: 'read JDCloud data @[测试功能](dsh-reference:jdcloud-lowcode-function/form-clock)' }],
     source: { kind: 'user', rpcId: 'coverage-rpc' } as never,
   })
 }

@@ -146,8 +146,16 @@ class FakeSessions implements ISessions {
     this.retained.push({ reference, release })
     return reference
   })
+  readonly using: ISessions['using'] = async (target, options, operation) => {
+    const reference = this.retain(target, options)
+    try {
+      await reference.ready
+      return await operation(reference)
+    } finally {
+      reference.release()
+    }
+  }
   readonly subagentAddress = vi.fn<ISessions['subagentAddress']>()
-  declare readonly using: ISessions['using']
   declare readonly retainInfo: ISessions['retainInfo']
   declare readonly searchResultLimit: ISessions['searchResultLimit']
   declare readonly setSubagentCatalogOpen: ISessions['setSubagentCatalogOpen']
@@ -277,6 +285,16 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.refreshSubagents).toHaveBeenCalledWith(sid('target'))
   })
 
+  it('clears the selected main Session and releases its reference', () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('target'))
+
+    b.uiWorkspace.clearSelection()
+
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+    expect(b.selectPanel).toHaveBeenLastCalledWith(null)
+  })
+
   it('keeps the current panel when retaining the target fails', () => {
     const b = bench()
     b.sessions.retain.mockImplementationOnce(() => { throw new Error('open failed') })
@@ -347,8 +365,9 @@ describe('UiWorkspaceService', () => {
 
   it('prepares reused and created blank Sessions before returning them', async () => {
     const reused = sid('reused')
+    persistSelection({ sessionId: reused })
     const b = bench({
-      sessions: sessionState([summary('reused', { blank: true, cwd: '/w/alpha' })], reused),
+      sessions: sessionState([summary('reused', { blank: true, cwd: '/w/alpha' })]),
       workspaces: workspaceState([
         workspace('alpha', [reused]),
         workspace('beta'),
@@ -367,6 +386,8 @@ describe('UiWorkspaceService', () => {
 
     await expect(b.uiWorkspace.connectWorkspace(wid('beta'))).resolves.toBe(sid('fresh-beta'))
     expect(initialize).toHaveBeenLastCalledWith(sid('fresh-beta'))
+    expect(b.sessions.retain).toHaveBeenCalledWith(sid('fresh-beta'), { source: 'workspaceOperation' })
+    expect(initialize).toHaveBeenCalledTimes(2)
 
     release()
     await expect(b.uiWorkspace.connectWorkspace(wid('gamma'))).resolves.toBe(sid('fresh-gamma'))
@@ -382,7 +403,7 @@ describe('UiWorkspaceService', () => {
 
     await expect(b.uiWorkspace.openWorkspace(wid('alpha')))
       .rejects.toThrow('permission initialization failed')
-    expect(b.sessions.open).not.toHaveBeenCalled()
+    expect(b.sessions.retain).toHaveBeenCalledWith(sid('unsafe'), { source: 'workspaceOperation' })
   })
 
   it('ignores a rejected startup selection and stale catalog callbacks after disposal', async () => {

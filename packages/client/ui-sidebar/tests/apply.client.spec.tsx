@@ -140,6 +140,35 @@ describe('ui-sidebar apply', () => {
     }
   })
 
+  it('filters unavailable panel entries and restores them when the policy is released', async () => {
+    const b = await bench()
+    const sidebar = b.ctx.plugin({ inject: [...inject], apply })
+    await sidebar.await()
+    const injected = (b.slots.entries('sidebar')[0]!.inject as () => SidebarRootInjected)()
+    const panel = b.ctx.plugin({
+      inject: ['slots'],
+      apply(ctx: Context) {
+        ctx.slots.register({ name: 'sidebar.panellist', id: 'plugins', order: 20, label: 'Plugins' }, () => null)
+      },
+    })
+    try {
+      await panel.await()
+      await vi.waitFor(() => {
+        expect(injected.hooks.panels.getSnapshot()).toEqual([{ id: 'plugins', order: 20, label: 'Plugins' }])
+      })
+      const release = (b.ctx.get('sidebarPanels') as { registerAvailabilityFilter(filter: (id: string) => boolean): () => void })
+        .registerAvailabilityFilter(id => id !== 'plugins')
+      await vi.waitFor(() => { expect(injected.hooks.panels.getSnapshot()).toEqual([]) })
+      release()
+      await vi.waitFor(() => {
+        expect(injected.hooks.panels.getSnapshot()).toEqual([{ id: 'plugins', order: 20, label: 'Plugins' }])
+      })
+    } finally {
+      await panel.dispose()
+      await sidebar.dispose()
+    }
+  })
+
   it('removes the entry and child declaration on teardown', async () => {
     const b = await bench()
     const fiber = b.ctx.plugin({ inject: [...inject], apply })

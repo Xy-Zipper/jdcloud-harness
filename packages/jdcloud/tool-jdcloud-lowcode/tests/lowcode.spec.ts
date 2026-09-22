@@ -57,7 +57,7 @@ interface MountedLowcode {
 /** A complete current-user response with both visible and filtered menu kinds. */
 function currentUser(
   permissions: readonly string[] = [],
-  systemAdministrator = false,
+  systemAdministrator = true,
 ): Record<string, unknown> {
   return {
     userInfo: {
@@ -184,7 +184,7 @@ async function mountLowcode(options: {
     corpId: 'corp-1',
     corpName: '测试租户',
     corps: [{ corpId: 'corp-1', corpName: '测试租户' }],
-    systemAdministrator: false,
+    systemAdministrator: true,
   }))
   ctx.provide('jdcloudAuthController', { requestAuthenticated, status } as never)
   const fiber = await ctx.plugin(LowcodePlugin, { maxPageSize: 50, maxOutputBytes: 8_192 })
@@ -215,14 +215,14 @@ async function mountLowcode(options: {
     readImage,
     async browserPrompt(turn = 1, step = 1) {
       return await preStep([createUserMessage({
-        content: [{ type: 'text', text: '查询本周打卡数据' }],
+        content: [{ type: 'text', text: admittedLowcodeText('查询本周打卡数据') }],
         source: { kind: 'user', rpcId: `rpc-${String(turn)}-${String(step)}` } as never,
       })], turn, step)
     },
     /** Run one pre-step whose browser prompt carries explicit user text. */
     async prompt(text: string, turn = 1, step = 1) {
       return await preStep([createUserMessage({
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: admittedLowcodeText(text) }],
         source: { kind: 'user', rpcId: `rpc-${String(turn)}-${String(step)}` } as never,
       })], turn, step)
     },
@@ -243,6 +243,13 @@ async function mountLowcode(options: {
       }))
     },
   }
+}
+
+/** Mark test prompts as the explicitly selected low-code workflow required by Web admission. */
+function admittedLowcodeText(text: string): string {
+  return text.includes('dsh-reference:jdcloud-lowcode-function/')
+    ? text
+    : `${text} @[测试功能](dsh-reference:jdcloud-lowcode-function/form-clock)`
 }
 
 /** Read the structured HarnessError code surfaced by ToolRuntime. */
@@ -464,6 +471,17 @@ describe('table schema generation', () => {
 })
 
 describe('prompt refresh and plugin lifecycle', () => {
+  it('does not refresh JDCloud capabilities for an ordinary browser prompt', async () => {
+    const mounted = await mountLowcode()
+    const message = createUserMessage({
+      content: [{ type: 'text', text: '帮我总结这段文字' }],
+      source: { kind: 'user', rpcId: 'ordinary-rpc' } as never,
+    })
+
+    await expect(mounted.preStepWith([message])).resolves.toEqual([message])
+    expect(mounted.requests).toEqual([])
+  })
+
   it('injects one safe snapshot for a browser prompt and does not refresh on the tool continuation', async () => {
     const current = currentUser()
     const mounted = await mountLowcode({
@@ -550,7 +568,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     // skipped, so its write verb never becomes a refusal.
     const entered = await mounted.preStepWith([
       createUserMessage({
-        content: [{ type: 'text', text: '删除熊香玉这条记录' }],
+        content: [{ type: 'text', text: '删除熊香玉这条记录 @[打卡记录](dsh-reference:jdcloud-lowcode-function/form-clock)' }],
         source: { kind: 'user', rpcId: 'rpc-mixed-step' } as never,
       }),
       createUserMessage({
@@ -613,6 +631,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(guidance).toContain('conversation file or image')
     expect(guidance).toContain('jdcloud_lowcode_upload_file')
     expect(guidance).toContain('Conversation attachments are evidence until this upload succeeds')
+    expect(guidance).toContain('Queries and record reads require readData.')
     await mounted.browserPrompt()
 
     await mounted.fiber.dispose()
@@ -627,8 +646,38 @@ describe('prompt refresh and plugin lifecycle', () => {
 })
 
 describe('Host-authorized tool execution', () => {
-  it('queries without agentPermissions and sends the bounded AND-connected request payload', async () => {
+  it('rejects every low-code operation for a non-administrator before any JDCloud request', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([], false) })
+    await mounted.browserPrompt()
+    mounted.requestAuthenticated.mockClear()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_query', { menu_id: 'form-clock' })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_ADMIN_REQUIRED')
+    expect(mounted.requests).toEqual([])
+  })
+
+  it.each([
+    ['jdcloud_lowcode_query', { menu_id: 'form-clock' }],
+    ['jdcloud_lowcode_get', { menu_id: 'form-clock', record_id: 'row-1' }],
+  ] as const)('rejects %s before any data request when readData is absent', async (name, args) => {
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
+    await mounted.browserPrompt()
+    mounted.requestAuthenticated.mockClear()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call(name, args)
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_PERMISSION_REQUIRED')
+    expect(resultText(result)).toContain('您当前暂无查询权限')
+    expect(mounted.requestAuthenticated).not.toHaveBeenCalled()
+    expect(mounted.requests).toEqual([])
+  })
+
+  it('queries with readData and sends the bounded AND-connected request payload', async () => {
     const mounted = await mountLowcode({
+      currentUser: currentUser(['readData', 'addData']),
       response: request => request.path === '/api/visualdev/form/list'
         ? { list: [{ name: 'Monday' }], pagination: { total: 1 } }
         : { ok: true },
@@ -1002,7 +1051,7 @@ describe('Host-authorized tool execution', () => {
   })
 
   it('rejects table creation for a non-administrator before any modifying request', async () => {
-    const mounted = await mountLowcode()
+    const mounted = await mountLowcode({ currentUser: currentUser([], false) })
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
     mounted.requests.splice(0)

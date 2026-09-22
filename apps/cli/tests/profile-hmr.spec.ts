@@ -9,7 +9,7 @@ import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 
 /** Load one shipped bundle patch through the same parser as profile boot. */
-function bundle(name: 'acp-app' | 'base' | 'headless' | 'sdk-app' | 'sdk-minimal' | 'web-app'): PatchOptions[] {
+function bundle(name: 'acp-app' | 'base' | 'headless' | 'jdcloud-login' | 'sdk-app' | 'sdk-minimal' | 'web-app'): PatchOptions[] {
   return loadOverlayPatches('profile-hmr test', join(REPOSITORY_ROOT, 'packages', 'bundle', name, 'cordis.patch.yml'))
 }
 
@@ -41,5 +41,21 @@ describe('YAML-owned profile HMR', () => {
 
   it('keeps the standalone sdk-minimal tree free of HMR', () => {
     expect(composeEntries([bundle('sdk-minimal')]).find(entry => entry.id === 'hmr')).toBeUndefined()
+  })
+})
+
+describe('JDCloud Web authentication overlay', () => {
+  it('uses an independent browser session without Harness launch authentication', () => {
+    const connection = composeEntries([
+      bundle('base'),
+      bundle('web-app'),
+      bundle('jdcloud-login'),
+    ]).find(entry => entry.id === 'connection')
+    expect(connection).toMatchObject({
+      config: {
+        browserAuthentication: false,
+        browserSession: true,
+      },
+    })
   })
 })

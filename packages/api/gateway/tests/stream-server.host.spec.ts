@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { once } from 'node:events'
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import {
   RemoteStreamMuxServer,
   type RemoteStreamFailureMapper,
   type RemoteStreamOpener,
+  type RemoteStreamRequestRunner,
 } from '../src/stream-server.ts'
 
 interface RunningMux {
@@ -123,6 +125,21 @@ describe('Remote stream mux server carrier lifecycle', () => {
     expect(String(noInputEvent[1])).toBe('invalid Remote stream request')
   })
 
+  it('runs logical streams inside the upgrade request context', async () => {
+    const identity = new AsyncLocalStorage<string>()
+    let observed: string | undefined
+    const entry = await startMux(async (_endpoint, _payload, signal) => {
+      await Promise.resolve()
+      observed = identity.getStore()
+      return waitForAbort(signal)
+    }, 2_000, operation => identity.run('browser-1', operation))
+    const client = await connect(entry.url)
+    client.send(openFrame('request-context'))
+    await vi.waitFor(() => { expect(observed).toBe('browser-1') })
+    client.close()
+    await once(client, 'close')
+  })
+
   it('accepts all ws text representations and terminates a carrier error', async () => {
     const entry = await startMux(async (_endpoint, _payload, signal) => waitForAbort(signal))
     const client = await connect(entry.url)
@@ -234,10 +251,14 @@ const mapFailure: RemoteStreamFailureMapper = error => ({
   details: {},
 })
 
-async function startMux(open: RemoteStreamOpener, heartbeatIntervalMs = 2_000): Promise<RunningMux> {
+async function startMux(
+  open: RemoteStreamOpener,
+  heartbeatIntervalMs = 2_000,
+  run?: RemoteStreamRequestRunner,
+): Promise<RunningMux> {
   const mux = new RemoteStreamMuxServer(open, mapFailure, heartbeatIntervalMs)
   const http = createServer()
-  http.on('upgrade', (request, socket, head) => { mux.handleUpgrade(request, socket, head) })
+  http.on('upgrade', (request, socket, head) => { mux.handleUpgrade(request, socket, head, run) })
   await new Promise<void>((resolve, reject) => {
     http.once('error', reject)
     http.listen(0, '127.0.0.1', () => {

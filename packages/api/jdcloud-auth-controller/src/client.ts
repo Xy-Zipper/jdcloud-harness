@@ -6,14 +6,15 @@ import type {
   JdcloudCorp,
   JdcloudLowcodeCapabilityState,
   JdcloudLowcodeMenuType,
-  JdcloudLowcodeWritePermission,
+  JdcloudLowcodePermission,
   JdcloudMultipartFile,
   JdcloudWritableMenu,
   JdcloudWritableMenuState,
 } from './types.ts'
 
 const AUTH_ERROR_CODES = new Set([600, 601, 602])
-const WRITE_PERMISSIONS = new Set<JdcloudLowcodeWritePermission>([
+const LOWCODE_PERMISSIONS = new Set<JdcloudLowcodePermission>([
+  'readData',
   'addData',
   'editData',
   'deleteData',
@@ -53,7 +54,7 @@ interface JdcloudMenuNode {
   readonly fullName: string
   readonly type: number
   readonly icon: string | undefined
-  readonly permissions: readonly JdcloudLowcodeWritePermission[]
+  readonly permissions: readonly JdcloudLowcodePermission[]
 }
 
 /** JDCloud business response failure. */
@@ -366,7 +367,7 @@ export function readJdcloudLowcodeCapabilities(value: unknown): JdcloudLowcodeCa
 /**
  * Parse the browser-safe writable-menu projection from `/api/oauth/currentUser`.
  * @param value - Unwrapped JDCloud current-user response data.
- * @returns Current tenant id and type 3/4 menus carrying at least one supported write permission.
+ * @returns Current tenant id and type 3/4 menus carrying at least one supported data permission.
  */
 export function readJdcloudWritableMenus(
   value: unknown,
@@ -416,7 +417,7 @@ function collectMenuNodes(menuList: readonly unknown[]): JdcloudMenuNode[] {
       icon: type === 3 || type === 4
         ? readOptionalMenuIcon(Reflect.get(menu, 'icon'), id)
         : undefined,
-      permissions: readWritePermissions(Reflect.get(menu, 'agentPermissions')),
+      permissions: readLowcodePermissions(Reflect.get(menu, 'agentPermissions')),
     })
     const children = Reflect.get(menu, 'children')
     if (children === undefined || children === null) continue
@@ -458,15 +459,15 @@ function readOptionalMenuIcon(value: unknown, menuId: string): string | undefine
   return value.trim()
 }
 
-/** Keep only the three data-write permissions supported by the low-code tools. */
-function readWritePermissions(value: unknown): JdcloudLowcodeWritePermission[] {
+/** Keep only low-code data permissions that the Host can enforce. */
+function readLowcodePermissions(value: unknown): JdcloudLowcodePermission[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error('JDCloud menu agentPermissions must be an array')
-  const permissions: JdcloudLowcodeWritePermission[] = []
+  const permissions: JdcloudLowcodePermission[] = []
   for (const permission of value) {
     if (typeof permission === 'string'
-      && WRITE_PERMISSIONS.has(permission as JdcloudLowcodeWritePermission)) {
-      permissions.push(permission as JdcloudLowcodeWritePermission)
+      && LOWCODE_PERMISSIONS.has(permission as JdcloudLowcodePermission)) {
+      permissions.push(permission as JdcloudLowcodePermission)
     }
   }
   return [...new Set(permissions)]

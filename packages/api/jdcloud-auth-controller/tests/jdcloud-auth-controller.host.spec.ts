@@ -3,10 +3,12 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
+import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
 import JdcloudAuthController, {
   JdcloudApiError,
   JdcloudClient,
   normalizeJdcloudBaseUrl,
+  readJdcloudLowcodeCapabilities,
   readJdcloudWritableMenus,
 } from '../src/index.ts'
 import type { JdcloudAuthenticatedRequest, JdcloudLoginRequest } from '../src/index.ts'
@@ -62,8 +64,42 @@ async function boot(fetcher: typeof fetch, config: {
   return ctx
 }
 
+async function bootWithBrowserSession(fetcher: typeof fetch) {
+  vi.stubGlobal('fetch', fetcher)
+  const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(MemoryCredentials)
+  let browserSession: BrowserSessionService | undefined
+  const sessionFiber = ctx.plugin({
+    inject: ['credentials'],
+    apply: async (sessionCtx: Context) => {
+      browserSession = await BrowserSessionService.create(sessionCtx, sessionCtx.credentials)
+    },
+  })
+  await sessionFiber.await()
+  await ctx.plugin(JdcloudAuthController, { defaultBaseUrl: 'https://kindoucloud.com' })
+  if (browserSession === undefined) throw new Error('browser session service was not created')
+  return { ctx, browserSession }
+}
+
+function browserCookie(browserSession: BrowserSessionService, authority: string): string {
+  const response: {
+    headers: Record<string, string>
+    writeHead: (_status: number, headers?: Readonly<Record<string, string>>) => void
+    end: () => void
+  } = {
+    headers: {},
+    writeHead: (_status, headers) => { if (headers !== undefined) Object.assign(response.headers, headers) },
+    end: () => undefined,
+  }
+  browserSession.authorizeIndex({ headers: { host: authority }, method: 'GET', url: '/' }, response)
+  const cookie = response.headers['set-cookie']?.split(';', 1)[0]
+  if (cookie === undefined) throw new Error('browser session cookie was not created')
+  return cookie
+}
+
 describe('minimal JDCloud HTTP client', () => {
-  it('projects only type 3/4 menus with a supported data-write permission', () => {
+  it('projects only type 3/4 menus with a supported data permission', () => {
     expect(readJdcloudWritableMenus({
       userInfo: { corpId: 'corp-current' },
       menuList: [{
@@ -77,7 +113,7 @@ describe('minimal JDCloud HTTP client', () => {
             fullName: '请假申请',
             type: 4,
             icon: 'iconfont   icon-wo',
-            agentPermissions: ['addData', 'queryData', 'addData'],
+            agentPermissions: ['readData', 'addData', 'queryData', 'readData', 'addData'],
           },
           {
             id: 'attendance',
@@ -86,7 +122,7 @@ describe('minimal JDCloud HTTP client', () => {
             icon: '/api/file/previewImage/corp-current/attendance',
             agentPermissions: ['editData'],
           },
-          { id: 'read-only', fullName: '只读表单', type: 3 },
+          { id: 'read-only', fullName: '只读表单', type: 3, agentPermissions: ['readData'] },
           { id: 'board', fullName: '数据看板', type: 6, agentPermissions: ['deleteData'] },
         ],
       }],
@@ -99,7 +135,7 @@ describe('minimal JDCloud HTTP client', () => {
           path: '人事管理 / 请假申请',
           type: 4,
           icon: 'iconfont   icon-wo',
-          agentPermissions: ['addData'],
+          agentPermissions: ['readData', 'addData'],
         },
         {
           menuId: 'attendance',
@@ -109,8 +145,31 @@ describe('minimal JDCloud HTTP client', () => {
           icon: '/api/file/previewImage/corp-current/attendance',
           agentPermissions: ['editData'],
         },
+        {
+          menuId: 'read-only',
+          fullName: '只读表单',
+          path: '人事管理 / 只读表单',
+          type: 3,
+          agentPermissions: ['readData'],
+        },
       ],
     })
+  })
+
+  it('exposes a read-only menu to the browser picker', () => {
+    const currentUser = {
+      userInfo: { corpId: 'corp-current' },
+      menuList: [{
+        id: 'read-only', fullName: '只读表单', type: 3, agentPermissions: ['readData'],
+      }],
+    }
+
+    expect(readJdcloudLowcodeCapabilities(currentUser).menus).toEqual([{
+      menuId: 'read-only', fullName: '只读表单', path: '只读表单', type: 3, agentPermissions: ['readData'],
+    }])
+    expect(readJdcloudWritableMenus(currentUser).menus).toEqual([{
+      menuId: 'read-only', fullName: '只读表单', path: '只读表单', type: 3, agentPermissions: ['readData'],
+    }])
   })
 
   it('requires a current tenant for the browser writable-menu projection', () => {
@@ -295,6 +354,68 @@ describe('minimal JDCloud HTTP client', () => {
 })
 
 describe('JDCloud authentication controller', () => {
+  it('does not fall back to the process-wide login outside a browser request', async () => {
+    const { ctx } = await bootWithBrowserSession(vi.fn() as typeof fetch)
+    await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+      kind: 'grant',
+      payload: {
+        version: 4,
+        baseUrl: 'https://kindoucloud.com',
+        token: 'legacy-token',
+        userId: 'legacy-id',
+        username: 'legacy-user',
+        corpId: 'corp-current',
+        corpName: 'Current Tenant',
+        corps: [{ corpId: 'corp-current', corpName: 'Current Tenant' }],
+        systemAdministrator: false,
+      },
+    }))
+    await expect(ctx.jdcloudAuthController.status())
+      .rejects.toThrow('JDCloud authentication requires a browser session')
+  })
+
+  it('keeps browser logins and logout records independent', async () => {
+    const fetcher = vi.fn(async (url: string | URL) => {
+      const pathname = new URL(url).pathname
+      if (pathname.endsWith('/oauth/login')) return json({ code: 200, msg: 'ok', data: { token: 'bearer token' } })
+      if (pathname.endsWith('/getCorpList')) return json({ code: 200, msg: 'ok', data: corpData() })
+      if (pathname.endsWith('/currentUser')) return json({ code: 200, msg: 'ok', data: currentUserData() })
+      throw new Error(`unexpected JDCloud path ${pathname}`)
+    })
+    const { ctx, browserSession } = await bootWithBrowserSession(fetcher as typeof fetch)
+    const firstCookie = browserCookie(browserSession, 'harness.example')
+    const secondCookie = browserCookie(browserSession, 'harness.example')
+    const firstRequest = { headers: { host: 'harness.example', cookie: firstCookie } }
+    const secondRequest = { headers: { host: 'harness.example', cookie: secondCookie } }
+    let firstId = ''
+    let secondId = ''
+
+    await browserSession.run(firstRequest, async () => {
+      firstId = browserSession.currentIdRequired()
+      await ctx.jdcloudAuthController.login({
+        baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+      }, AbortSignal.timeout(1000))
+    })
+    await browserSession.run(secondRequest, async () => {
+      secondId = browserSession.currentIdRequired()
+      await ctx.jdcloudAuthController.login({
+        baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+      }, AbortSignal.timeout(1000))
+    })
+
+    expect(firstId).not.toBe(secondId)
+    const firstKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(firstId).digest('hex')}`)
+    const secondKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(secondId).digest('hex')}`)
+    expect(await ctx.credentials.readRecord(firstKey)).toBeDefined()
+    expect(await ctx.credentials.readRecord(secondKey)).toBeDefined()
+
+    await browserSession.run(firstRequest, () => ctx.jdcloudAuthController.logout())
+    await expect(browserSession.run(firstRequest, () => ctx.jdcloudAuthController.status()))
+      .resolves.toMatchObject({ authenticated: false })
+    await expect(browserSession.run(secondRequest, () => ctx.jdcloudAuthController.status()))
+      .resolves.toMatchObject({ authenticated: true, username: 'user' })
+  })
+
   it('uses an empty initial address for omitted or blank configuration', async () => {
     const omitted = await boot(vi.fn() as typeof fetch, {})
     expect(await omitted.jdcloudAuthController.status()).toEqual({ authenticated: false, baseUrl: '' })
@@ -508,7 +629,7 @@ describe('JDCloud authentication controller', () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { token: 'bearer token' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData() }))
-      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData() }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', true) }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { menuList: ['menu'] } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'created' } }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: { id: 'updated' } }))
@@ -566,6 +687,7 @@ describe('JDCloud authentication controller', () => {
         msg: 'ok',
         data: {
           userInfo: { corpId: 'corp-current' },
+          userPermission: { systemAdministrator: false },
           menuList: [
             {
               id: 'leave',

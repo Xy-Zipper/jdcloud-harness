@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to start a Web conversation with one writable JDCloud low-code function already identified. It shows current-tenant forms and workflows that carry `addData`, `editData`, or `deleteData`, then inserts the selected function as an atomic `@` tag. The panel closes immediately after one selection and returns if the tag is removed. Before submission, the Host reloads the menu and rejects a stale tenant or permission instead of trusting browser state.
+Use this package to start a Web conversation with one writable JDCloud low-code function already identified. It shows current-tenant forms and workflows that carry `addData`, `editData`, or `deleteData`, and also offers them from the composer `@` menu, then inserts the selected function as an atomic `@` tag. The panel closes immediately after one selection and returns if the tag is removed. Before submission, the Host reloads the menu and rejects a stale tenant or permission instead of trusting browser state.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ Mount this plugin beside the JDCloud authentication controller, Session Controll
 - name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'
 ```
 
-The picker appears only for a blank top-level Session with at least one writable type `3` form or type `4` workflow. Its card grid matches the composer card width, keeps every card the same width, and starts an incomplete final row at the left. Clicking a card inserts one structured tag at the beginning of the draft and hides the complete picker. Removing that tag makes the picker available again.
+The picker appears only for a blank top-level Session with at least one writable type `3` form or type `4` workflow. Its card grid matches the composer card width, keeps every card the same width, and starts an incomplete final row at the left. Clicking a card, or choosing the same form or workflow from `@`, inserts one structured tag and hides the complete picker. Removing that tag makes the picker available again.
 
 Each menu may provide an `icon` value. A value whose first class is `iconfont`, such as `iconfont icon-wo`, uses the complete bundled JDCloud icon font. A value beginning with `/` is resolved against the authenticated JDCloud service address and rendered as a custom image. Missing and unsupported values retain the form or workflow fallback icon.
 
@@ -84,11 +84,11 @@ One selection changes only the new user-message suffix. Earlier Session history 
 
 <a id="known-limitations-and-deferred-work"></a>
 
-These limits keep the picker aligned with the current tenant and mutation permissions.
+These limits keep the picker aligned with the current tenant and authorized functions.
 
 - **One function per draft** — the panel hides while its function tag exists; selecting several functions requires separate conversations.
-- **Write permissions only** — query-only menus without `addData`, `editData`, or `deleteData` do not appear in this picker.
-- **Unavailable data stays hidden** — authentication failure, current-user failure, or an empty writable-menu result produces no panel; the login plugin owns authentication recovery.
+- **Recognized data permissions only** — a menu appears only with at least one `readData`, `addData`, `editData`, or `deleteData` grant.
+- **Unavailable data stays hidden** — authentication failure, current-user failure, or an empty permitted-menu result produces no panel; the login plugin owns authentication recovery.
 
 <a id="dev-note"></a>
 ### Dev Note

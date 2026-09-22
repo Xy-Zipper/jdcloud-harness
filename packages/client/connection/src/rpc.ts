@@ -184,6 +184,14 @@ export interface HostConnectionHandle {
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 
   /**
+   * Run an asynchronous transport operation with the request's browser identity.
+   * @param request - request headers from the HTTP or upgrade request.
+   * @param operation - operation that may await request-scoped work.
+   * @returns the operation result.
+   */
+  runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value
+
+  /**
    * Authenticate one frontend index request, or allow it when browser authentication is disabled.
    * @param request - root or configured-index HTTP request.
    * @param response - response owned when the result is false.

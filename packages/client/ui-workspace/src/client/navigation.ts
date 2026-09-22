@@ -34,6 +34,8 @@ export interface UiWorkspace {
    * @param target - known Session identity or durable direct-parent subagent address to display.
    */
   openSession(target: SessionTarget): void
+  /** Clear the selected main Session and return the conversation surface to its empty state. */
+  clearSelection(): void
   /**
    * Connect a Workspace and open its Session unless a later navigation supersedes it.
    * @param workspaceId - target Workspace.
@@ -187,11 +189,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   /** Run each initializer in registration order before exposing the Session to navigation. */
   private async initializeNewSession(sessionId: SessionId): Promise<void> {
-    for (const initializer of this.newSessionInitializers) await initializer(sessionId)
+    if (this.newSessionInitializers.size === 0) return
+    await this.sessions.using(
+      sessionId,
+      { source: 'workspaceOperation' },
+      async () => {
+        for (const initializer of this.newSessionInitializers) await initializer(sessionId)
+      },
+    )
   }
 
   openSession(target: SessionTarget): void {
     this.replaceMain(target, this.lifetime.signal)
+  }
+
+  clearSelection(): void {
+    this.clearMain()
   }
 
   async openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void> {

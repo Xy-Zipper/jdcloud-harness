@@ -3,6 +3,7 @@
 import { readJdcloudLowcodeCapabilities } from '@deepseek-ai/dsh-api-jdcloud-auth-controller'
 import type {
   JdcloudLowcodeMenuType,
+  JdcloudLowcodePermission,
   JdcloudLowcodeWritePermission,
   JdcloudWritableMenu,
 } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
@@ -10,7 +11,10 @@ import type {
 /** JDCloud menu kinds available to the low-code tools. */
 export type LowcodeMenuType = JdcloudLowcodeMenuType
 
-/** JDCloud write permissions enforced by the Host tools. */
+/** JDCloud data permissions enforced by the Host tools. */
+export type LowcodePermission = JdcloudLowcodePermission
+
+/** JDCloud write permissions enforced before data-modifying Host requests. */
 export type LowcodeWritePermission = JdcloudLowcodeWritePermission
 
 /** One form or workflow available in the current tenant. */

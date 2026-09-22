@@ -107,6 +107,17 @@ async function bench(authenticated = false, administrator = true) {
     },
   }
   ctx.provide('sidebarRightTabs', tabs as never)
+  const panelFilters = new Set<(id: string) => boolean>()
+  ctx.provide('sidebarPanels', {
+    registerAvailabilityFilter(filter: (id: string) => boolean) {
+      panelFilters.add(filter)
+      return () => { panelFilters.delete(filter) }
+    },
+    isAvailable(id: string) {
+      return [...panelFilters].every(filter => filter(id))
+    },
+    subscribe: vi.fn(() => () => undefined),
+  } as never)
   const sessionCommand = vi.fn(async (_line: string) => ({ ok: true as const, value: { matched: true } }))
   let sessionBinding: { session: { command: typeof sessionCommand } } | undefined = {
     session: { command: sessionCommand },
@@ -115,7 +126,9 @@ async function bench(authenticated = false, administrator = true) {
   ctx.provide('sessions', {
     binding: () => sessionBinding,
   } as never)
+  const clearSelection = vi.fn()
   ctx.provide('uiWorkspace', {
+    clearSelection,
     registerNewSessionInitializer(initializer: (sessionId: never) => Promise<void>) {
       newSessionInitializers.add(initializer)
       return () => { newSessionInitializers.delete(initializer) }
@@ -148,6 +161,10 @@ async function bench(authenticated = false, administrator = true) {
     commandAvailable(name: string) {
       return [...commandFilters].every(filter => filter(name, { sessionId: 'session-test' as never }))
     },
+    panelAvailable(id: string) {
+      return [...panelFilters].every(filter => filter(id))
+    },
+    clearSelection,
     async initializeNewSession() {
       for (const initializer of newSessionInitializers) await initializer('session-new' as never)
     },
@@ -218,7 +235,7 @@ describe('JDCloud login browser plugin', () => {
     expect(clientInject).toEqual(['remote'])
     expect(uiInject).toEqual([
       'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
-      'sessions', 'uiWorkspace',
+      'sidebarPanels', 'sessions', 'uiWorkspace',
     ])
   })
 
@@ -238,6 +255,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.tabs.guide()).toHaveLength(0)
     expect(b.tabs.get('terminal')).toBeUndefined()
+    expect(b.panelAvailable('plugins')).toBe(false)
     expect(b.commandAvailable('plan')).toBe(true)
     await b.initializeNewSession()
     expect(b.sessionCommand).toHaveBeenCalledExactlyOnceWith('/permission workspace-write')
@@ -245,6 +263,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('model')).toBe(true)
     expect(b.commandAvailable('permission')).toBe(true)
     expect(b.tabs.get('terminal')?.kind).toBe('terminal')
+    expect(b.panelAvailable('plugins')).toBe(true)
     b.sessionCommand.mockClear()
     await b.initializeNewSession()
     expect(b.sessionCommand).not.toHaveBeenCalled()
@@ -304,6 +323,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('model')).toBe(true)
     expect(b.commandAvailable('permission')).toBe(true)
     expect(b.tabs.get('terminal')?.kind).toBe('terminal')
+    expect(b.panelAvailable('plugins')).toBe(true)
 
     b.setAdministrator(false)
     const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
@@ -312,6 +332,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('model')).toBe(false)
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.tabs.get('terminal')).toBeUndefined()
+    expect(b.panelAvailable('plugins')).toBe(false)
     await b.initializeNewSession()
     expect(b.sessionCommand).toHaveBeenCalledExactlyOnceWith('/permission workspace-write')
     await fiber.dispose()
@@ -518,6 +539,7 @@ describe('JDCloud login browser plugin', () => {
     })
     await expect(accountInjected?.logout()).resolves.toEqual({ ok: true })
     expect(b.logout).toHaveBeenCalledOnce()
+    expect(b.clearSelection).toHaveBeenCalledOnce()
     expect(b.tabs.get('terminal')).toBeUndefined()
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.slots.entries('sidebar.account').some(candidate => candidate.component === AccountSeat)).toBe(false)
@@ -535,6 +557,7 @@ describe('JDCloud login browser plugin', () => {
     const accountInjected = (accountEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.()
     await expect(accountInjected?.switchCorp('corp-next')).resolves.toEqual({ ok: true })
     expect(b.switchCorp).toHaveBeenCalledWith('corp-next')
+    expect(b.clearSelection).toHaveBeenCalledOnce()
     const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
     expect((updatedEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.().status)
       .toMatchObject({ corpId: 'corp-next', corpName: 'Next Tenant' })

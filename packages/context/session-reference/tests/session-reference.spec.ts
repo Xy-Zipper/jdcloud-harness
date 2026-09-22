@@ -634,6 +634,24 @@ describe('model-relative reference budgets', () => {
 })
 
 describe('session reference discovery and preparation', () => {
+  it('limits discovery and direct references to the current tenant user', async () => {
+    const ctx = await harness()
+    const target = ctx.sessions.create(SessionId('target'), { meta: { cwd: '/same' } })
+    const visible = ctx.sessions.create(SessionId('visible'), { meta: { cwd: '/same' } })
+    const hidden = ctx.sessions.create(SessionId('hidden'), { meta: { cwd: '/same' } })
+    ctx.provide('jdcloudAuthController', {
+      currentScopeKey: () => Promise.resolve('tenant-user'),
+      owns: (_kind: 'session' | 'workspace', id: string, scopeKey?: string) =>
+        Promise.resolve(scopeKey === 'tenant-user' && id !== hidden.id),
+    } as never)
+
+    await expect(ctx.sessionReferenceResolver.listCandidates(fakeAgent(target))).resolves.toEqual([
+      expect.objectContaining({ sessionId: visible.id }),
+    ])
+    await expect(ctx.sessionReferenceResolver.prepare(fakeAgent(target), [], [{ sessionId: hidden.id }]))
+      .rejects.toThrow(expectCode('SESSION_REFERENCE_READ_FAILED'))
+  })
+
   it('matches candidate metadata and titles before ranking by cwd', async () => {
     const ctx = await harness()
     const target = ctx.sessions.create(SessionId('target'), { meta: { cwd: '/same', createdAt: 10 } })

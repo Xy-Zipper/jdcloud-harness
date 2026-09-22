@@ -91,7 +91,7 @@ export class WorkspaceFeed {
     const follower = new WorkspaceFollower(owner, scopeKey)
     this.followers.add(follower)
     try {
-      yield { type: 'baseline', value: await this.scopedBaseline() }
+      yield { type: 'baseline', value: await this.scopedBaseline(owner, scopeKey) }
       yield* follower.read(signal)
     } finally {
       this.followers.delete(follower)
@@ -99,16 +99,19 @@ export class WorkspaceFeed {
     }
   }
 
-  private async scopedBaseline(): Promise<WorkspaceBaseline> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+  private async scopedBaseline(
+    owner: ScopeOwner | undefined,
+    scopeKey: string | undefined,
+  ): Promise<WorkspaceBaseline> {
     if (owner === undefined) return this.baseline()
+    if (scopeKey === undefined) return { items: [], archivedSessionIds: [] }
     const items = []
     for (const workspace of this.ctx.workspaceRegistry.list()) {
-      if (await owner.owns('workspace', String(workspace.id))) items.push(workspaceView(workspace))
+      if (await owner.owns('workspace', String(workspace.id), scopeKey)) items.push(workspaceView(workspace))
     }
     const archivedSessionIds: string[] = []
     for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
-      if (await owner.owns('session', String(sessionId))) archivedSessionIds.push(String(sessionId))
+      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(String(sessionId))
     }
     return { items, archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'] }
   }

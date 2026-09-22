@@ -35,6 +35,8 @@ JDCLOUD_DEFAULT_BASE_URL=https://example.com
 
 `JDCLOUD_DEFAULT_BASE_URL` is the initial account/password login address. A token-transfer link may supply any syntactically valid absolute HTTP(S) service address; the Host sends the supplied Token to that destination without an allowlist. A successful login stores its normalized service address, Token, account, current tenant, and available tenants in the Host credentials provider. The Web Client shows the account and tenant in the sidebar; its account menu marks the current tenant, switches among all available tenants without returning to login, and provides Sign out.
 
+This bundle disables Harness launch-token authentication and enables an HttpOnly browser session cookie. Login records are isolated per browser, while sessions and workspaces remain shared by the same JDCloud tenant and user.
+
 For a blank new conversation, the writable-function row shows type `3` forms and type `4` workflows carrying at least one data-write permission. One click inserts a single structured function tag and closes the panel; deleting the tag restores it. For each submitted user prompt, the low-code tool row injects a capability snapshot and provides data tools whose Host execution enforces the current permissions.
 
 <a id="model-experience"></a>

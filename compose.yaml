@@ -52,7 +52,8 @@ services:
         - node
         - --input-type=module
         - --eval
-        - "const response = await fetch('http://127.0.0.1:3080/'); if (!response.ok) process.exit(1)"
+        # The root route can redirect; verify the local Web listener without following that loop.
+        - "const response = await fetch('http://127.0.0.1:3080/', { redirect: 'manual' }); if (response.status < 200 || response.status >= 400) process.exit(1)"
       interval: 10s
       timeout: 5s
       retries: 12

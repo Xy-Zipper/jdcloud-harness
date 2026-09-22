@@ -10,6 +10,7 @@ import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@de
 import ToolRuntime, {
   defineContentToolFixture, defineTool, JsonSchemaError, parameterSchemaSpecToJsonSchema, validateArgs, ToolArgsError, ToolNotFoundError,
   TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH,
+  TOOL_RUNTIME_SCHEDULER,
   type InferArgs, type ParameterSchemaSpec, type PreToolDecision, type PostToolDecision,
   type JsonSchemaNode, type ToolDefinition, type ToolDispatchExecution, type ToolExecutionResult, type ToolExecutionToken,
 } from '@deepseek-ai/dsh-tools'
@@ -38,6 +39,16 @@ const echoTool = defineTool({
 })
 
 describe('ToolRuntime', () => {
+  it('exposes the scheduler through a stable cross-package key', async () => {
+    const ctx = await setup()
+    expect(ctx.tools[TOOL_RUNTIME_SCHEDULER]).toMatchObject({
+      prepare: expect.any(Function),
+      dispatch: expect.any(Function),
+      finalize: expect.any(Function),
+      finish: expect.any(Function),
+    })
+  })
+
   it('registers tools, exposes schemas, and feeds the system-prompt assembly', async () => {
     const ctx = await setup()
     ctx.tools.register(echoTool)

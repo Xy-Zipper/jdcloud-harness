@@ -68,13 +68,19 @@ export type JdcloudAuthenticatedRequest =
     readonly multipartFile: JdcloudMultipartFile
   }
 
-/** JDCloud low-code menu kinds exposed by the write-action picker. */
+/** JDCloud low-code menu kinds exposed by the browser function picker. */
 export type JdcloudLowcodeMenuType = 3 | 4
+
+/** JDCloud business-data reads the Host authorizes for one low-code menu. */
+export type JdcloudLowcodeReadPermission = 'readData'
 
 /** JDCloud data mutations the Host authorizes for one low-code menu. */
 export type JdcloudLowcodeWritePermission = 'addData' | 'editData' | 'deleteData'
 
-/** One form or workflow with at least one Host-confirmed data mutation grant. */
+/** One JDCloud data permission recognized by the Host for one low-code menu. */
+export type JdcloudLowcodePermission = JdcloudLowcodeReadPermission | JdcloudLowcodeWritePermission
+
+/** One form or workflow with Host-confirmed data permissions for the browser function picker. */
 export interface JdcloudWritableMenu {
   readonly menuId: string
   readonly fullName: string
@@ -82,10 +88,10 @@ export interface JdcloudWritableMenu {
   readonly type: JdcloudLowcodeMenuType
   /** Iconfont class list or service-relative custom image path. */
   readonly icon?: string
-  readonly agentPermissions: readonly JdcloudLowcodeWritePermission[]
+  readonly agentPermissions: readonly JdcloudLowcodePermission[]
 }
 
-/** Current-tenant writable menus returned to the authenticated browser. */
+/** Current-tenant permitted menus returned to the authenticated browser. */
 export interface JdcloudWritableMenuState {
   /** Authenticated service address used to resolve service-relative menu icons. */
   readonly baseUrl: string

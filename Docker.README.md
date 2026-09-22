@@ -11,7 +11,9 @@ docker build `
   --tag jdcloud-harness:local `
   .
 # caddy:2-alpine
-docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
+# docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
+
+docker image save -o .\jdcloud-harness.tar jdcloud-harness:local
 docker pull caddy:2-alpine
 
 
@@ -79,6 +81,8 @@ docker image load -i jdcloud-harness.tar
 docker compose up -d --no-build --pull never
 docker compose ps
 ```
+
+根页面可能返回重定向，健康检查会将本地 `3080` 端口的 `2xx` 或 `3xx` 响应视为服务已就绪。修改 `compose.yaml` 后不需要重新构建镜像，但需要重建容器。
 
 ## 修改模型配置
 

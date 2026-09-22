@@ -25,12 +25,12 @@ import type {
 } from './types.ts'
 
 export type * from './types.ts'
+export { readJdcloudLowcodeCapabilities } from './client.ts'
 export {
   isJdcloudAuthError,
   JdcloudApiError,
   JdcloudClient,
   normalizeJdcloudBaseUrl,
-  readJdcloudLowcodeCapabilities,
   readJdcloudWritableMenus,
 } from './client.ts'
 
@@ -50,6 +50,10 @@ interface LegacyAuthPayload {
 interface AuthPayload extends Omit<LegacyAuthPayload, 'version'> {
   readonly version: 4
   readonly systemAdministrator: boolean
+}
+
+interface BrowserSessionIdentity {
+  currentIdRequired(): string
 }
 
 type StoredAuthPayload = LegacyAuthPayload | AuthPayload
@@ -147,9 +151,9 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   /**
-   * Read the current tenant's forms and workflows carrying a supported data-write permission.
+   * Read the current tenant's forms and workflows carrying a supported data permission.
    * @param signal - Caller cancellation combined with the configured request timeout.
-   * @returns Browser-safe menu identities, labels, paths, types, icons, and write permissions.
+   * @returns Browser-safe menu identities, labels, paths, types, icons, and data permissions.
    */
   @Remote
   async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState> {
@@ -486,18 +490,17 @@ export class JdcloudAuthController extends TypertRemoteService {
     return this.upgradeLegacyAuth(auth)
   }
 
-  /** Select one durable login record for the current browser, or the legacy test key outside HTTP. */
+  /** Select one durable login record for the current browser, or the legacy key without a browser service. */
   private authKey(): ReturnType<typeof credentialKey> {
-    const browserSession = this.ctx.get('browserSession')
+    const browserSession = this.ctx.get('browserSession') as BrowserSessionIdentity | undefined
     if (browserSession === undefined) return LEGACY_AUTH_KEY
-    let browserId: string
     try {
-      browserId = browserSession.currentIdRequired()
-    } catch {
-      return LEGACY_AUTH_KEY
+      const browserId = browserSession.currentIdRequired()
+      const suffix = createHash('sha256').update(browserId).digest('hex')
+      return credentialKey('jdcloud-auth-controller', `login-${suffix}`)
+    } catch (error) {
+      throw new Error('JDCloud authentication requires a browser session', { cause: error })
     }
-    const suffix = createHash('sha256').update(browserId).digest('hex')
-    return credentialKey('jdcloud-auth-controller', `login-${suffix}`)
   }
 
   private ownerKey(kind: 'session' | 'workspace', id: string): ReturnType<typeof credentialKey> {

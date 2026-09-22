@@ -79,7 +79,7 @@ This section explains the design decisions behind the feature and points at the 
 
 ### Design philosophy
 
-- **One record per canonical path.** `fs.realpath` is the single uniqueness canon: paths are stored canonicalized, so a symlink to an owned directory collides, and uniqueness is string equality of canonical paths.
+- **Canonical paths, owner-scoped records.** `fs.realpath` is the storage canon. Different tenant-user owners may register the same canonical path, while each owner resolves and receives only its own record through the Host controller.
 - **Membership is ownership plus a live cwd fact.** The record's ordered `sessionIds` is the ownership truth; the startup header index validates it, and `sessionIds` filters on read while the next mutation prunes durably.
 - **Header-only reads.** Bootstrap and attach validation read `SessionHeader` fields only; event bodies are never loaded.
 - **Two-write mutations with an explicit marker.** Create and delete persist a `pendingMutation` marker before the record/order pair can diverge, so startup completes exactly the interrupted operation and unmarked divergence fails loud as corruption.
@@ -106,7 +106,7 @@ The registry opens the `workspace` domain (version 2): a `workspaces` table keye
 
 ### Lifecycle
 
-On start, the registry opens the domain, completes a marked mutation if one is pending, validates stored state — duplicate paths, duplicate session accounts, and order drift all fail loud — and, when not yet initialized, bootstraps history from persisted headers before writing the initialized marker last, so an interrupted bootstrap resumes safely. A fresh empty registry is real once initialized; it never re-bootstraps.
+On start, the registry opens the domain, completes a marked mutation if one is pending, validates stored state — duplicate session accounts and order drift fail loud, while duplicate paths are valid for owner-scoped records — and, when not yet initialized, bootstraps history from persisted headers before writing the initialized marker last, so an interrupted bootstrap resumes safely. A fresh empty registry is real once initialized; it never re-bootstraps.
 
 ### Failure and recovery
 

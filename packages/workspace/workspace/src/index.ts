@@ -28,6 +28,12 @@ export { realpathNormalize } from './paths.ts'
 /** Identifies one workspace record (see `src/types.ts` for the brand rationale). */
 export type WorkspaceId = WorkspaceIdBrand
 
+/** Options controlling how a new workspace registration handles an existing path. */
+export interface WorkspaceCreateOptions {
+  /** Permit another registration for the canonical path when ownership is scoped elsewhere. */
+  readonly allowDuplicatePath?: boolean
+}
+
 /**
  * Brand a string as a {@link WorkspaceId}.
  * @param id - Raw workspace id string.
@@ -142,11 +148,13 @@ export class WorkspaceRegistry extends Service {
    * Create or reuse a workspace for an existing directory. The fully qualified
    * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
    * non-directory path rejects. Repeated calls for the same canonical path
-   * return the existing entity without changing its title.
+   * return the existing entity without changing its title, unless duplicate
+   * registration is requested.
    * A newly created workspace is prepended to the durable registry order.
    * Different canonical paths may share a display title.
    * @param path - Existing directory to own, in a fully qualified path spelling.
    * @param title - Display title used only when a new record is created.
+   * @param options - Whether to permit another record for the canonical path.
    * @returns the existing or newly durable workspace.
    */
   // TODO: `title` lost its last production caller when the gateway's
@@ -154,12 +162,12 @@ export class WorkspaceRegistry extends Service {
   // (.agents/notes/archived/simplification/2026-07-31-one-route-to-add-a-workspace.md);
   // drop the parameter with its @param clause and the `create(path, title?)`
   // lines in this package's README pair.
-  async create(path: string, title?: string): Promise<Workspace> {
+  async create(path: string, title?: string, options: WorkspaceCreateOptions = {}): Promise<Workspace> {
     const canonical = await realpathNormalize(path)
     if (!(await stat(canonical)).isDirectory()) {
       throw new Error(`cannot create a workspace at '${canonical}': path is not a directory`)
     }
-    return await this.enqueueOperation(() => this.createCanonical(canonical, title))
+    return await this.enqueueOperation(() => this.createCanonical(canonical, title, options.allowDuplicatePath === true))
   }
 
   /**
@@ -297,16 +305,31 @@ export class WorkspaceRegistry extends Service {
    * @returns the workspace owning the canonical path, when one exists.
    */
   async resolveByPath(path: string): Promise<Workspace | undefined> {
-    const canonical = await realpathNormalize(path)
-    for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
-    }
-    return undefined
+    const matches = await this.resolveAllByPath(path)
+    return matches[0]
   }
 
-  private async createCanonical(canonical: string, title?: string): Promise<WorkspaceEntity> {
-    for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
+  /**
+   * Resolve every workspace registered for a canonical directory path.
+   * @param path - Existing directory path in a fully qualified spelling.
+   * @returns matching workspaces in registry order.
+   */
+  async resolveAllByPath(path: string): Promise<readonly Workspace[]> {
+    const canonical = await realpathNormalize(path)
+    return this.requireState().workspaceIds
+      .map(id => this.entities.get(id))
+      .filter((entity): entity is WorkspaceEntity => entity !== undefined && entity.path === canonical)
+  }
+
+  private async createCanonical(
+    canonical: string,
+    title: string | undefined,
+    allowDuplicatePath: boolean,
+  ): Promise<WorkspaceEntity> {
+    if (!allowDuplicatePath) {
+      for (const entity of this.entities.values()) {
+        if (entity.path === canonical) return entity
+      }
     }
 
     const workspaceName = title ?? defaultWorkspaceTitle(canonical)
@@ -463,15 +486,21 @@ export class WorkspaceRegistry extends Service {
     }).sort((left, right) =>
       right.newestAt - left.newestAt || left.path.localeCompare(right.path))
 
-    const byPath = new Map<string, WorkspaceId>()
+    const byPath = new Map<string, WorkspaceId[]>()
     const accounted = new Map<SessionId, WorkspaceId>()
     for (const [id, record] of table.entries()) {
-      byPath.set(record.path, id)
+      const matches = byPath.get(record.path)
+      if (matches === undefined) byPath.set(record.path, [id])
+      else matches.push(id)
       for (const sessionId of record.sessionIds) accounted.set(sessionId, id)
     }
 
     for (const group of groups) {
-      let id = byPath.get(group.path)
+      const pathMatches = byPath.get(group.path)
+      // Historical sessions cannot be assigned to one of several owner-scoped
+      // registrations without consulting the auth owner, so leave them ungrouped.
+      if (pathMatches !== undefined && pathMatches.length > 1) continue
+      let id = pathMatches?.[0]
       if (id === undefined) {
         const sessionIds = group.headers
           .map(header => header.id)
@@ -487,7 +516,7 @@ export class WorkspaceRegistry extends Service {
           updatedAt: createdAt,
         }
         await table.put(id, record)
-        byPath.set(group.path, id)
+        byPath.set(group.path, [id])
         for (const sessionId of sessionIds) accounted.set(sessionId, id)
         continue
       }
@@ -548,17 +577,8 @@ export class WorkspaceRegistry extends Service {
       )
     }
 
-    const paths = new Map<string, WorkspaceId>()
     const accounted = new Map<SessionId, WorkspaceId>()
     for (const [id, record] of table.entries()) {
-      const pathHolder = paths.get(record.path)
-      if (pathHolder !== undefined) {
-        throw new Error(
-          `workspace domain is inconsistent: path '${record.path}' is claimed `
-          + `by both workspace '${pathHolder}' and workspace '${id}'`,
-        )
-      }
-      paths.set(record.path, id)
       for (const sessionId of record.sessionIds) {
         const holder = accounted.get(sessionId)
         if (holder !== undefined) {

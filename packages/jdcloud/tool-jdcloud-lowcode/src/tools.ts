@@ -16,7 +16,7 @@ import mime from 'mime-types'
 import type {
   LowcodeCapabilitySnapshot,
   LowcodeMenuCapability,
-  LowcodeWritePermission,
+  LowcodePermission,
 } from './current-user.ts'
 import { buildFormData } from './table-schema.ts'
 import type { TableFieldInput } from './table-schema.ts'
@@ -196,6 +196,7 @@ export function registerLowcodeTools(
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
+      requirePermission(menu, 'readData')
       const currentPage = positiveInteger(args.current_page ?? 1, 'current_page')
       const defaultPageSize = Math.min(20, config.maxPageSize)
       const pageSize = positiveInteger(args.page_size ?? defaultPageSize, 'page_size')
@@ -242,6 +243,7 @@ export function registerLowcodeTools(
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
+      requirePermission(menu, 'readData')
       const result = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
         path: '/api/visualdev/form/info',
         method: 'POST',
@@ -534,6 +536,10 @@ async function requireExecutionSnapshot(
       'JDCLOUD_LOWCODE_TENANT_CHANGED',
     )
   }
+  // Low-code data belongs to a separate product and is exposed only to JDCloud system administrators.
+  if (!snapshot.systemAdministrator) {
+    reject('JDCloud low-code tools require systemAdministrator access', 'JDCLOUD_LOWCODE_ADMIN_REQUIRED')
+  }
   return snapshot
 }
 
@@ -553,8 +559,8 @@ async function requireMenu(
   return menu
 }
 
-/** Enforce one JDCloud write grant before any modifying request is sent. */
-function requirePermission(menu: LowcodeMenuCapability, permission: LowcodeWritePermission): void {
+/** Enforce one JDCloud data grant before the matching Host request is sent. */
+function requirePermission(menu: LowcodeMenuCapability, permission: LowcodePermission): void {
   if (menu.agentPermissions.includes(permission)) return
   const notice = permissionNotice(actionForPermission(permission))
   reject(notice.message, notice.code)

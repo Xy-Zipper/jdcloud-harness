@@ -1,4 +1,12 @@
 # Optional Web-profile layer for JDCloud low-code authentication.
+- id: connection
+  config:
+    # JDCloud owns application login, so each browser gets its own opaque
+    # Host session instead of sharing Harness authentication state.
+    browserAuthentication: false
+    browserSession: true
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
+
 - insert:
     - id: jdcloud-auth-controller
       name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'

@@ -7,10 +7,13 @@
  * paths) and self-service configuration advice in customer-visible output.
  */
 
-import type { LowcodeWritePermission } from './current-user.ts'
+import type { LowcodePermission } from './current-user.ts'
 
 /** What the customer is trying to do, in customer vocabulary. */
-export type LowcodeWriteAction = 'create' | 'update' | 'delete'
+export type LowcodeDataAction = 'read' | 'create' | 'update' | 'delete'
+
+/** What the customer is trying to change, in customer vocabulary. */
+export type LowcodeWriteAction = Exclude<LowcodeDataAction, 'read'>
 
 /**
  * One refusal a customer could resolve by asking an administrator, paired with
@@ -27,14 +30,15 @@ export const NOTICE_CODE_PERMISSION_REQUIRED = 'JDCLOUD_LOWCODE_PERMISSION_REQUI
 /** Machine-routable code for a capability snapshot taken before the current turn. */
 export const NOTICE_CODE_SNAPSHOT_REQUIRED = 'JDCLOUD_LOWCODE_SNAPSHOT_REQUIRED'
 
-const ACTION_LABELS: Readonly<Record<LowcodeWriteAction, string>> = {
+const ACTION_LABELS: Readonly<Record<LowcodeDataAction, string>> = {
+  read: '查询',
   create: '新增',
   update: '修改',
   delete: '删除',
 }
 
 /**
- * Build the notice for a write the current account is not authorized to perform.
+ * Build the notice for a data operation the current account is not authorized to perform.
  *
  * Every grant-backed action shares one sentence so the customer sees a single
  * consistent policy rather than a per-operation variant, and the sentence names
@@ -42,10 +46,10 @@ const ACTION_LABELS: Readonly<Record<LowcodeWriteAction, string>> = {
  * vocabulary, not something a customer can act on. The requested wording names
  * the administrator as the actor, because the customer cannot grant it.
  *
- * @param action - the write the customer asked for.
+ * @param action - the data operation the customer asked for.
  * @returns customer-visible text plus the Host-routable code.
  */
-export function permissionNotice(action: LowcodeWriteAction): LowcodeUserNotice {
+export function permissionNotice(action: LowcodeDataAction): LowcodeUserNotice {
   return {
     message: `您当前暂无${ACTION_LABELS[action]}权限，请联系管理人员完成授权后再进行操作。`,
     code: NOTICE_CODE_PERMISSION_REQUIRED,
@@ -70,12 +74,13 @@ export function staleSnapshotNotice(): LowcodeUserNotice {
 }
 
 /**
- * Map one JDCloud write grant to the customer action it authorizes.
- * @param permission - write grant returned by the JDCloud capability snapshot.
+ * Map one JDCloud data grant to the customer action it authorizes.
+ * @param permission - data grant returned by the JDCloud capability snapshot.
  * @returns customer action authorized by the grant.
  */
-export function actionForPermission(permission: LowcodeWritePermission): LowcodeWriteAction {
+export function actionForPermission(permission: LowcodePermission): LowcodeDataAction {
   switch (permission) {
+    case 'readData': return 'read'
     case 'addData': return 'create'
     case 'editData': return 'update'
     case 'deleteData': return 'delete'

@@ -79,8 +79,33 @@ export function apply(ctx: ClientContext): void {
     trigger: '@',
     name: SOURCE,
     showGroupTitle: false,
-    candidates: () => Promise.resolve([]),
-    onPick: () => undefined,
+    candidates: (_session, { query, quoted }) => {
+      const snapshot = menuState.getSnapshot()
+      if (quoted === true || snapshot.phase !== 'ready') return Promise.resolve([])
+      const needle = query.toLocaleLowerCase()
+      return Promise.resolve(snapshot.menus
+        .filter(menu => needle === ''
+          || menu.fullName.toLocaleLowerCase().includes(needle)
+          || menu.path.toLocaleLowerCase().includes(needle))
+        .map(menu => ({
+          name: menu.fullName,
+          description: menu.path,
+          section: t('forms'),
+          value: functionReference(snapshot.corpId, menu).ref,
+        })))
+    },
+    onPick({ candidate }) {
+      if (candidate.value === undefined) return undefined
+      const selected = parseReference(candidate.value, t)
+      return {
+        insert: {
+          source: SOURCE,
+          ref: candidate.value,
+          label: selected.label,
+          clipboardText: `@${selected.label}`,
+        },
+      }
+    },
     codec: {
       clipboardText(ref) {
         return `@${parseReference(ref, t).label}`
@@ -126,7 +151,7 @@ export function apply(ctx: ClientContext): void {
   ctx.on('connection/reset', () => { void refresh() })
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
-      if (String(key) === AUTH_RECORD_KEY) void refresh()
+      if (String(key).startsWith(AUTH_RECORD_KEY)) void refresh()
     })
     void refresh()
     return () => {

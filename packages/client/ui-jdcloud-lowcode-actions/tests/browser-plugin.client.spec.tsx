@@ -54,6 +54,13 @@ const MENUS: readonly JdcloudWritableMenu[] = [
     icon: '/api/file/previewImage/corp-current/receipt',
     agentPermissions: ['addData'],
   },
+  {
+    menuId: 'read-only',
+    fullName: '只读表单',
+    path: '人事管理 / 只读表单',
+    type: 3,
+    agentPermissions: ['readData'],
+  },
 ]
 
 /** Assemble the plugin over controllable Remote and input-source faces. */
@@ -145,6 +152,34 @@ describe('JDCloud low-code action browser plugin', () => {
     expect(b.source()).toBeUndefined()
   })
 
+  it('offers current-tenant forms through @ and inserts the selected tag', async () => {
+    const b = await bench()
+    const source = b.source()
+    if (source === undefined) throw new Error('low-code reference source did not register')
+    const forms = await source.candidates({ sessionId: 'session-1' as SessionId }, {
+      query: '请假', position: 'inline', drilled: false, signal: AbortSignal.timeout(1000),
+    })
+    expect(forms).toEqual([expect.objectContaining({
+      name: '请假申请', description: '人事管理 / 请假申请', section: 'Forms',
+    })])
+    await expect(source.candidates({ sessionId: 'session-1' as SessionId }, {
+      query: '只读', position: 'inline', drilled: false, signal: AbortSignal.timeout(1000),
+    })).resolves.toEqual([expect.objectContaining({
+      name: '只读表单', description: '人事管理 / 只读表单', section: 'Forms',
+    })])
+    const picked = source.onPick({
+      candidate: forms[0]!, session: { sessionId: 'session-1' as SessionId }, position: 'inline', via: 'menu',
+      action: 'pick', span: { start: 0, end: 0, draftRev: 5 },
+    })
+    expect(picked).toMatchObject({ insert: {
+      source: 'jdcloud-lowcode-function', label: '请假申请', clipboardText: '@请假申请',
+    } })
+    await expect(source.candidates({ sessionId: 'session-1' as SessionId }, {
+      query: '', quoted: true, position: 'inline', drilled: false, signal: AbortSignal.timeout(1000),
+    })).resolves.toEqual([])
+    await b.fiber.dispose()
+  })
+
   it('revalidates the selected menu before serializing model-visible context', async () => {
     const b = await bench()
     b.injected.selectMenu(MENUS[0]!, 1)
@@ -174,6 +209,8 @@ describe('JDCloud low-code action browser plugin', () => {
     expect(b.writableMenus).toHaveBeenCalledTimes(2)
     b.emitCredential('jdcloud-auth-controller/login')
     await vi.waitFor(() => { expect(b.writableMenus).toHaveBeenCalledTimes(3) })
+    b.emitCredential('jdcloud-auth-controller/login-browser-session')
+    await vi.waitFor(() => { expect(b.writableMenus).toHaveBeenCalledTimes(4) })
     await b.fiber.dispose()
   })
 

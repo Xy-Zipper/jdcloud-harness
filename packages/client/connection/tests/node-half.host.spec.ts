@@ -336,22 +336,27 @@ describe('connection node half', () => {
     await dispose()
   })
 
-  it('can disable browser authentication without disabling the Host and Origin fence', async () => {
+  it('uses an independent browser identity when Harness authentication is disabled', async () => {
     const { routes, connection, dispose } = await mounted({
       browserAuthentication: false,
       trustedHosts: ['harness.example'],
     })
     try {
       expect(connection.authenticatedUrl('http://harness.example/')).toBe('http://harness.example/')
+      const exchange = fakeResponse()
       expect(connection.authorizeIndex(
         fakeRequest({ host: 'harness.example' }, '/'),
-        fakeResponse().response,
-      )).toBe(true)
-      expect(connection.requestRejection(fakeRequest({ host: 'harness.example' }))).toBeUndefined()
+        exchange.response,
+      )).toBe(false)
+      const cookie = exchange.state.headers?.['set-cookie']?.split(';', 1)[0]
+      expect(cookie).toMatch(/^dsh-user-session=/u)
+      if (cookie === undefined) throw new Error('browser session cookie was not created')
+      expect(connection.requestRejection(fakeRequest({ host: 'harness.example' }))).toBe(401)
+      expect(connection.requestRejection(fakeRequest({ host: 'harness.example', cookie }))).toBeUndefined()
       expect(connection.requestRejection(fakeRequest({ host: 'untrusted.example' }))).toBe(403)
 
       const allowed = fakeResponse()
-      await routes[0]!.handler(fakeRequest({ host: 'harness.example' }), allowed.response)
+      await routes[0]!.handler(fakeRequest({ host: 'harness.example', cookie }), allowed.response)
       expect(allowed.state.status).toBe(404)
     } finally {
       await dispose()

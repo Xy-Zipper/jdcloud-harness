@@ -84,6 +84,25 @@ describe('Session control Inbox projection', () => {
     await iterator.next()
   })
 
+  it('keeps the opening tenant scope for its baseline', async () => {
+    const { ctx, control } = await harness()
+    const scopes: (string | undefined)[] = []
+    ctx.provide('jdcloudAuthController', {
+      currentScopeKey: () => Promise.resolve('tenant-at-open'),
+      owns: (_kind: 'session' | 'workspace', _id: string, scopeKey?: string) => {
+        scopes.push(scopeKey)
+        return Promise.resolve(scopeKey === 'tenant-at-open')
+      },
+    } as never)
+
+    const iterator = control.control(new AbortController().signal)[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: { type: 'baseline', value: { projections: { 'queue-session': expect.anything() } } },
+    })
+    expect(scopes).toEqual(['tenant-at-open'])
+    await iterator.return?.()
+  })
+
   it('derives queue replacements from the completed projection regardless of registration order', async () => {
     const ctx = new Context()
     ownedContexts.add(ctx)

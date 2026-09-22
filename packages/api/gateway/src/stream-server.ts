@@ -19,6 +19,9 @@ export type RemoteStreamOpener = (
 /** Convert an invocation or carrier failure to a stable wire value. */
 export type RemoteStreamFailureMapper = (error: unknown) => RemoteStreamFailure
 
+/** Run one stream operation inside the request context that accepted its socket. */
+export type RemoteStreamRequestRunner = <Value>(operation: () => Value) => Value
+
 const MAX_MISSED_HEARTBEATS = 2
 
 /** Own the no-server WebSocket acceptor and every active logical stream. */
@@ -44,13 +47,19 @@ export class RemoteStreamMuxServer {
    * @param req - authenticated HTTP upgrade request.
    * @param socket - carrier socket transferred to the WebSocket server.
    * @param head - bytes already read after the HTTP upgrade headers.
+   * @param run - request-scoped wrapper retained for each logical stream.
    */
-  handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  handleUpgrade(
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    run: RemoteStreamRequestRunner = operation => operation(),
+  ): void {
     this.server.handleUpgrade(req, socket, head, (websocket) => {
       this.missedHeartbeats.set(websocket, 0)
       websocket.on('pong', () => { this.missedHeartbeats.set(websocket, 0) })
       this.startHeartbeat()
-      const connection = new RemoteStreamMuxConnection(websocket, this.open, this.failure)
+      const connection = new RemoteStreamMuxConnection(websocket, this.open, this.failure, run)
       const done = connection.run()
       this.connections.add(done)
       void done.then(() => { this.connections.delete(done) })
@@ -107,6 +116,7 @@ class RemoteStreamMuxConnection {
     private readonly socket: WebSocket,
     private readonly open: RemoteStreamOpener,
     private readonly failure: RemoteStreamFailureMapper,
+    private readonly requestRunner: RemoteStreamRequestRunner,
   ) {}
 
   async run(): Promise<void> {
@@ -146,7 +156,7 @@ class RemoteStreamMuxConnection {
       done: Promise.resolve(),
     }
     this.streams.set(message.streamId, active)
-    const done = this.pump(message.streamId, message.endpoint, message.payload, active)
+    const done = this.requestRunner(() => this.pump(message.streamId, message.endpoint, message.payload, active))
     active.done = done
     const remove = (): void => { this.streams.delete(message.streamId) }
     void done.then(remove, remove)

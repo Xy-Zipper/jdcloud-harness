@@ -67,7 +67,7 @@ async function startJdcloudServer(): Promise<JdcloudServer> {
     }
     if (request.method === 'GET' && url.pathname === '/api/oauth/currentUser') {
       reply({
-        userInfo: { userName: 'ordinary-user', corpId: 'corp-ordinary' },
+        userInfo: { id: 'ordinary-user-id', userName: 'ordinary-user', corpId: 'corp-ordinary' },
         userPermission: { systemAdministrator: false },
         menuList: [
           { id: 'folder-hr', parentId: '-1', fullName: '人事管理', type: 1 },
@@ -222,6 +222,11 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     await writeComposerDraft(page, input, '')
     await expect.poll(() => chip.count()).toBe(0)
     await page.getByRole('region', { name: '可用的低代码功能' }).waitFor()
+    await writeComposerDraft(page, input, '@请假')
+    const suggestions = page.getByRole('listbox', { name: '触发候选建议' })
+    await suggestions.getByRole('option', { name: /请假申请/ }).click()
+    await expect.poll(() => chip.count()).toBe(1)
+    await expect.poll(() => chip.textContent()).toBe('@请假申请')
 
     const agent = scaffold.ctx.agents.list()[0]
     if (agent === undefined) throw new Error('connected JDCloud workspace did not create an Agent')

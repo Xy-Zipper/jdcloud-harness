@@ -5,15 +5,14 @@
  * model-ordered. Abort or an internal scheduler failure stops replenishment
  * and drains started calls.
  *
- * Abort records synthetic error results for skipped calls so replay stays
- * valid. A terminal scheduler failure preserves already-recorded `tool/call`
- * events without fabricating results.
+ * Abort and scheduler failure record synthetic error results so replay stays
+ * valid even when a call cannot reach an ordinary tool result.
  * @module dsh-agent-loop/tool-calls
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { createToolResultMessage, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
-import type { Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
+import { createToolResultMessage, errorChain, type ToolCallBlock } from '@deepseek-ai/dsh-llm'
+import { TOOL_NOT_STARTED, TOOL_OUTCOME_UNKNOWN, type Session, type SessionSeq, type UserMessage } from '@deepseek-ai/dsh-session'
 import { TOOL_ABORTED_BEFORE_DISPATCH, TOOL_RUNTIME_SCHEDULER, type ToolExecutionInput, type ToolExecutionMode, type ToolExecutionResult, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 
@@ -45,8 +44,8 @@ interface GroupOutcome {
  * the signal still aborted after accepting started-call context through the
  * caller-supplied acceptor (the machine stages it in its next-step inbox for the
  * step boundary). An internal scheduler failure stops new dispatches, drains
- * already-started dispatches, and rejects with the first failure without
- * fabricating tool results.
+ * already-started dispatches, records synthetic results for every unanswered
+ * call, and rejects with the first failure.
  * The committed step's AgentLoop driver boundary supplies the initiating Agent
  * that becomes each explicit {@link ToolExecutionInput.agent}.
  *
@@ -88,9 +87,15 @@ export async function executeToolCalls(
     const first = planned[next]!
     const mode = ctx.tools.executionMode(first.exec).kind
     const group = mode === 'parallel' ? planned.slice(next) : [first]
-    const outcome = await runGroup(
-      ctx, turn, step, group, mode, signal, acceptContext,
-    )
+    let outcome: GroupOutcome
+    try {
+      outcome = await runGroup(ctx, turn, step, group, mode, signal, acceptContext)
+    } catch (error: unknown) {
+      for (const call of planned.slice(next + group.length)) {
+        appendSchedulerFailureToolCall(session, turn, step, call.block, error, false)
+      }
+      throw error
+    }
     next += outcome.consumed
     concluded ||= outcome.concluded
     if (outcome.aborted) {
@@ -116,8 +121,8 @@ function parseArguments(raw: string): unknown {
  * drain and remains for the caller's next barrier. Results and contexts commit
  * in model order. Abort stops starts, drains and commits started calls, accepts
  * their contexts into the owning batch, records results for skipped calls, and
- * returns an aborted outcome. Scheduler failure drains dispatches without
- * committing synthetic recovery results.
+ * returns an aborted outcome. Scheduler failure drains dispatches and records
+ * synthetic results for unanswered calls.
  */
 async function runGroup(
   ctx: Context,
@@ -232,6 +237,15 @@ async function runGroup(
   } catch (error: unknown) {
     schedulerFailure ??= { error }
     await Promise.allSettled(inFlight.values())
+    for (let index = committed; index < started; index++) {
+      // A settled result that never reached the ordered commit has an unknown
+      // outcome, so the next provider request still receives a tool result.
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- every started index has a call and sequence
+      appendSchedulerFailureToolCall(session, turn, step, group[index]!.block, schedulerFailure.error, true, callSeqs[index]!)
+    }
+    for (const call of group.slice(started)) {
+      appendSchedulerFailureToolCall(session, turn, step, call.block, schedulerFailure.error, false)
+    }
     throw schedulerFailure.error
   }
 
@@ -257,6 +271,34 @@ function appendSkippedToolCall(session: Session, turn: number, step: number, blo
       info: { name: 'AbortError', code: TOOL_ABORTED_BEFORE_DISPATCH },
     },
   }, callSeq)
+}
+
+/** Append a provider-valid error result when scheduler failure interrupts a tool batch. */
+function appendSchedulerFailureToolCall(
+  session: Session,
+  turn: number,
+  step: number,
+  block: ToolCallBlock,
+  failure: unknown,
+  started: boolean,
+  callSeq?: SessionSeq,
+): void {
+  const recordedCallSeq = callSeq ?? appendToolCall(session, turn, step, block)
+  const reason = errorChain(failure)
+  const message = started
+    ? `The tool call was interrupted after it started and no result was recorded. Its outcome is unknown. Scheduler failure: ${reason}`
+    : `The tool call was not started because the tool scheduler failed: ${reason}`
+  appendToolResult(session, turn, step, block, {
+    content: [{ type: 'text', text: message }],
+    isError: true,
+    error: {
+      message,
+      info: {
+        name: started ? 'ToolOutcomeUnknownError' : 'ToolNotStartedError',
+        code: started ? TOOL_OUTCOME_UNKNOWN : TOOL_NOT_STARTED,
+      },
+    },
+  }, recordedCallSeq)
 }
 
 /** Append a started call and return the event seq that its result must cite. */

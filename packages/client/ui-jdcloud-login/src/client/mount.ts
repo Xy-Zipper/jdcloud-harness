@@ -57,7 +57,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required after the generated JDCloud Remote namespace is mounted. */
 export const uiInject = [
   'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
-  'sessions', 'uiWorkspace',
+  'sidebarPanels', 'sessions', 'uiWorkspace',
 ]
 
 /** Null occupant that shadows one administrator-only single slot. */
@@ -131,9 +131,16 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   let disposeAccount: (() => void) | undefined
   let disposeAdministratorShadows: (() => void) | undefined
   let disposeTerminalFilter: (() => void) | undefined
+  let disposePluginPanelFilter: (() => void) | undefined
   let disposeNewSessionInitializer: (() => void) | undefined
   let systemAdministrator = false
   const isActive = (): boolean => active
+
+  /** Clear a selected Session before presenting a different JDCloud identity. */
+  const resetIdentityView = (): void => {
+    if (!active) return
+    ctx.uiWorkspace.clearSelection()
+  }
 
   /** Apply the current tenant's administrator-only client controls. */
   const applyAdministratorAccess = (allowed: boolean, initializeNewSessions: boolean): void => {
@@ -143,6 +150,8 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       disposeAdministratorShadows = undefined
       disposeTerminalFilter?.()
       disposeTerminalFilter = undefined
+      disposePluginPanelFilter?.()
+      disposePluginPanelFilter = undefined
       disposeNewSessionInitializer?.()
       disposeNewSessionInitializer = undefined
       return
@@ -154,6 +163,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
     }
     disposeAdministratorShadows ??= installAdministratorControlShadows(ctx)
     disposeTerminalFilter ??= ctx.sidebarRightTabs.registerAvailabilityFilter(kind => kind !== 'terminal')
+    disposePluginPanelFilter ??= ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins')
     if (initializeNewSessions) {
       disposeNewSessionInitializer ??= installOrdinaryUserSessionInitializer(ctx)
     } else {
@@ -185,12 +195,14 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       logout: async () => {
         const result = await ctx.remote.jdcloudAuth.logout()
         if (!result.ok) return { ok: false, error: result.error.message }
+        resetIdentityView()
         applyStatus(result.value)
         return { ok: true }
       },
       switchCorp: async (corpId) => {
         const result = await ctx.remote.jdcloudAuth.switchCorp(corpId)
         if (!result.ok) return { ok: false, error: result.error.message }
+        resetIdentityView()
         applyStatus(result.value)
         return { ok: true }
       },
@@ -228,6 +240,8 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       login: async (request) => {
         const result = await ctx.remote.jdcloudAuth.login(request)
         if (!result.ok) return { ok: false, error: result.error.message }
+        if (!active) return { ok: true }
+        resetIdentityView()
         applyStatus(result.value)
         return { ok: true }
       },
@@ -251,6 +265,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
         if (!result.ok) return { ok: false }
         if (active) {
           window.history.replaceState(null, '', '/')
+          resetIdentityView()
           applyStatus(result.value)
         }
         return { ok: true }
@@ -286,16 +301,21 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }, 'ui-jdcloud-login: administrator command policy')
   ctx.effect(() => {
     disposeTerminalFilter = ctx.sidebarRightTabs.registerAvailabilityFilter(kind => kind !== 'terminal')
+    disposePluginPanelFilter = ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins')
     return () => {
       disposeTerminalFilter?.()
       disposeTerminalFilter = undefined
+      disposePluginPanelFilter?.()
+      disposePluginPanelFilter = undefined
       disposeNewSessionInitializer?.()
       disposeNewSessionInitializer = undefined
     }
   }, 'ui-jdcloud-login: ordinary-user Session policy')
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
-      if (String(key) === AUTH_RECORD_KEY) void refresh()
+      if (!active || !String(key).startsWith(AUTH_RECORD_KEY)) return
+      resetIdentityView()
+      void refresh()
     })
     const transfer = readTransferCredentials()
     if (transfer === undefined) {

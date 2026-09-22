@@ -26,7 +26,7 @@
   config:
     suffix: Your working directory is {{cwd}}.
     prefix: >-
-      You are a coding agent powered by the {{model}} model.
+      You are a coding agent powered by the {{model}} model, running on JDCloud Harness.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

@@ -67,12 +67,15 @@ export class HostConnectionService extends Service implements HostConnectionHand
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
    * @param browserAuth - process token and persistent browser-session owner, or undefined when disabled.
+   * @param browserSession - independent browser identity service, or undefined when not configured.
+   * @param browserSessionRequired - whether requests without that identity are rejected.
    */
   constructor(
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth | undefined,
-    private readonly browserSession: BrowserSessionService | undefined = undefined,
+    private readonly browserSession?: BrowserSessionService,
+    private readonly browserSessionRequired = browserSession !== undefined,
   ) {
     super(ctx, 'connection')
   }
@@ -99,7 +102,9 @@ export class HostConnectionService extends Service implements HostConnectionHand
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
     if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
     if (this.browserAuth !== undefined && !this.browserAuth.isAuthenticated(request)) return 401
-    return this.browserSession === undefined || this.browserSession.accepts(request) ? undefined : 401
+    if (this.browserSessionRequired
+      && (this.browserSession === undefined || !this.browserSession.accepts(request))) return 401
+    return undefined
   }
 
   /** Authenticate an index request, or allow it when browser authentication is disabled. */
@@ -130,15 +135,14 @@ export class HostConnectionService extends Service implements HostConnectionHand
         const pathname = new URL(request.url).pathname
         const route = this.fetchRoutes.get(pathname)
         if (route?.methods.has(request.method) === true) {
-          return this.browserSession?.run(request, () => route.fetch(request)) ?? route.fetch(request)
+          return this.runWithBrowserIdentity(request, () => route.fetch(request))
         }
         const endpoint = endpointFromPath(channel, pathname)
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
           return Promise.resolve(new Response('not found', { status: 404 }))
         }
-        return this.browserSession?.run(request, () => interceptor.fetchHandler.fetch(request))
-          ?? interceptor.fetchHandler.fetch(request)
+        return this.runWithBrowserIdentity(request, () => interceptor.fetchHandler.fetch(request))
       },
     }
   }
@@ -211,6 +215,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
       }
     }, `client-connection: ${channel} rpc interceptor`)
   }
+
+  /** Run an asynchronous transport operation with the request's browser identity. */
+  runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
+    if (this.browserSession === undefined || !this.browserSession.accepts(request)) return operation()
+    return this.browserSession.run(request, operation)
+  }
 }
 
 function rpcFetchHandler(
@@ -252,8 +262,9 @@ function rpcFetchHandler(
       }
 
       try {
-        const result = await (browserSession?.run(request, () => handler(endpoint, message.payload, request.signal))
-          ?? handler(endpoint, message.payload, request.signal))
+        const result = await (browserSession === undefined || !browserSession.accepts(request)
+          ? handler(endpoint, message.payload, request.signal)
+          : browserSession.run(request, () => handler(endpoint, message.payload, request.signal)))
         return fullResponse(message.rpcId, result)
       } catch (error) {
         return new Response(`handler failure: ${String(error)}`, { status: 500 })

@@ -91,7 +91,8 @@ export interface ConnectionConfig {
   recovery?: ConnectionRecoveryConfig
   /** Require the launch-token exchange and signed browser cookie. Default: true. */
   browserAuthentication?: boolean
-  /** Require an independent opaque browser cookie without Harness launch authentication. */
+  /** Require an independent opaque browser cookie in addition to launch authentication,
+   * or by itself when launch authentication is disabled. */
   browserSession?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
@@ -128,6 +129,9 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const recovery = resolveConnectionConfig(config?.recovery)
   const browserAuthentication = config?.browserAuthentication ?? true
   const browserSession = config?.browserSession ?? false
+  // JDCloud deployments disable Harness launch authentication, so they still
+  // need an opaque browser cookie to keep Host state out of process-global keys.
+  const browserSessionEnabled = browserSession || !browserAuthentication
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
@@ -142,7 +146,10 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     browserAuthentication
       ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
       : undefined,
-    browserSession ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays) : undefined,
+    browserSessionEnabled
+      ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays)
+      : undefined,
+    browserSessionEnabled,
   )
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
