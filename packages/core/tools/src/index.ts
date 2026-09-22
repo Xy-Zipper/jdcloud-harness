@@ -13,7 +13,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { AssembleContext, PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
+import type { PromptSection, ToolProviderResult } from '@deepseek-ai/dsh-system-prompt'
 import type { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 // Type-only: makes `ctx.get('approval')` resolve to the ApprovalService
@@ -27,6 +27,13 @@ import type { PtcSdkLanguage } from './ptc.ts'
 import { renderToolsSdk } from './ts-types.ts'
 import type { ToolSdkSchema } from './ts-types.ts'
 import { renderToolsSdkPy } from './py-types.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Tool availability changes supplied by the tool registry. */
+    'tool-registry': { kind: 'tool-registry' }
+  }
+}
 
 /**
  * Language → SDK-section renderer. The registry looks up the loaded
@@ -216,18 +223,6 @@ export interface ToolOutputDefinition {
 export interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
-  /**
-   * Pure per-assembly projection of the description and parameter schema sent
-   * to the model. The execution schema remains {@link parameters}; a projected
-   * schema may only remove or narrow accepted arguments. Diagnostics that call
-   * {@link ToolRuntime.schemas} do not apply this request-specific projection.
-   * @param context - the current model-request assembly context.
-   * @returns model-facing field replacements, or an empty object to keep both fields.
-   */
-  modelSchema?(context: AssembleContext): {
-    readonly description?: string
-    readonly parameters?: Record<string, unknown>
-  }
   /**
    * Run one accepted call and return only its canonical lossless-JSON value.
    * Async work must observe or forward `exec.signal` and settle only after its
@@ -452,10 +447,9 @@ export type ScheduledToolDispatch =
   | { kind: 'final-result'; result: ToolExecutionResult }
 
 /**
- * Stable-keyed scheduler view that keeps pre/post policy ordered while
- * overlapping dispatch. A string key keeps the view available when the
- * profile loads duplicate package instances. Ordinary callers use
- * {@link ToolRuntime.execute}; this is not a plugin extension point.
+ * Symbol-keyed scheduler view that keeps pre/post policy ordered while
+ * overlapping dispatch. Ordinary callers use {@link ToolRuntime.execute};
+ * this is not a plugin extension point.
  * @internal
  */
 export interface ToolRuntimeScheduler {
@@ -473,7 +467,7 @@ export interface ToolRuntimeScheduler {
  * Scheduler entry point omitted from the generated named service API.
  * @internal
  */
-export const TOOL_RUNTIME_SCHEDULER = '@deepseek-ai/dsh-tools.scheduler' as const
+export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol('@deepseek-ai/dsh-tools.scheduler')
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'
@@ -844,7 +838,7 @@ export class ToolRuntime extends Service {
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
-    ctx.systemPrompt.tools(context => this.wireSchemas(context))
+    ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
     if (this.defaultMode !== 'native') {
       ctx.systemPrompt.section(this.collapseSection())
       ctx.systemPrompt.section(this.sdkSection())
@@ -901,7 +895,7 @@ export class ToolRuntime extends Service {
         const render = SDK_RENDERERS[runtime.language]
         /* v8 ignore next -- requirePtcRuntime rejects an unknown language before this runs. */
         if (render === undefined) throw new Error(`dsh-tools: no SDK renderer for ${runtime.language}`)
-        return render(this.sdkSchemas(context))
+        return render(this.sdkSchemas(context.scope))
       },
     }
   }
@@ -998,12 +992,11 @@ export class ToolRuntime extends Service {
    * Build one scope's wire schemas and names for prompt-order validation.
    * Restrictions do not make known tools invalid, but a mode collapse does.
    */
-  private wireSchemas(context: AssembleContext): ToolProviderResult {
-    const { scope } = context
+  private wireSchemas(scope?: ScopeKey): ToolProviderResult {
     const view = this.view(scope)
     const mode = this.modeFor(scope)
     if (mode === 'native') {
-      const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false, context))
+      const schemas = [...view.visible.values()].map(definition => this.schemaOf(definition, false))
       return { schemas, knownNames: [...view.knownNames] }
     }
     // Validate the runtime language BEFORE projecting schemas: schemaOf reads
@@ -1256,8 +1249,7 @@ export class ToolRuntime extends Service {
   }
 
   /** Project visible callable tools onto the generated PTC mode SDK contract. */
-  private sdkSchemas(context: AssembleContext): ToolSdkSchema[] {
-    const { scope } = context
+  private sdkSchemas(scope?: ScopeKey): ToolSdkSchema[] {
     return [...this.view(scope).visible.values()]
       .filter(definition => definition.name !== RUN_CODE_NAME)
       .map((definition): ToolSdkSchema => {
@@ -1267,27 +1259,24 @@ export class ToolRuntime extends Service {
           throw new Error(`tool "${definition.name}" output schema must be lossless JSON before SDK projection`)
         }
         return {
-          ...this.schemaOf(definition, true, context),
+          ...this.schemaOf(definition, true),
           output,
         }
       })
   }
 
   /** Project one definition onto the model-facing schema fields. */
-  private schemaOf(definition: ToolDefinition, detachParameters: boolean, context?: AssembleContext): ToolSchema {
-    const { name } = definition
-    const projected = context === undefined ? undefined : definition.modelSchema?.(context)
-    const description = projected?.description ?? definition.description
-    const parameters = projected?.parameters ?? definition.parameters
+  private schemaOf(definition: ToolDefinition, detachParameters: boolean): ToolSchema {
+    const { name, description, parameters, deferLoading } = definition
     const detached = detachParameters ? snapshotJsonValue(parameters) : parameters
     if (detached === undefined) {
       throw new Error(`tool "${name}" parameters must be lossless JSON before schema projection`)
     }
-    if (projected?.parameters !== undefined) assertSupportedJsonSchema(detached)
     return {
       name,
       description,
       parameters: detached,
+      ...deferLoading === true ? { deferLoading } : {},
     }
   }
 

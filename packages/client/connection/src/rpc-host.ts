@@ -2,6 +2,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import {
   RpcId,
   type ClientRequest,
@@ -13,7 +14,9 @@ import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import type { BrowserSessionService } from './browser-session.ts'
+import { OperatorPeer } from './operator-peer.ts'
 import type {
+  PeerAdmission,
   ConnectionIndexRequest,
   ConnectionIndexResponse,
   ConnectionFetchRoute,
@@ -59,6 +62,8 @@ declare module '@deepseek-ai/cordis' {
 
 /** Host Connection service whose channel registrations belong to the caller fiber. */
 export class HostConnectionService extends Service implements HostConnectionHandle {
+  /** The operator Peer every admitted request speaks for. */
+  readonly operator: PeerScope
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
 
@@ -66,9 +71,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
    * Provide the Host half over the active HTTP server.
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by the Host/Origin fence.
-   * @param browserAuth - process token and persistent browser-session owner, or undefined when disabled.
-   * @param browserSession - independent browser identity service, or undefined when not configured.
-   * @param browserSessionRequired - whether requests without that identity are rejected.
+   * @param browserAuth - process token and persistent browser-session owner.
    */
   constructor(
     ctx: Context,
@@ -78,6 +81,8 @@ export class HostConnectionService extends Service implements HostConnectionHand
     private readonly browserSessionRequired = browserSession !== undefined,
   ) {
     super(ctx, 'connection')
+    this.operator = new OperatorPeer(ctx)
+    ctx.effect(() => () => this.operator.dispose(), 'client-connection: operator Peer')
   }
 
   /** Generic channel registry scoped to the Context reading this service. */
@@ -98,24 +103,36 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
   }
 
-  /** Apply the Host/Origin fence, then browser authentication when configured. */
+  /** Apply the configured Host/Origin fence, then the enabled browser authentication. */
   requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection {
     if (!isTrustedApiRequest(request, this.trustedHosts)) return 403
     if (this.browserAuth !== undefined && !this.browserAuth.isAuthenticated(request)) return 401
-    if (this.browserSessionRequired
-      && (this.browserSession === undefined || !this.browserSession.accepts(request))) return 401
+    if (this.browserSessionRequired && (this.browserSession === undefined || !this.browserSession.accepts(request))) return 401
     return undefined
   }
 
-  /** Authenticate an index request, or allow it when browser authentication is disabled. */
+  /** A request that passes the fence and authentication speaks for the operator. */
+  admit(request: ConnectionTrustRequest): PeerAdmission {
+    const rejection = this.requestRejection(request)
+    return rejection === undefined ? { peer: this.operator } : { rejection }
+  }
+
+  /** Authenticate an index request through the process-token exchange or cookie. */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     if (this.browserAuth !== undefined) return this.browserAuth.authorizeIndex(request, response)
     return this.browserSession?.authorizeIndex(request, response) ?? true
   }
 
-  /** Add this process's launch token when browser authentication is enabled. */
+  /** Add this process's launch token to the clean application URL. */
   authenticatedUrl(baseUrl: string): string {
     return this.browserAuth?.authenticatedUrl(baseUrl) ?? new URL('/', baseUrl).href
+  }
+
+  /** Run one admitted operation with its optional JDCloud browser identity. */
+  runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
+    return this.browserSession === undefined || !this.browserSession.accepts(request)
+      ? operation()
+      : this.browserSession.run(request, operation)
   }
 
   /**
@@ -134,15 +151,13 @@ export class HostConnectionService extends Service implements HostConnectionHand
       fetch: (request) => {
         const pathname = new URL(request.url).pathname
         const route = this.fetchRoutes.get(pathname)
-        if (route?.methods.has(request.method) === true) {
-          return this.runWithBrowserIdentity(request, () => route.fetch(request))
-        }
+        if (route?.methods.has(request.method) === true) return route.fetch(request)
         const endpoint = endpointFromPath(channel, pathname)
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
           return Promise.resolve(new Response('not found', { status: 404 }))
         }
-        return this.runWithBrowserIdentity(request, () => interceptor.fetchHandler.fetch(request))
+        return interceptor.fetchHandler.fetch(request)
       },
     }
   }
@@ -172,15 +187,15 @@ export class HostConnectionService extends Service implements HostConnectionHand
     handler: ConnectionRpcHandler,
   ): () => Promise<void> {
     assertChannel(channel)
-    const fetchHandler = rpcFetchHandler(channel, handler, this.browserSession)
+    const fetchHandler = rpcFetchHandler(channel, handler, this.operator, this.browserSession)
     const route: WebRoute = {
       kind: 'prefix',
       path: channel,
       handler: async (req, res) => {
-        const rejection = this.requestRejection(req)
-        if (rejection !== undefined) {
-          res.writeHead(rejection)
-          res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+        const admission = this.admit(req)
+        if ('rejection' in admission) {
+          res.writeHead(admission.rejection)
+          res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
           return
         }
         await bridge(req, res, fetchHandler)
@@ -203,7 +218,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
     const interceptor: ConnectionRpcInterceptor = {
       matches,
-      fetchHandler: rpcFetchHandler(channel, handler, this.browserSession),
+      fetchHandler: rpcFetchHandler(channel, handler, this.operator, this.browserSession),
     }
     return owner.effect(() => {
       if (this.interceptors.has(channel)) {
@@ -215,17 +230,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
       }
     }, `client-connection: ${channel} rpc interceptor`)
   }
-
-  /** Run an asynchronous transport operation with the request's browser identity. */
-  runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
-    if (this.browserSession === undefined || !this.browserSession.accepts(request)) return operation()
-    return this.browserSession.run(request, operation)
-  }
 }
 
 function rpcFetchHandler(
   channel: string,
   handler: ConnectionRpcHandler,
+  peer: PeerScope,
   browserSession?: BrowserSessionService,
 ): ConnectionFetchHandler {
   return {
@@ -263,8 +273,8 @@ function rpcFetchHandler(
 
       try {
         const result = await (browserSession === undefined || !browserSession.accepts(request)
-          ? handler(endpoint, message.payload, request.signal)
-          : browserSession.run(request, () => handler(endpoint, message.payload, request.signal)))
+          ? handler(endpoint, message.payload, request.signal, peer)
+          : browserSession.run(request, () => handler(endpoint, message.payload, request.signal, peer)))
         return fullResponse(message.rpcId, result)
       } catch (error) {
         return new Response(`handler failure: ${String(error)}`, { status: 500 })
@@ -298,9 +308,23 @@ function errorResponse(rpcId: RpcIdType, error: ConnectionRpcFailure): Response 
   return fullResponse(rpcId, { ok: false, error })
 }
 
-function fullResponse(rpcId: RpcIdType, result: ConnectionRpcResult<unknown>): Response {
-  const body: ConnectionServerResponse = { type: 'server-response', rpcId, result }
-  return Response.json(body)
+function fullResponse(rpcId: RpcIdType, result: Awaited<ReturnType<ConnectionRpcHandler>>): Response {
+  if (!result.ok) {
+    const body: ConnectionServerResponse = { type: 'server-response', rpcId, result }
+    return Response.json(body)
+  }
+  const { attachments, ...success } = result
+  const body: ConnectionServerResponse = { type: 'server-response', rpcId, result: success }
+  if (attachments === undefined || attachments.length === 0) return Response.json(body)
+  const parts = new FormData()
+  const attachmentMetadata = attachments.map((attachment, index) => {
+    const part = `bytes-${index}`
+    // FileSystem bytes may have SharedArrayBuffer backing, which BlobPart excludes.
+    parts.set(part, new Blob([new Uint8Array(attachment.bytes)]))
+    return { path: [...attachment.path], codec: 'bytes' as const, part }
+  })
+  parts.set('metadata', JSON.stringify({ ...body, attachments: attachmentMetadata }))
+  return new Response(parts)
 }
 
 function assertChannel(channel: string): void {

@@ -34,8 +34,7 @@ dist-exe/
 # Docker bind-mounted runtime data contains credentials, sessions, and attachments.
 /data/
 apps/desktop/.desktop-build/
-python/sdk-runtime/src/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-*
-python/sdk-runtime/src/deepseek_harness_runtime/runtime/node/
+python/sdk-runtime/src/deepseek_harness_runtime/runtime/
 python/**/__pycache__/
 python/**/.pytest_cache/
 packages/**/__pycache__/

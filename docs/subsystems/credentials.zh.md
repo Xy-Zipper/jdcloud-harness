@@ -53,6 +53,12 @@ interface CredentialInfo {
 
 `credentials/reference-updated (ref)` 在提供方管理的来源发生已提交变更后发出——`set`、`unset` 或在存储中观察到的外部编辑。进程环境自身的变化不可观测，永不发出事件。消费方不需要该事件（它们按操作重新解析）；它服务于配置界面刷新「已配置」徽标。
 
+## 内嵌 Platform 凭证
+
+PlatformSession 是 getPlatformSession 返回的仅限 Host 快照：origin 指定所配置的 Platform 签发来源，token 包含其已存账号凭证。退登账号返回 null；签发来源不匹配时失败。原生使用方负责在凭证变化时使文档失效。账号控制器 RPC、AccountView 和 AccountDetails 均不包含此快照。
+
+AccountDetails.balance 将充值钱包投影为 value、赠送钱包投影为 bonusWallets，分别保留币种和十进制余额字符串。查询失败不包含钱包数组。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -253,94 +259,75 @@ Host service backing the generated `ctx.remote.credentials` namespace. It carrie
 
 Source: [`packages/api/settings-controller/src/credentials.ts`](../../packages/api/settings-controller/src/credentials.ts)
 
-<a id="ctxjdcloudauthcontroller--jdcloudauthcontroller"></a>
+<a id="ctxdeepseekaccount--deepseekaccount-abstract-seam"></a>
 
-### `ctx.jdcloudAuthController` — `JdcloudAuthController`
+### `ctx.deepseekAccount` — `DeepSeekAccount` (abstract seam)
 
-Store credentials, expose login commands, and validate each browser prompt.
+Account operations; only Host consumers can obtain a request credential.
 
 ```ts cordis-catalog
 /**
- * Read redacted stored authentication state.
- * @returns Current redacted authentication state.
+ * Read stored-account presence and the latest login attempt.
+ * @returns a snapshot without credentials or PKCE secrets.
  */
-@Remote async status(): Promise<JdcloudAuthStatus>
+abstract getState(): Promise<AccountView>
 
 /**
- * Read the current tenant's forms and workflows carrying a supported data-write permission.
- * @param signal - Caller cancellation combined with the configured request timeout.
- * @returns Browser-safe menu identities, labels, paths, types, icons, and write permissions.
+ * Query Platform profile independently of wallet balances.
+ * @returns profile outcome, or null if signed out or the grant changed during the query.
  */
-@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>
+abstract getProfile(): Promise<AccountDetails['profile'] | null>
 
 /**
- * Authenticate, validate the resulting token, and commit it to Host credentials.
- * @param request - Service address and password credentials.
- * @param signal - Caller cancellation for login and validation requests.
- * @returns Redacted authenticated state.
+ * Query Platform recharge and bonus wallet balances independently of profile data.
+ * @returns balance outcome, or null if signed out or the grant changed during the query.
  */
-@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+abstract getBalance(): Promise<AccountDetails['balance'] | null>
 
 /**
- * Replace the stored login after synchronizing a transferred token to its reported current tenant.
- * @param request - Absolute HTTP(S) service address and raw transfer token.
- * @param signal - Caller cancellation for tenant synchronization and current-user validation.
- * @returns Redacted authenticated state.
+ * Join an active attempt or start browser authorization.
+ * @param locale - active UI language for a new attempt; joining retains its original language.
+ * @param callbackOrigin - browser-accessible loopback HTTP origin, including any SSH local port.
+ * @param loginSource - initiating UI, used to return from a failed exchange.
+ * @returns the initial snapshot without waiting for browser approval.
  */
-@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+abstract startSignIn(locale: string, callbackOrigin: string, loginSource: 'web' | 'desktop'): Promise<AccountView>
 
 /**
- * Select another tenant for the stored JDCloud login.
- * @param corpId - Tenant identity from the current authenticated status.
- * @param signal - Caller cancellation for the switch and confirmation requests.
- * @returns Redacted authenticated state with the confirmed current tenant.
+ * Cancel only the named attempt; committing attempts settle before returning.
+ * @param id - attempt identity from this Host.
+ * @returns state after cancellation or an already-started commit.
  */
-@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>
+abstract cancelSignIn(id: SignInAttemptId): Promise<AccountView>
 
 /**
- * Delete the stored JDCloud token.
- * @returns Redacted unauthenticated state.
+ * Remove the local grant while retaining API keys and tasks; the provider revokes it in the background.
+ * @returns the signed-out state after local removal; remote failures never restore the grant.
  */
-@Remote async logout(): Promise<JdcloudAuthStatus>
+abstract signOut(): Promise<AccountView>
 
 /**
- * Send one Host-only JDCloud API request with the stored login.
- * @param request - Fixed API path, method, and one optional JSON or multipart-file body.
- * @param signal - Caller cancellation combined with the configured request timeout.
- * @returns JDCloud response data without exposing the stored token.
+ * Subscribe to snapshots including a complete initial state.
+ * @param signal - subscription lifetime; ending it never cancels login.
+ * @returns complete snapshots as account state changes.
  */
-async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>
+abstract watch(signal: AbortSignal): AsyncIterable<AccountView>
 
 /**
- * Return the deterministic tenant-user owner key for the current browser login.
- * @returns The owner key, or undefined when no user login is active.
+ * Resolve a credential only for the inference origin allowed by the provider.
+ * @param url - actual request destination or API base URL.
+ * @returns stored token, or undefined for other origins or a signed-out account.
  */
-async currentScopeKey(): Promise<string | undefined>
+abstract resolveToken(url: string): Promise<string | undefined>
 
 /**
- * Return whether the current login has system-administrator terminal access.
- * @returns Whether the current login is a system administrator.
+ * Read credentials for the configured Platform origin, bound to their issuing environment.
+ * @returns a Host-only snapshot, or null while signed out.
  */
-async isCurrentAdministrator(): Promise<boolean>
-
-/**
- * Claim a newly-created Session or Workspace for the current tenant-user.
- * @param kind - The durable resource kind.
- * @param id - The durable resource identifier.
- */
-async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
-
-/**
- * Check whether a durable Session or Workspace belongs to the current tenant-user.
- * @param kind - The durable resource kind.
- * @param id - The durable resource identifier.
- * @param expectedScopeKey - Optional owner key to check instead of the current login.
- * @returns Whether the resource belongs to the selected tenant-user owner.
- */
-async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+abstract getPlatformSession(): Promise<PlatformSession | null>
 ```
 
-Source: [`packages/api/jdcloud-auth-controller/src/index.ts`](../../packages/api/jdcloud-auth-controller/src/index.ts)
+Source: [`packages/credentials/deepseek-account/src/index.ts`](../../packages/credentials/deepseek-account/src/index.ts)
 
 <a id="authorization-events"></a>
 
@@ -416,3 +403,5 @@ Committed change to a provider-managed credential source: a `set`, an `unset`, o
 
 Source: [`packages/credentials/credentials/src/types.ts`](../../packages/credentials/credentials/src/types.ts)
 <!-- END GENERATED cordis-surface -->
+
+账号服务定义提供 getState、getProfile、getBalance、startSignIn、cancelSignIn、signOut、watch 及仅限 Host 的 resolveToken 和 getPlatformSession。平台提供者使用 AuthorizationFlow 和私有 GrantRecord 实现这些操作。AccountView 区分本地存在与服务器验证；尝试 ID 将取消绑定到单次本地流程。参见[账号包](../../packages/credentials/deepseek-account/README.zh.md)。

@@ -54,7 +54,7 @@ Agents declared in the config start automatically when the plugin loads. Each en
 | `agents[].sessionId` | — | Exact identity: first use creates, a remount resumes materialized history |
 | `agents[].resumeSessionId` | — | Load this persisted session instead of creating one; mutually exclusive with `sessionId` |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-loop) is the exhaustive source for every accepted field. The adapter validates the effective reasoning effort and the loop records it in the request header. `maxParallelToolCalls` is also the whole `agent-loop` settings section, so a user layer over this entry caps the next tool group without a restart.
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-loop) lists every accepted field. `maxParallelToolCalls` is a volatile Config field sampled for the next tool group; `agents` remains startup configuration.
 
 ### Create or resume agents programmatically
 
@@ -122,7 +122,9 @@ Prompt admission uses the actual `prepareCall()` result, not the preceding `requ
 
 ### Failure and cancellation
 
-Final adapter selection, dispatch, and iteration failures arrive as terminal finishes and enter `agent/request-error`; a handling listener returns `{ kind: 'retry' }` without calling `next()`, while an unhandled failure is terminal. Middleware, result-processing, tool, and other extension failures remain thrown and close the turn directly — plugin failure ends the turn, not the loop. Undispatched model tool calls after cancellation receive synthetic `tool/call` plus `ABORTED_BEFORE_DISPATCH` result pairs. A scheduler failure also records error results for every unanswered call, preserving a provider-valid history while the turn reports the original failure. The [explicit-cancellation decision](../../../.agents/notes/implemented/architecture/2026-07-16-explicit-turn-cancellation.md) owns the signal lifecycle.
+`turn/end` declares `TurnEndCancelCause`; cancellation records a fresh `AgentCancelCause` there, retaining the caller's `kind` and the hook's `reason` text. The live `AbortSignal.reason` remains the caller's object, which a transport may extend — Node's fetch assigns a `stack` onto it — so the copy keeps that trace out of the log and keeps the ending appendable.
+
+Final adapter selection, dispatch, and iteration failures arrive as terminal finishes and enter `agent/request-error`; a handling listener returns `{ kind: 'retry' }` without calling `next()`, while an unhandled failure is terminal. Middleware, result-processing, tool, and other extension failures remain thrown and close the turn directly — plugin failure ends the turn, not the loop. Undispatched model tool calls after cancellation receive synthetic `tool/call` plus `ABORTED_BEFORE_DISPATCH` result pairs. The [explicit-cancellation decision](../../../.agents/notes/implemented/architecture/2026-07-16-explicit-turn-cancellation.md) owns the signal lifecycle.
 
 </details>
 
