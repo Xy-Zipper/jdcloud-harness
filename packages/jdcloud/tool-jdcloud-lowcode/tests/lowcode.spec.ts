@@ -471,15 +471,51 @@ describe('table schema generation', () => {
 })
 
 describe('prompt refresh and plugin lifecycle', () => {
-  it('does not refresh JDCloud capabilities for an ordinary browser prompt', async () => {
+  it('loads current-user menus for a browser query without an @ selection', async () => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['readData']),
+      response: request => request.path === '/api/visualdev/form/list'
+        ? { pagination: { total: 3 }, list: [] }
+        : { ok: true },
+    })
+    const message = createUserMessage({
+      content: [{ type: 'text', text: '现在有多少打卡记录' }],
+      source: { kind: 'user', rpcId: 'query-rpc' } as never,
+    })
+
+    const entered = await mounted.preStepWith([message])
+    expect(entered[1]?.source).toMatchObject({ kind: 'jdcloud-lowcode', form: 'snapshot' })
+    expect(entered[1]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'text', text: expect.stringContaining('"menuId":"form-clock"') }),
+    ]))
+    expect(mounted.requests[0]).toEqual({ path: '/api/oauth/currentUser', method: 'GET' })
+
+    const result = await mounted.call('jdcloud_lowcode_query', { menu_id: 'form-clock' })
+    expect(result.isError).toBe(false)
+    expect(resultText(result)).toContain('"total":3')
+  })
+
+  it('does not load current-user menus for a non-browser message', async () => {
     const mounted = await mountLowcode()
     const message = createUserMessage({
-      content: [{ type: 'text', text: '帮我总结这段文字' }],
-      source: { kind: 'user', rpcId: 'ordinary-rpc' } as never,
+      content: [{ type: 'text', text: '现在有多少打卡记录' }],
+      source: { kind: 'tool-registry' },
     })
 
     await expect(mounted.preStepWith([message])).resolves.toEqual([message])
     expect(mounted.requests).toEqual([])
+  })
+
+  it('does not issue a write refusal for unrelated browser text without a selected function', async () => {
+    const mounted = await mountLowcode({ currentUser: currentUser([]) })
+    const entered = await mounted.preStepWith([createUserMessage({
+      content: [{ type: 'text', text: '帮我修改这段文字' }],
+      source: { kind: 'user', rpcId: 'ordinary-rpc' } as never,
+    })])
+
+    expect(entered[1]?.source).toMatchObject({ kind: 'jdcloud-lowcode', form: 'snapshot' })
+    expect(entered.filter(message => message.source.kind === 'jdcloud-lowcode'
+      && message.source.form === 'notice')).toEqual([])
   })
 
   it('injects one safe snapshot for a browser prompt and does not refresh on the tool continuation', async () => {
@@ -609,6 +645,8 @@ describe('prompt refresh and plugin lifecycle', () => {
     const assembled = await mounted.ctx.systemPrompt.assemble()
     expect(assembled.sections.map(section => section.name)).toContain('tool:jdcloud-lowcode')
     const guidance = assembled.sections.find(section => section.name === 'tool:jdcloud-lowcode')?.text ?? ''
+    expect(guidance).toContain('Do not require an @ selection')
+    expect(guidance).toContain('ask the user to select the function with @')
     expect(guidance).toContain('dsh-reference:jdcloud-lowcode-function/<menuId>')
     expect(guidance).toContain('follow each described writeType exactly')
     expect(guidance).toContain('multi-select fields, including userSelect, depSelect, and roleSelect')

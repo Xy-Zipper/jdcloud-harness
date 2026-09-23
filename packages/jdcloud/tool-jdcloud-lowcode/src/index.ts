@@ -55,10 +55,12 @@ export const Config: z<Config> = z.object({
 
 const SYSTEM_PROMPT =
   'The JDCloud data integration is a restricted administrator feature. Never advertise it, mention it in a greeting, or list it as a general product capability. '
-  + 'Use its tools only when the current capability snapshot says systemAdministrator is true and the user explicitly selected a JDCloud function in the prompt. '
+  + 'Use its tools only when the current capability snapshot says systemAdministrator is true and the user asks to inspect or change JDCloud low-code data or tables. '
   + 'A plugin-sourced capability snapshot identifies the current tenant and the only form/workflow menu ids available for this browser prompt. '
   + 'A user-message marker in the form `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` means the user selected that exact menu id from the snapshot for this request. '
-  + 'Never invent a menu_id: select it from that snapshot, and call jdcloud_lowcode_describe when field codes are not already known. '
+  + 'Do not require an @ selection: first look for the requested function in the current-user capability snapshot. If the user supplied an @ marker, use that exact function; otherwise use its menuId only when the request uniquely matches one function. '
+  + 'If the requested function is absent or ambiguous, ask the user to select the function with @; if it lacks the required permission, explain that the operation is unavailable instead. Never guess a menu_id or claim the data was queried. '
+  + 'Call jdcloud_lowcode_describe when field codes are not already known. '
   + 'For create and update data, follow each described writeType exactly. Single-select fields use one id string, while multi-select fields, including userSelect, depSelect, and roleSelect, use arrays of id strings; expanded read objects such as `{id,fullName}` are not writable values. '
   + 'For create requests, infer every field value that is directly supported by facts in the user message or its attachments—not only titles, but also values such as amounts, dates, purposes, descriptions, and nested detail fields. Mark each inferred value in the confirmation instead of asking for information that the evidence already supplies. '
   + 'The snapshot currentMember contains Host-resolved current-user, department, and role selections. When a field semantically refers to the current applicant, requester, submitter, reimbursement claimant, employee, or their department or role, use those exact selections before treating those fields as missing, and never infer identity from unrelated records. Never invent opaque ids, other person or department selections, or attachment upload values that the available evidence does not determine. '
@@ -94,7 +96,7 @@ export function apply(ctx: Context, config: Config): void {
     next,
   ): Promise<PreStepDecision> => {
     const decision = await next()
-    if (decision.kind === 'reject' || signal.aborted || !decision.messages.some(isLowcodePrompt)) return decision
+    if (decision.kind === 'reject' || signal.aborted || !decision.messages.some(isBrowserPrompt)) return decision
     snapshots.delete(agent)
     const currentUserData = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
       path: '/api/oauth/currentUser',
@@ -195,7 +197,7 @@ function deniedWriteNotices(
 ): readonly { readonly text: string }[] {
   const requested = new Set<LowcodeWriteAction>()
   for (const message of messages) {
-    if (!isLowcodePrompt(message)) continue
+    if (!isSelectedLowcodePrompt(message)) continue
     for (const block of message.content) {
       if (block.type !== 'text') continue
       for (const action of impliedWriteActions(block.text)) requested.add(action)
@@ -262,10 +264,16 @@ function resolveConfig(config: Config): LowcodeToolConfig {
 }
 
 /** Whether one entering message is a Host-admitted browser prompt. */
-function isLowcodePrompt(message: UserMessage): boolean {
+function isBrowserPrompt(message: UserMessage): boolean {
   const source = message.source
   if (source.kind !== 'user' || !('rpcId' in source)) return false
-  return message.content.some(block => block.type === 'text' && block.text.includes('dsh-reference:jdcloud-lowcode-function/'))
+  return true
+}
+
+/** Whether a browser prompt explicitly selected a JDCloud function for write notices. */
+function isSelectedLowcodePrompt(message: UserMessage): boolean {
+  return isBrowserPrompt(message)
+    && message.content.some(block => block.type === 'text' && block.text.includes('dsh-reference:jdcloud-lowcode-function/'))
 }
 
 export type { LowcodeCapabilitySnapshot, LowcodeMenuCapability } from './current-user.ts'

@@ -52,7 +52,9 @@ kind: "package-reference"
 
 ### 每个 Prompt 的能力快照
 
-认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，此插件调用 `/api/oauth/currentUser`；只有系统管理员才会继续请求成员名称和部门数据、筛选菜单并发布能力快照。普通账号不会获得低代码快照。管理员快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值、带完整路径的全部 `tenantDepartments` 选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料和全部认证值都会被排除。
+认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，即使没有使用 `@` 选择，此插件也会调用 `/api/oauth/currentUser`；只有系统管理员才会继续请求成员名称和部门数据、筛选菜单并发布能力快照。普通账号不会获得低代码快照。管理员快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值、带完整路径的全部 `tenantDepartments` 选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料和全部认证值都会被排除。
+
+未使用 `@` 的低代码请求可直接使用快照中唯一匹配的功能（查询要求 `readData`）。如果找不到或有多个候选项，模型才会要求用户用 `@` 选择，而不会猜测菜单 id 或声称已经查询数据。缺少权限时说明无法操作，而不是要求重新选择。显式 `@` 选择仍可准确指定功能。
 
 快照属于当前开放轮次。工具续步复用该快照，不会再次请求 current-user、成员名称或部门选择器；后续浏览器 Prompt 会为对应轮次替换快照。每次工具操作前，Host 本地认证状态仍必须指向快照所属租户。菜单标签和每个上游值都会标为不可信数据，而不是指令。
 

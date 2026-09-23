@@ -247,9 +247,9 @@ describe('JDCloud login through a real Loader composition', () => {
               departmentId: ['department-1'],
               roleId: [],
             },
-            userPermission: { systemAdministrator: false },
+            userPermission: { systemAdministrator: true },
             menuList: [
-              { id: 'form-1', parentId: '-1', fullName: '打卡记录', type: 3 },
+              { id: 'form-1', parentId: '-1', fullName: '打卡记录', type: 3, agentPermissions: ['readData'] },
               { id: 'board-1', parentId: '-1', fullName: '打卡看板', type: 6 },
             ],
           }))
@@ -293,7 +293,7 @@ describe('JDCloud login through a real Loader composition', () => {
       signal,
     }, admission)
     const prompt = createUserMessage({
-      content: [{ type: 'text', text: '查询这周打卡数据 @[打卡记录](dsh-reference:jdcloud-lowcode-function/form-1)' }],
+      content: [{ type: 'text', text: '查询这周打卡数据' }],
       source: { kind: 'user', rpcId: 'browser-prompt-1' } as never,
     })
     const decision = await agentEvents(context, agent).waterfall(
@@ -314,7 +314,7 @@ describe('JDCloud login through a real Loader composition', () => {
       kind: 'enter',
       messages: [
         { source: { kind: 'user', rpcId: 'browser-prompt-1' } },
-        { source: { kind: 'plugin', plugin: 'tool-jdcloud-lowcode', form: 'snapshot' } },
+        { source: { kind: 'jdcloud-lowcode', plugin: 'tool-jdcloud-lowcode', form: 'snapshot' } },
       ],
     })
     expect(JSON.stringify(decision)).toContain('form-1')
