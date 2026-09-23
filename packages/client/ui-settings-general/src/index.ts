@@ -1,4 +1,24 @@
-/** Host loader entry for the browser implementation exported from `./client`. */
+/** Welcome acknowledgement stored in the plugin configuration. */
+import type {} from '@deepseek-ai/dsh-settings'
 
-/** Host plugin body — the Settings shell has no Host-side behavior. */
-export function apply(): void {}
+import type { Volatile, Context } from '@deepseek-ai/cordis'
+
+import z from '@deepseek-ai/schemastery'
+
+/** Runtime preferences projected to the browser. */
+export interface Config {
+  /** Last acknowledged welcome notice version. */
+  welcomeNoticeVersion: Volatile<string | undefined>
+}
+
+/** Live welcome preference. */
+export const Config = z.object({
+  welcomeNoticeVersion: z.string().volatile(),
+})
+
+/** The browser consumes the configuration form projection.
+ * @param ctx Plugin context used for optional settings presentation.
+ */
+export function apply(ctx: Context): void {
+  ctx.inject(['settings'], (child) => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
+}

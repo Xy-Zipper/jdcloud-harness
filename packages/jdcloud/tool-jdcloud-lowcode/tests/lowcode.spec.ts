@@ -506,7 +506,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     ])
     expect(entered).toHaveLength(2)
     expect(entered[1]?.source).toMatchObject({
-      kind: 'plugin',
+      kind: 'jdcloud-lowcode',
       plugin: 'tool-jdcloud-lowcode',
       form: 'snapshot',
     })
@@ -526,7 +526,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
     const entered = await mounted.prompt('把没有简历的熊香玉的删了，另外修改一下廖文杰的部门')
 
-    const notices = entered.filter(message => message.source.kind === 'plugin'
+    const notices = entered.filter(message => message.source.kind === 'jdcloud-lowcode'
       && message.source.form === 'notice')
       .map(message => message.content.map(block => block.type === 'text' ? block.text : '').join(''))
     expect(notices).toContain('您当前暂无删除权限，请联系管理人员完成授权后再进行操作。')
@@ -538,7 +538,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode({ currentUser: currentUser(['addData', 'editData', 'deleteData']) })
     const entered = await mounted.prompt('删除熊香玉并修改廖文杰的部门')
 
-    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+    expect(entered.filter(message => message.source.kind === 'jdcloud-lowcode' && message.source.form === 'notice'))
       .toEqual([])
   })
 
@@ -546,7 +546,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode({ currentUser: currentUser([]) })
     const entered = await mounted.prompt('查看 @[删除记录表](dsh-reference:jdcloud-lowcode-function/form-clock) 的数据')
 
-    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+    expect(entered.filter(message => message.source.kind === 'jdcloud-lowcode' && message.source.form === 'notice'))
       .toEqual([])
   })
 
@@ -554,10 +554,10 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode({ currentUser: currentUser([]) })
     const entered = await mounted.preStepWith([createUserMessage({
       content: [{ type: 'text', text: '删除这条记录' }],
-      source: { kind: 'plugin', plugin: 'other-plugin' } as never,
+      source: { kind: 'tool-registry' },
     })], 1, 1)
 
-    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+    expect(entered.filter(message => message.source.kind === 'jdcloud-lowcode' && message.source.form === 'notice'))
       .toEqual([])
   })
 
@@ -573,11 +573,11 @@ describe('prompt refresh and plugin lifecycle', () => {
       }),
       createUserMessage({
         content: [{ type: 'text', text: '新增一条打卡记录' }],
-        source: { kind: 'plugin', plugin: 'other-plugin' } as never,
+        source: { kind: 'tool-registry' },
       }),
     ], 1, 1)
 
-    const notices = entered.filter(message => message.source.kind === 'plugin'
+    const notices = entered.filter(message => message.source.kind === 'jdcloud-lowcode'
       && message.source.form === 'notice')
       .map(message => message.content.map(block => block.type === 'text' ? block.text : '').join(''))
     expect(notices).toEqual(['您当前暂无删除权限，请联系管理人员完成授权后再进行操作。'])
@@ -590,7 +590,7 @@ describe('prompt refresh and plugin lifecycle', () => {
       source: { kind: 'user', rpcId: 'rpc-image-only' } as never,
     })], 1, 1)
 
-    expect(entered.filter(message => message.source.kind === 'plugin' && message.source.form === 'notice'))
+    expect(entered.filter(message => message.source.kind === 'jdcloud-lowcode' && message.source.form === 'notice'))
       .toEqual([])
   })
 

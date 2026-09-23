@@ -28,12 +28,9 @@ interface ToolDefinition extends ToolSchema {
   /** Mandatory canonical output declaration. */
   readonly output: ToolOutputDefinition
   /**
-   * Pure per-assembly projection of the description and parameter schema sent
-   * to the model. The execution schema remains {@link parameters}; a projected
-   * schema may only remove or narrow accepted arguments. Diagnostics that call
-   * {@link ToolRuntime.schemas} do not apply this request-specific projection.
-   * @param context - the current model-request assembly context.
-   * @returns model-facing field replacements, or an empty object to keep both fields.
+   * Project request-specific model fields without changing execution validation.
+   * @param context - current model-request assembly context.
+   * @returns model-facing field replacements.
    */
   modelSchema?(context: AssembleContext): {
     readonly description?: string

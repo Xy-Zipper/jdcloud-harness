@@ -290,3 +290,50 @@ export function providerUsable(row: ProviderRow): boolean {
   if (row.apiKeyEnv === undefined) return true
   return row.credential?.configured === true
 }
+
+/** First-run onboarding readiness derived only from the shared Models join. */
+export type OnboardingReadiness =
+  | { kind: 'loading' }
+  | { kind: 'adapter-absent' }
+  | { kind: 'provider-ready' }
+  | { kind: 'credential-missing' }
+  | {
+    kind: 'unavailable'
+    reason:
+      | 'load-failed'
+      | 'provider-inactive'
+      | 'credentials-unavailable'
+      | 'settings-read-only'
+      | 'credential-read-only'
+  }
+
+/**
+ * Project first-run readiness from the provider/settings/credential join used
+ * by the Models page. The step exists to leave the user with a model to talk
+ * to, so ANY usable provider ends it; only when none exists does the official
+ * DeepSeek route decide whether prompting can help.
+ * @param state - current shared Models join snapshot.
+ * @returns the onboarding state without reading a parallel fact source.
+ */
+export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadiness {
+  if ((state.status === 'idle' || state.status === 'loading') && state.rows.length === 0) {
+    return { kind: 'loading' }
+  }
+  if (state.status === 'error') {
+    return { kind: 'unavailable', reason: 'load-failed' }
+  }
+  if (state.rows.some(providerUsable)) return { kind: 'provider-ready' }
+  const row = state.rows.find(candidate =>
+    candidate.entry.provider === 'deepseek-official'
+    && candidate.entry.settingsNs === 'llm-deepseek'
+    && candidate.entry.settingsPath.length === 0)
+  if (row === undefined) return { kind: 'adapter-absent' }
+  if (!row.entry.active) return { kind: 'unavailable', reason: 'provider-inactive' }
+  // An active route past the usable gate names a credential reference with no stored value.
+  if (state.credentialError !== null || row.credential === undefined) {
+    return { kind: 'unavailable', reason: 'credentials-unavailable' }
+  }
+  if (!state.writable) return { kind: 'unavailable', reason: 'settings-read-only' }
+  if (!row.credential.writable) return { kind: 'unavailable', reason: 'credential-read-only' }
+  return { kind: 'credential-missing' }
+}

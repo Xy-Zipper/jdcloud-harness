@@ -48,7 +48,7 @@ The limits below bound list requests and complete model-visible successful resul
 | `maxPageSize` | `100` | Largest `page_size` accepted by `jdcloud_lowcode_query`; omitted calls request up to 20 rows |
 | `maxOutputBytes` | `65,536` | Maximum UTF-8 bytes in the complete successful tool-result string; when space permits, it contains JSON or a truncation notice and preview |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-jdcloud-lowcode) is the exhaustive source for accepted fields and their JSDoc.
+The generated [configuration catalog](../../../docs/config-catalog.md) is the exhaustive source for accepted fields and their JSDoc.
 
 ### Per-prompt capability snapshot
 
@@ -130,7 +130,7 @@ Read these pages when the package-level contract is not enough. They move from t
 
 #### What the model sees
 
-Each admitted browser prompt gains a plugin-sourced user message headed `JDCloud low-code capabilities for this browser prompt.` Its JSON contains `tenant`, `systemAdministrator`, `currentMember`, `tenantDepartments`, and `functions`. `currentMember.user`, `currentMember.department`, and `currentMember.role` contain exact selection arrays resolved from the current account. `tenantDepartments` contains every department returned by the current tenant with `id`, `fullName`, and complete `path`; each function carries only `menuId`, `fullName`, `path`, `type`, and recognized `agentPermissions`. The message explicitly labels every name and value as untrusted data.
+Each admitted browser prompt gains a user message with `source.kind: jdcloud-lowcode` headed `JDCloud low-code capabilities for this browser prompt.` Its JSON contains `tenant`, `systemAdministrator`, `currentMember`, `tenantDepartments`, and `functions`. `currentMember.user`, `currentMember.department`, and `currentMember.role` contain exact selection arrays resolved from the current account. `tenantDepartments` contains every department returned by the current tenant with `id`, `fullName`, and complete `path`; each function carries only `menuId`, `fullName`, `path`, `type`, and recognized `agentPermissions`. The message explicitly labels every name and value as untrusted data.
 
 #### Token effect
 

@@ -5,7 +5,7 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type { JdcloudAuthStatus } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import {
-  IconChevronDownOutline14, IconUserOutline16, Menu, type MenuEntry,
+  IconChevronDownOutlineRegular, IconUserOutlineRegular, Menu, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { NS } from './locales.ts'
 import css from './AccountSeat.module.css'
@@ -99,12 +99,12 @@ export function AccountSeat({ wide, status, logout, switchCorp, t }: JdcloudAcco
   return (
     <div className={css.root}>
       <Menu
-        className={css.menu as string}
+        className={css.menu}
         open={open}
         onClose={() => { setOpen(false) }}
         items={items}
         footer={footer}
-        viewportClassName={css.tenantViewport as string}
+        listClassName={css.tenantViewport}
         selectedId={`${CORP_ID_PREFIX}${status.corpId}`}
         selection="fill"
         onSelect={onSelect}
@@ -119,14 +119,14 @@ export function AccountSeat({ wide, status, logout, switchCorp, t }: JdcloudAcco
             aria-label={t('accountAria', { username: status.username, corpName: status.corpName })}
             onClick={() => { setOpen(value => !value) }}
           >
-            <span className={css.icon} aria-hidden="true"><IconUserOutline16 size={wide ? 18 : 20} /></span>
+            <span className={css.icon} aria-hidden="true"><IconUserOutlineRegular size={wide ? 18 : 20} /></span>
             {wide && (
               <>
                 <span className={css.identity}>
                   <span className={css.username} data-testid="jdcloud-sidebar-user-name">{status.username}</span>
                   <span className={css.corpName} data-testid="jdcloud-sidebar-corp-name">{status.corpName}</span>
                 </span>
-                <IconChevronDownOutline14 className={open ? css.chevronOpen : css.chevron} />
+                <IconChevronDownOutlineRegular className={open ? css.chevronOpen : css.chevron} />
               </>
             )}
           </button>

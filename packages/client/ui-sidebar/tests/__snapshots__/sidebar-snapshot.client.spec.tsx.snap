@@ -34,6 +34,14 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
         />
       </button>
     </div>
+    <div
+      class="accountArea"
+    >
+      <div
+        data-slot="sidebar.account"
+        style="display: contents;"
+      />
+    </div>
     <button
       aria-label="New session"
       class="newSession"
@@ -133,7 +141,7 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
                 <span
                   class="localBuildTitle"
                 >
-                  DSH Local Build
+                  JDCloud Harness
                 </span>
                 <span
                   class="buildVersion"
@@ -162,6 +170,14 @@ exports[`sidebar shell snapshots > renders Windows caption controls in expanded 
           xmlns="http://www.w3.org/2000/svg"
         />
       </button>
+    </div>
+    <div
+      class="accountArea"
+    >
+      <div
+        data-slot="sidebar.account"
+        style="display: contents;"
+      />
     </div>
     <button
       aria-label="New session"

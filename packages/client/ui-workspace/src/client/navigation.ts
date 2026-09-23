@@ -30,10 +30,18 @@ interface MainSelection {
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
   /**
+   * Register preparation before a blank Session is returned for navigation.
+   * @param initializer - preparation for a new-conversation Session.
+   * @returns disposer that stops preparing later Sessions.
+   */
+  registerNewSessionInitializer(initializer: (sessionId: SessionId) => Promise<void>): () => void
+  /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param target - known Session identity or durable direct-parent subagent address to display.
    */
   openSession(target: SessionTarget): void
+  /** Clear the selected Session when the active identity changes. */
+  clearSelection(): void
   /**
    * Connect a Workspace and open its Session unless a later navigation supersedes it.
    * @param workspaceId - target Workspace.
@@ -126,6 +134,7 @@ export class DirectoryBrowseError extends Error {
 /** Implements Workspace archive and directory UI operations. */
 class UiWorkspaceService extends Service implements UiWorkspace {
   private readonly connecting = new Map<WorkspaceId, Promise<SessionId>>()
+  private readonly newSessionInitializers = new Set<(sessionId: SessionId) => Promise<void>>()
   private readonly lifetime = new AbortController()
   private readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
@@ -161,6 +170,12 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }, 'ui-workspace: Workspace navigation policy')
   }
 
+  /** Register a reversible new-conversation preparation step. */
+  registerNewSessionInitializer(initializer: (sessionId: SessionId) => Promise<void>): () => void {
+    this.newSessionInitializers.add(initializer)
+    return () => { this.newSessionInitializers.delete(initializer) }
+  }
+
   async connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId> {
     const workspace = this.workspaces.list.getSnapshot().items
       .find(item => item.workspaceId === workspaceId)
@@ -171,6 +186,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     if (inflight !== undefined) return inflight
 
     const attempt = this.reuseOrCreateBlank(workspace)
+      .then(async (sessionId) => {
+        await this.initializeNewSession(sessionId)
+        return sessionId
+      })
       .finally(() => { this.connecting.delete(workspaceId) })
     this.connecting.set(workspaceId, attempt)
     return attempt
@@ -197,8 +216,24 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
   }
 
+  /** Prepare a retained Session before exposing it to navigation. */
+  private async initializeNewSession(sessionId: SessionId): Promise<void> {
+    if (this.newSessionInitializers.size === 0) return
+    await this.sessions.using(
+      sessionId,
+      { source: 'workspaceOperation' },
+      async () => {
+        for (const initializer of this.newSessionInitializers) await initializer(sessionId)
+      },
+    )
+  }
+
   openSession(target: SessionTarget): void {
     this.replaceMain(target, this.lifetime.signal, 'reveal')
+  }
+
+  clearSelection(): void {
+    this.clearMain()
   }
 
   async openWorkspace(workspaceId: WorkspaceId, beforeOpen?: (sessionId: SessionId) => void): Promise<void> {

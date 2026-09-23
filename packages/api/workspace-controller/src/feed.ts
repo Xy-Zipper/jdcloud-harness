@@ -107,7 +107,7 @@ export class WorkspaceFeed {
     scopeKey: string | undefined,
   ): Promise<WorkspaceBaseline> {
     if (owner === undefined) return this.baseline()
-    if (scopeKey === undefined) return { items: [], archivedSessionIds: [] }
+    if (scopeKey === undefined) return { items: [], archivedSessionIds: [], pinnedSessionIds: [] }
     const items = []
     for (const workspace of this.ctx.workspaceRegistry.list()) {
       if (await owner.owns('workspace', String(workspace.id), scopeKey)) items.push(workspaceView(workspace))
@@ -116,7 +116,15 @@ export class WorkspaceFeed {
     for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
       if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(String(sessionId))
     }
-    return { items, archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'] }
+    const pinnedSessionIds: WorkspaceBaseline['pinnedSessionIds'][number][] = []
+    for (const sessionId of this.ctx.workspaceRegistry.pinnedSessionIds) {
+      if (await owner.owns('session', String(sessionId), scopeKey)) pinnedSessionIds.push(sessionId)
+    }
+    return {
+      items,
+      archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'],
+      pinnedSessionIds,
+    }
   }
 
   private changed(change: DomainChanged): void {
@@ -203,6 +211,13 @@ class WorkspaceFollower {
             if (await this.owner.owns('session', String(id), this.scopeKey)) archivedSessionIds.push(id)
           }
           frame = { type: 'archived', archivedSessionIds }
+        }
+        if (frame.type === 'pinned') {
+          const pinnedSessionIds = []
+          for (const id of frame.pinnedSessionIds) {
+            if (await this.owner.owns('session', String(id), this.scopeKey)) pinnedSessionIds.push(id)
+          }
+          frame = { type: 'pinned', pinnedSessionIds }
         }
       }
       /* oxlint-disable-next-line no-unnecessary-condition -- close() may run while queued ownership checks await. */

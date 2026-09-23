@@ -162,7 +162,7 @@ describe('Menu', () => {
         align="end"
         side="top"
         className="x"
-        viewportClassName="viewport-x"
+        listClassName="viewport-x"
         anchor={<span>trigger</span>}
         items={items}
         selectedId="a"
@@ -172,7 +172,7 @@ describe('Menu', () => {
     expect((container.firstElementChild as HTMLElement).classList.contains('x')).toBe(true)
     const menu = screen.getByRole('menu')
     expect(menu.className).toMatch(/sideTop|alignEnd/)
-    expect(menu.firstElementChild?.classList.contains('viewport-x')).toBe(true)
+    expect(menu.classList.contains('viewport-x')).toBe(true)
     const selected = screen.getByRole('menuitem', { name: 'Alpha' })
     expect(selected.querySelector('svg')).not.toBeNull()
     const other = screen.getByRole('menuitem', { name: 'Beta' })

@@ -31,7 +31,7 @@ export function attachmentErrorText(
   limits?: ImageAttachmentLimits,
 ): string {
   switch (reason) {
-    // case 'MODEL_DOES_NOT_SUPPORT_IMAGES': return t('image.modelUnsupported')
+    case 'MODEL_DOES_NOT_SUPPORT_IMAGES': return t('image.modelUnsupported')
     // A prompt cited a file the Host has no staged upload for (expired
     // process, foreign id): solvable by re-adding the file.
     case 'FILE_NOT_STAGED': return t('file.notStaged')

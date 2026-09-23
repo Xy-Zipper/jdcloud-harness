@@ -1,13 +1,15 @@
 /** JDCloud bundle rows must activate through the real Cordis Loader. */
 
+import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import Include from '@deepseek-ai/cordis-plugin-include'
+import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
+import * as yaml from 'js-yaml'
 import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
 import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
 import { createUserMessage } from '../../../llm/llm/src/index.ts'
@@ -141,6 +143,22 @@ function runningAgent(context: Context): Agent {
 }
 
 describe('JDCloud login through a real Loader composition', () => {
+  it('turns off first-run notices and credentials without removing the Models settings plugin', () => {
+    const web = yaml.load(
+      readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8'),
+      { schema: entryListSchema },
+    ) as PatchOptions[]
+    const jdcloud = yaml.load(
+      readFileSync(join(import.meta.dirname, '../cordis.patch.yml'), 'utf8'),
+      { schema: entryListSchema },
+    ) as PatchOptions[]
+    const rows = applyEntryPatches([], [...web, ...jdcloud], () => {})
+    expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-settings-models',
+      config: { welcomeNotice: false, credentialOnboarding: false },
+    })
+  })
+
   it('activates the foundation services, Host controller, low-code tools, and login UI node half', async () => {
     const context = await bootComposition()
 

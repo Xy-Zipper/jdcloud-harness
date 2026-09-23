@@ -10,7 +10,11 @@ export class SidebarPanelRuntime extends Service {
     super(ctx, 'sidebarPanels')
   }
 
-  /** Register one reversible panel visibility policy. */
+  /**
+   * Register one reversible panel visibility policy.
+   * @param filter - Panel availability predicate.
+   * @returns Disposer for the policy.
+   */
   registerAvailabilityFilter(filter: (id: MainPanelId) => boolean): () => void {
     const dispose = this.ctx.effect(() => {
       this.filters.add(filter)
@@ -23,12 +27,20 @@ export class SidebarPanelRuntime extends Service {
     return () => { void dispose() }
   }
 
-  /** Return whether every active policy allows a panel. */
+  /**
+   * Return whether every active policy allows a panel.
+   * @param id - Panel to check.
+   * @returns Whether the panel is available.
+   */
   isAvailable(id: MainPanelId): boolean {
     return [...this.filters].every(filter => filter(id))
   }
 
-  /** Observe policy changes so the sidebar projection stays current. */
+  /**
+   * Observe policy changes so the sidebar projection stays current.
+   * @param listener - Callback invoked after a policy changes.
+   * @returns Disposer for the callback.
+   */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }

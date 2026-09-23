@@ -692,7 +692,7 @@ describe('tool-call scheduler: failure quiescence', () => {
       .map(event => event.data.message.source.callId))
       .toEqual([ToolCallId('c1'), ToolCallId('c2'), ToolCallId('c3')])
     const toolResults = agent.session.deriveMessages()
-      .flatMap(message => message.content.filter(block => block.type === 'tool-result'))
+      .filter(message => message.role === 'tool')
     expect(toolResults.map(block => block.toolCallId))
       .toEqual([ToolCallId('c1'), ToolCallId('c2'), ToolCallId('c3')])
   })

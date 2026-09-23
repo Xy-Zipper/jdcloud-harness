@@ -607,7 +607,7 @@ function sessionAttachments(agent: Agent): SessionAttachment[] {
   return [...attachments.values()]
 }
 
-/** Collect user attachments recursively without accepting a model-invented reference. */
+/** Collect durable user attachments without accepting a model-invented reference. */
 function collectAttachments(
   blocks: readonly ContentBlock[],
   attachments: Map<string, SessionAttachment>,
@@ -618,9 +618,6 @@ function collectAttachments(
     }
     if (block.type === 'file') {
       attachments.set(String(block.attachment.attachmentId), { type: 'file', attachment: block.attachment })
-    }
-    if (block.type === 'tool-result') {
-      collectAttachments(block.content, attachments)
     }
   }
 }

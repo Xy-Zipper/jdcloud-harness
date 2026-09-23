@@ -64,7 +64,10 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/credentials/deepseek-account': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
   'packages/credentials/deepseek-account-platform': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
   'packages/api/account-controller': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
+  'packages/api/jdcloud-auth-controller': { kind: 'none', reason: 'Prompt admission rejects unauthenticated requests before Session delivery and adds no model context.' },
   'packages/client/ui-settings-account': { kind: 'none', reason: 'Account authorization registers no model context or tools; credentials affect HTTP authentication only.' },
+  'packages/client/ui-jdcloud-login': { kind: 'none', reason: 'Browser-side authentication presentation adds no model context or tools.' },
+  'packages/bundle/jdcloud-login': { kind: 'indirect', reason: 'The bundle delegates model-visible references, capability snapshots, and tools to its inserted packages.' },
 
   'packages/attachment/attachment': { kind: 'indirect', reason: 'The storage seam delegates model request rendering to provider adapters.' },
   'packages/attachment/attachment-local': { kind: 'indirect', reason: 'The local backend delegates model request rendering to provider adapters.' },

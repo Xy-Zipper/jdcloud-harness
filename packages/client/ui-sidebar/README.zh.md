@@ -38,6 +38,7 @@ dsh Web 客户端的侧边栏让用户识别当前构建、查看可选的已认
 ### 全局面板入口
 
 插件在 root 作用域的 `sidebar.panellist` list 中注册图标组件，提供 `id`、可选 `order`，以及字符串或 locale-aware 的 `label`。同一个 id 寻址布局中 root 作用域 `main` keyed slot 的组件；选择不存在的主面板条目会抛错，并保留当前选中态。标签提供普通可见文字、无障碍名称和折叠提示。每一行通过 `usePanelInfo` 读取自己的选中态；DOM 焦点移到搜索框或目录选择器时，显示的面板及其列表项选中态不变。没有注册项时，列表及其间距均不渲染。产品随附的组合不注册示例面板。
+插件可以注册可撤销的 `sidebarPanels.registerAvailabilityFilter` 策略，在不移除 slot 注册的情况下隐藏面板入口；策略变化时列表会更新。
 
 ### 折叠行为
 

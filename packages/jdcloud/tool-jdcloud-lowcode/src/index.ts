@@ -5,7 +5,7 @@ import z from '@deepseek-ai/schemastery'
 import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-jdcloud-auth-controller'
 import { createUserMessage, HarnessError } from '@deepseek-ai/dsh-llm'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import {
   parseCurrentMemberLookup,
@@ -22,6 +22,13 @@ import type { LowcodeWriteAction } from './user-notice.ts'
 
 /** Cordis plugin name used by Loader diagnostics and durable context attribution. */
 export const name = 'tool-jdcloud-lowcode'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** JDCloud low-code capability context and Host-enforced notices. */
+    'jdcloud-lowcode': { kind: 'jdcloud-lowcode'; plugin: string } & ContextFormed
+  }
+}
 
 /** Host services required by prompt refresh, attachment upload, and tool authorization. */
 export const inject = ['agents', 'attachments', 'jdcloudAuthController', 'sessionProjections', 'systemPrompt', 'tools']
@@ -147,7 +154,7 @@ export function apply(ctx: Context, config: Config): void {
         createUserMessage({
           content: [{ type: 'text', text }],
           source: {
-            kind: 'plugin',
+            kind: 'jdcloud-lowcode',
             plugin: name,
             form: 'snapshot',
             sections: [{ name: 'jdcloud-lowcode-capabilities', text }],
@@ -156,7 +163,7 @@ export function apply(ctx: Context, config: Config): void {
         ...denied.map(notice => createUserMessage({
           content: [{ type: 'text', text: notice.text }],
           source: {
-            kind: 'plugin',
+            kind: 'jdcloud-lowcode',
             plugin: name,
             form: 'notice',
             summary: notice.text,

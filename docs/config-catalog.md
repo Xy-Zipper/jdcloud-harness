@@ -196,6 +196,24 @@ export interface Config {
 
 Source: [`packages/api/gateway/src/index.ts:144`](../packages/api/gateway/src/index.ts)
 
+<a id="deepseek-aidsh-api-jdcloud-auth-controller"></a>
+
+## `@deepseek-ai/dsh-api-jdcloud-auth-controller`
+
+Requires: `credentials`
+
+```ts config-catalog
+/** JDCloud authentication controller configuration. */
+export interface Config {
+  /** Service address shown before the user has saved a login. */
+  readonly defaultBaseUrl?: string
+  /** Network deadline for login and prompt validation requests. */
+  readonly requestTimeoutMs?: number
+}
+```
+
+Source: [`packages/api/jdcloud-auth-controller/src/index.ts:62`](../packages/api/jdcloud-auth-controller/src/index.ts)
+
 <a id="deepseek-aidsh-api-job-controller"></a>
 
 ## `@deepseek-ai/dsh-api-job-controller`
@@ -333,7 +351,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/api/workspace-files/src/index.ts:70`](../packages/api/workspace-files/src/index.ts)
+Source: [`packages/api/workspace-files/src/index.ts:74`](../packages/api/workspace-files/src/index.ts)
 
 <a id="deepseek-aidsh-attachment-local"></a>
 
@@ -430,6 +448,11 @@ Requires: `credentials`
 export interface ConnectionConfig {
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
+  /** Require the launch-token exchange and signed browser cookie. Default: true. */
+  browserAuthentication?: boolean
+  /** Require an independent opaque browser cookie in addition to launch authentication,
+   * or by itself when launch authentication is disabled. */
+  browserSession?: boolean
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -463,7 +486,7 @@ export interface ConnectionRecoveryConfig {
 }
 ```
 
-Source: [`packages/client/connection/src/index.ts:92`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:94`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -506,6 +529,8 @@ Source: [`packages/client/ui-settings-account/src/contact-config.ts:5`](../packa
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /** Show the versioned internal-testing notice before credential onboarding. */
+  welcomeNotice: boolean
 }
 ```
 
@@ -3146,7 +3171,7 @@ Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packa
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
 export interface Config {
-  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
+  /** Include the fixed JDCloud Harness identity before the deployment persona (default true). */
   includeHarnessIdentity?: boolean
   /** Include dynamic runtime-context snapshots in model history (default true). */
   includeRuntimeContext?: boolean
@@ -3391,6 +3416,24 @@ export interface Config {
 ```
 
 Source: [`packages/goal/tool-goal/src/index.ts:32`](../packages/goal/tool-goal/src/index.ts)
+
+<a id="deepseek-aidsh-tool-jdcloud-lowcode"></a>
+
+## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
+
+Requires: `agents` · `attachments` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
+
+```ts config-catalog
+/** Deployment-owned JDCloud result limits. */
+export interface Config {
+  /** Maximum rows accepted by one list query. Defaults to 100. */
+  readonly maxPageSize?: number
+  /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
+  readonly maxOutputBytes?: number
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:43`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
@@ -3808,7 +3851,7 @@ export interface Config {
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:663`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:672`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -4107,6 +4150,8 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-directory-picker-native` ([`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-goal` ([`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-jdcloud-login` — requires `webServer` ([`packages/client/ui-jdcloud-login/src/index.ts`](../packages/client/ui-jdcloud-login/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions` ([`packages/client/ui-jdcloud-lowcode-actions/src/index.ts`](../packages/client/ui-jdcloud-lowcode-actions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
@@ -4158,6 +4203,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
+- `@deepseek-ai/dsh-jdcloud-login` ([`packages/bundle/jdcloud-login/src/index.ts`](../packages/bundle/jdcloud-login/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
 - `@deepseek-ai/dsh-mcp-resources` — requires `tools` ([`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts))

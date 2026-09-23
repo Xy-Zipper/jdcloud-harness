@@ -153,7 +153,14 @@ class FakeSessions implements ISessions {
     return reference
   })
   readonly subagentAddress = vi.fn<ISessions['subagentAddress']>()
-  declare readonly using: ISessions['using']
+  readonly using: ISessions['using'] = async (target, options, operation) => {
+    const reference = this.retain(target, options)
+    try {
+      return await operation(reference)
+    } finally {
+      reference.release()
+    }
+  }
   declare readonly retainInfo: ISessions['retainInfo']
   declare readonly searchResultLimit: ISessions['searchResultLimit']
   declare readonly refresh: ISessions['refresh']
@@ -307,6 +314,37 @@ function bench(options: BenchOptions = {}) {
 }
 
 describe('UiWorkspaceService', () => {
+  it('prepares a reused blank before navigation and stops preparing after disposal', async () => {
+    const blank = summary('blank', { blank: true, cwd: '/w/a' })
+    const b = bench({
+      workspaces: workspaceState([workspace('a', [blank.id])]),
+      sessions: sessionState([blank], 'pending'),
+    })
+    const initializer = vi.fn(async () => {})
+    const dispose = b.uiWorkspace.registerNewSessionInitializer(initializer)
+
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(blank.id)
+    expect(initializer).toHaveBeenCalledExactlyOnceWith(blank.id)
+    expect(b.sessions.retained[0]?.reference.sessionId).toBe(blank.id)
+    expect(b.sessions.retained[0]?.release).toHaveBeenCalledOnce()
+
+    dispose()
+    await b.uiWorkspace.connectWorkspace(wid('a'))
+    expect(initializer).toHaveBeenCalledOnce()
+  })
+
+  it('does not open a Session when its registered preparation fails', async () => {
+    const b = bench({
+      workspaces: workspaceState([workspace('a')]),
+      sessions: sessionState([], 'pending'),
+    })
+    const failure = new Error('preparation failed')
+    b.uiWorkspace.registerNewSessionInitializer(async () => { throw failure })
+    await expect(b.uiWorkspace.openWorkspace(wid('a'))).rejects.toBe(failure)
+    expect(b.sessions.retain).not.toHaveBeenCalledWith(sid('created-a'), { source: 'mainView' })
+    expect(b.sessions.retained[0]?.release).toHaveBeenCalledOnce()
+  })
+
   it.each([
     ['zh', '默认工作区', '默认工作区'],
     ['en', 'Default workspace', 'Default workspace'],

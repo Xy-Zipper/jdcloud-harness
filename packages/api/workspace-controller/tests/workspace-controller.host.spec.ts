@@ -371,6 +371,31 @@ describe('WorkspaceController follow', () => {
     }
   })
 
+  it('limits pinned Session baselines and increments to the opening tenant', async () => {
+    const { ctx, root } = await harness()
+    const owned = ctx.sessions.create(SessionId('owned-pin'), { meta: { cwd: root } })
+    const foreign = ctx.sessions.create(SessionId('foreign-pin'), { meta: { cwd: root } })
+    await ctx.workspaceRegistry.pinSession(owned.id)
+    await ctx.workspaceRegistry.pinSession(foreign.id)
+    ctx.provide('jdcloudAuthController', {
+      currentScopeKey: () => Promise.resolve('tenant-at-open'),
+      owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(id === owned.id),
+    } as never)
+
+    const abort = new AbortController()
+    const iterator = new WorkspaceFeed(ctx).follow(abort.signal)[Symbol.asyncIterator]()
+    try {
+      await expect(nextFrame(iterator)).resolves.toMatchObject({
+        type: 'baseline', value: { pinnedSessionIds: [owned.id] },
+      })
+      await ctx.workspaceRegistry.unpinSession(owned.id)
+      await expect(nextFrame(iterator)).resolves.toEqual({ type: 'pinned', pinnedSessionIds: [] })
+    } finally {
+      abort.abort()
+      await iterator.return?.()
+    }
+  })
+
   it('starts with a complete baseline and emits committed increments in domain order', async () => {
     const { controller, ctx, root } = await harness()
     const abort = new AbortController()

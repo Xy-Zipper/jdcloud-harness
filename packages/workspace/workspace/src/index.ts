@@ -30,6 +30,12 @@ export { realpathNormalize } from './paths.ts'
 /** Identifies one workspace record (see `src/types.ts` for the brand rationale). */
 export type WorkspaceId = WorkspaceIdBrand
 
+/** Options controlling registration of a canonical directory path. */
+export interface WorkspaceCreateOptions {
+  /** Permit another registration when an owner already has the same path. */
+  readonly allowDuplicatePath?: boolean
+}
+
 /**
  * Brand a string as a {@link WorkspaceId}.
  * @param id - Raw workspace id string.
@@ -221,11 +227,12 @@ export class WorkspaceRegistry extends Service {
    * Create or reuse a workspace for an existing directory. The fully qualified
    * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
    * non-directory path rejects. Repeated calls for the same canonical path
-   * return the existing entity without changing its title.
+   * return the existing entity without changing its title, unless duplicate registration is requested.
    * A newly created workspace is prepended to the durable registry order.
    * Different canonical paths may share a display title.
    * @param path - Existing directory to own, in a fully qualified path spelling.
    * @param title - Display title used only when a new record is created.
+   * @param options - Allow another owner to register the same canonical directory.
    * @returns the existing or newly durable workspace.
    */
   // TODO: `title` lost its last production caller when the gateway's
@@ -233,12 +240,12 @@ export class WorkspaceRegistry extends Service {
   // (.agents/notes/archived/simplification/2026-07-31-one-route-to-add-a-workspace.md);
   // drop the parameter with its @param clause and the `create(path, title?)`
   // lines in this package's README pair.
-  async create(path: string, title?: string): Promise<Workspace> {
+  async create(path: string, title?: string, options: WorkspaceCreateOptions = {}): Promise<Workspace> {
     const canonical = await realpathNormalize(path)
     if (!(await stat(canonical)).isDirectory()) {
       throw new Error(`cannot create a workspace at '${canonical}': path is not a directory`)
     }
-    return await this.enqueueOperation(() => this.createCanonical(canonical, title))
+    return await this.enqueueOperation(() => this.createCanonical(canonical, title, options.allowDuplicatePath === true))
   }
 
   /**
@@ -266,7 +273,7 @@ export class WorkspaceRegistry extends Service {
       const canonical = await realpathNormalize(path)
       // A Session can start outside the registry queue while directory preparation awaits I/O.
       if ((await this.listStoredHeaders()).length > 0 || sessions.list().length > 0) return undefined
-      return this.createCanonical(canonical, title, true)
+      return this.createCanonical(canonical, title, false, true)
     })
   }
 
@@ -496,16 +503,32 @@ export class WorkspaceRegistry extends Service {
    * @returns the workspace owning the canonical path, when one exists.
    */
   async resolveByPath(path: string): Promise<Workspace | undefined> {
-    const canonical = await realpathNormalize(path)
-    for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
-    }
-    return undefined
+    const matches = await this.resolveAllByPath(path)
+    return matches[0]
   }
 
-  private async createCanonical(canonical: string, title?: string, firstUse = false): Promise<WorkspaceEntity> {
-    for (const entity of this.entities.values()) {
-      if (entity.path === canonical) return entity
+  /**
+   * Resolve every registration for the canonical directory.
+   * @param path - Existing directory path.
+   * @returns matching Workspaces in registry order.
+   */
+  async resolveAllByPath(path: string): Promise<readonly Workspace[]> {
+    const canonical = await realpathNormalize(path)
+    return this.requireState().workspaceIds
+      .map(id => this.entities.get(id))
+      .filter((entity): entity is WorkspaceEntity => entity !== undefined && entity.path === canonical)
+  }
+
+  private async createCanonical(
+    canonical: string,
+    title: string | undefined,
+    allowDuplicatePath: boolean,
+    firstUse = false,
+  ): Promise<WorkspaceEntity> {
+    if (!allowDuplicatePath) {
+      for (const entity of this.entities.values()) {
+        if (entity.path === canonical) return entity
+      }
     }
 
     const workspaceName = title ?? defaultWorkspaceTitle(canonical)
@@ -756,17 +779,8 @@ export class WorkspaceRegistry extends Service {
       )
     }
 
-    const paths = new Map<string, WorkspaceId>()
     const accounted = new Map<SessionId, WorkspaceId>()
     for (const [id, record] of table.entries()) {
-      const pathHolder = paths.get(record.path)
-      if (pathHolder !== undefined) {
-        throw new Error(
-          `workspace domain is inconsistent: path '${record.path}' is claimed `
-          + `by both workspace '${pathHolder}' and workspace '${id}'`,
-        )
-      }
-      paths.set(record.path, id)
       for (const sessionId of record.sessionIds) {
         const holder = accounted.get(sessionId)
         if (holder !== undefined) {

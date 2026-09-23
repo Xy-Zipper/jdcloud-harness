@@ -285,7 +285,7 @@ describe('plugin configuration and prompt branches', () => {
     })
     const plugin = createUserMessage({
       content: [{ type: 'text', text: 'plugin' }],
-      source: { kind: 'plugin', plugin: 'fixture' },
+      source: { kind: 'tool-registry' },
     })
     await expect(preStep(
       mounted.ctx,
@@ -822,12 +822,10 @@ describe('write-tool failures and table partial completion', () => {
       response: request => request.path.includes('/fields/') ? fields : { ok: true },
     })
 
-    // A user message carrying only text contributes no attachment, and a nested
-    // `tool-result` block is walked without yielding one either.
+    // A user message carrying only text contributes no attachment.
     mounted.agent.session.append('user/message', createUserMessage({
       content: [
         { type: 'text', text: 'please file this' },
-        { type: 'tool-result', toolCallId: ToolCallId('call-nested-empty'), content: [{ type: 'text', text: 'no attachment here' }] },
       ],
       source: { kind: 'user', rpcId: 'rpc-text-probe' } as never,
     }), { surfaceOp: 'append' })
@@ -836,7 +834,7 @@ describe('write-tool failures and table partial completion', () => {
 
     expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_REQUIRED_FIELDS')
     expect(resultText(result)).toContain('Files (files)')
-    // The nested tool-result contributed nothing, so upload was never attempted.
+    // No attachment was available, so upload was never attempted.
     expect(mounted.requests.map(request => request.path))
       .toEqual(['/api/visualdev/base/fields/form-1'])
   })
@@ -957,9 +955,7 @@ describe('write-tool failures and table partial completion', () => {
       name: 'a.txt',
       bytes: 3,
     }
-    // A transcript holds messages from every role, and a user message may nest
-    // a tool-result whose own content carries the attachment. Both shapes are
-    // walked: the non-user message is skipped, the nested result is descended.
+    // A transcript holds messages from every role; only user attachments are accepted.
     mounted.agent.session.append('assistant/message', {
       message: {
         id: 'assistant-1',
@@ -971,7 +967,7 @@ describe('write-tool failures and table partial completion', () => {
     mounted.agent.session.append('user/message', createUserMessage({
       content: [
         { type: 'text', text: 'here is the receipt' },
-        { type: 'tool-result', toolCallId: ToolCallId('call-nested-file'), content: [{ type: 'file', attachment: ref }] },
+        { type: 'file', attachment: ref },
       ],
       source: { kind: 'user', rpcId: 'rpc-nested-file' } as never,
     }), { surfaceOp: 'append' })
@@ -980,7 +976,7 @@ describe('write-tool failures and table partial completion', () => {
       menu_id: 'form-1', write_kind: 'create', attachment_id: 'sha256:abcdef0123456789',
     })
 
-    // The nested file resolved, so the upload went through.
+    // The user file resolved, so the upload went through.
     expect(result.isError).toBe(false)
   })
 

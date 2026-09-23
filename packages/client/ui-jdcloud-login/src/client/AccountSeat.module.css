@@ -8,7 +8,7 @@
 }
 
 /* The tenant rows scroll independently so the sign-out footer stays visible. */
-.tenantViewport {
+.tenantViewport > :first-child {
   max-height: 240px;
   overflow-y: auto;
 }

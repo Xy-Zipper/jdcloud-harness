@@ -1,7 +1,7 @@
 /** New-conversation cards for Host-confirmed writable JDCloud menus. */
 
 import type { JdcloudWritableMenu } from '@deepseek-ai/dsh-api-jdcloud-auth-controller/types'
-import { IconBranchOutline16, IconDataOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutlineRegular, IconDataOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef, useState } from 'react'
 import type { WritableMenuPickerInjected } from './types.ts'
@@ -28,7 +28,7 @@ function MenuIcon({ menu, baseUrl }: { menu: JdcloudWritableMenu; baseUrl: strin
   if (icon?.startsWith('/')) {
     return <img className={css.iconImage} src={`${baseUrl}${icon}`} alt="" />
   }
-  return menu.type === 3 ? <IconDataOutline16 size={20} /> : <IconBranchOutline16 size={20} />
+  return menu.type === 3 ? <IconDataOutlineRegular size={20} /> : <IconBranchOutlineRegular size={20} />
 }
 
 /** Show one single-select menu panel only while the current Session is blank. */

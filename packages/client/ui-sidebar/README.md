@@ -38,6 +38,7 @@ The expanded brand row renders `sidebar.brand.mark` and `sidebar.brand.name` as 
 ### Global panel entries
 
 Plugins add an icon component to the root-scoped `sidebar.panellist` list with an `id`, optional `order`, and a string or locale-aware `label`. The same id addresses the component registered in the layout's root-scoped `main` keyed slot; selecting a missing main entry throws without changing the current selection. The label supplies plain visible text, the accessible name, and the collapsed tooltip. Each row reads its own selected state through `usePanelInfo`; moving DOM focus to search or a directory picker does not change the displayed panel or its selected row. With no registrations, neither the list nor spacing for it is rendered. The shipped composition registers no example panel.
+Plugins can register reversible `sidebarPanels.registerAvailabilityFilter` policies to hide panel entries without removing their slot registrations; the list updates when a policy changes.
 
 ### Collapse behavior
 

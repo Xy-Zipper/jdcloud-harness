@@ -43,18 +43,30 @@ export class WorkspaceCommands {
   constructor(private readonly ctx: Context) {}
 
   /**
-   * Create or resolve one Workspace over an existing directory.
+   * Create or resolve one Workspace over an existing directory in the current owner scope.
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
    */
   create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
     return this.enqueue(async () => {
       try {
-        const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
-        if (existing !== undefined) {
-          return { workspace: workspaceView(existing), created: false }
+        const owner = this.owner()
+        if (owner === undefined) {
+          const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
+          if (existing !== undefined) return { workspace: workspaceView(existing), created: false }
+          const workspace = await this.ctx.workspaceRegistry.create(request.path)
+          return { workspace: workspaceView(workspace), created: true }
         }
-        const workspace = await this.ctx.workspaceRegistry.create(request.path)
+        const matches = await this.ctx.workspaceRegistry.resolveAllByPath(request.path)
+        for (const existing of matches) {
+          if (await owner.owns('workspace', String(existing.id))) {
+            return { workspace: workspaceView(existing), created: false }
+          }
+        }
+        const workspace = await this.ctx.workspaceRegistry.create(request.path, undefined, {
+          allowDuplicatePath: matches.length > 0,
+        })
+        await owner.claimOwned('workspace', String(workspace.id))
         return { workspace: workspaceView(workspace), created: true }
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error

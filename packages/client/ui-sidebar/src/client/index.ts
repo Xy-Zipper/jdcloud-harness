@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SidebarPanelMetadata, SidebarRootInjected } from './contract/slots.ts'
 import { HeaderLeadingControls } from './HeaderLeadingControls.tsx'
+import { SidebarPanelRuntime } from './panel-registry.ts'
 import { SidebarRoot } from './SidebarRoot.tsx'
 import { en, zh, type SidebarKey } from './locales.ts'
 
@@ -20,6 +21,14 @@ export type {
   SidebarRootComponentProps, SidebarRootInjected, SidebarSectionOwnerProps, SidebarSettingsOwnerProps,
 } from './contract/slots.ts'
 export type { SidebarKey } from './locales.ts'
+export { SidebarPanelRuntime } from './panel-registry.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Global sidebar panel visibility policies. */
+    sidebarPanels: SidebarPanelRuntime
+  }
+}
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -42,15 +51,25 @@ export const inject = ['slots', 'layout', 'uiWorkspace', 'locale']
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
+  ctx.plugin(SidebarPanelRuntime)
+  ctx.inject(['sidebarPanels'], (scope: ClientContext) => {
+    registerSidebar(ctx, scope.sidebarPanels)
+  })
+}
+
+/** Register sidebar views after their visibility policy becomes available. */
+function registerSidebar(ctx: ClientContext, sidebarPanels: SidebarPanelRuntime): void {
   const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-sidebar: dictionaries')
   const panels = createSnapshotStore<readonly SidebarPanelMetadata[]>([])
   const syncPanels = (): void => {
-    const next = ctx.slots.entriesOfSlot('sidebar.panellist').map(({ options }) => {
-      // The list registration requires an id; StoredEntry erases the slot kind.
-      const id = options.id as MainPanelId
-      return { id, order: options.order ?? 0, label: resolveSlotLabel(options.label) ?? id }
-    }).sort((a, b) => a.order - b.order)
+    const next = ctx.slots.entriesOfSlot('sidebar.panellist')
+      .filter(({ options }) => sidebarPanels.isAvailable(options.id as MainPanelId))
+      .map(({ options }) => {
+        // The list registration requires an id; StoredEntry erases the slot kind.
+        const id = options.id as MainPanelId
+        return { id, order: options.order ?? 0, label: resolveSlotLabel(options.label) ?? id }
+      }).sort((a, b) => a.order - b.order)
     const previous = panels.getSnapshot()
     if (previous.length === next.length && previous.every((panel, index) => {
       const candidate = next[index] as SidebarPanelMetadata
@@ -60,6 +79,7 @@ export function apply(ctx: ClientContext): void {
   }
   ctx.effect(() => ctx.slots.subscribe('sidebar.panellist', syncPanels), 'ui-sidebar: panel entries')
   ctx.effect(() => ctx.locale.subscribe(syncPanels), 'ui-sidebar: panel labels')
+  ctx.effect(() => sidebarPanels.subscribe(syncPanels), 'ui-sidebar: panel visibility')
 
   const injectProps = (): SidebarRootInjected => ({
     // The shell's New Session button rides the Workspace UI's shared action
@@ -75,6 +95,7 @@ export function apply(ctx: ClientContext): void {
     children: {
       'sidebar.brand.mark': { kind: 'single', scope: 'root' },
       'sidebar.brand.name': { kind: 'single', scope: 'root' },
+      'sidebar.account': { kind: 'single', scope: 'root' },
       'sidebar.toggle.badge': { kind: 'single', scope: 'root' },
       'sidebar.panellist': { kind: 'list', scope: 'root' },
       'sidebar.workspaces': { kind: 'single', scope: 'root' },

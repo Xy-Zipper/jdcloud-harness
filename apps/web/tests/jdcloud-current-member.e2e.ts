@@ -204,7 +204,7 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
     ])
     const pluginMessage = sessionEvents.find((event): event is Extract<SessionEvent, { type: 'user/message' }> => (
       event.type === 'user/message'
-      && event.data.source.kind === 'plugin'
+      && event.data.source.kind === 'jdcloud-lowcode'
       && event.data.source.plugin === 'tool-jdcloud-lowcode'
     ))
     if (pluginMessage === undefined) throw new Error('JDCloud current-member snapshot was not persisted')

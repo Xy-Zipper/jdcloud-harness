@@ -48,6 +48,7 @@ On a loopback browser, the shell renders **Open configuration file** only when t
 ### Onboarding steps
 
 The onboarding ledger projects in ascending order and mounts exactly one step at a time. Registrants own durable completion, capability readiness, copy, mutations, and their visible wrapper, so independently registered flows cannot stack and the shell does not become a second configuration fact source. Visible steps own their dialog chrome and app-root `inert` lifecycle.
+The Host plugin stores the last acknowledged welcome-notice version as a volatile `welcomeNoticeVersion` setting for the browser's onboarding projection.
 
 -----
 

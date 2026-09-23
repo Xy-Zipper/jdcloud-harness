@@ -53,7 +53,7 @@ describe('JDCloud sidebar account seat', () => {
     const menu = screen.getByRole('menu')
     const tenantViewport = menu.firstElementChild
     expect(tenantViewport).toBeInstanceOf(HTMLElement)
-    expect(tenantViewport?.className).toMatch(/tenantViewport/)
+    expect(menu.className).toMatch(/tenantViewport/)
     expect(screen.getByText('租户')).toBeTruthy()
     const currentTenant = screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Current Tenant' })
     expect(currentTenant.disabled).toBe(true)

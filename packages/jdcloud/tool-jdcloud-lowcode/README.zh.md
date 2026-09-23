@@ -48,7 +48,7 @@ kind: "package-reference"
 | `maxPageSize` | `100` | `jdcloud_lowcode_query` 接受的最大 `page_size`；省略时最多请求 20 行 |
 | `maxOutputBytes` | `65,536` | 完整成功工具结果字符串的最大 UTF-8 字节数；空间足够时，其中包含 JSON 或截断提示和预览 |
 
-生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)是全部可接受字段及其 JSDoc 的详尽真源。
+生成的[配置目录](../../../docs/config-catalog.zh.md)是全部可接受字段及其 JSDoc 的详尽真源。
 
 ### 每个 Prompt 的能力快照
 
@@ -130,7 +130,7 @@ Prompt 监听器复用认证控制器的 current-user 解析器，通过一次�
 
 #### 模型看到的内容
 
-每个通过准入的浏览器 Prompt 会获得一条以 `JDCloud low-code capabilities for this browser prompt.` 开头的插件来源用户消息。其 JSON 包含 `tenant`、`systemAdministrator`、`currentMember`、`tenantDepartments` 和 `functions`。`currentMember.user`、`currentMember.department` 和 `currentMember.role` 包含根据当前账号解析的准确选择值数组。`tenantDepartments` 包含当前租户返回的全部部门及其 `id`、`fullName` 和完整 `path`；每项功能只包含 `menuId`、`fullName`、`path`、`type` 和已识别的 `agentPermissions`。消息会明确把每个名称和值标为不可信数据。
+每个通过准入的浏览器 Prompt 会获得一条 `source.kind: jdcloud-lowcode`、以 `JDCloud low-code capabilities for this browser prompt.` 开头的用户消息。其 JSON 包含 `tenant`、`systemAdministrator`、`currentMember`、`tenantDepartments` 和 `functions`。`currentMember.user`、`currentMember.department` 和 `currentMember.role` 包含根据当前账号解析的准确选择值数组。`tenantDepartments` 包含当前租户返回的全部部门及其 `id`、`fullName` 和完整 `path`；每项功能只包含 `menuId`、`fullName`、`path`、`type` 和已识别的 `agentPermissions`。消息会明确把每个名称和值标为不可信数据。
 
 #### Token 影响
 

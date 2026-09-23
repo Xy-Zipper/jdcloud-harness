@@ -121,11 +121,13 @@ export function projectUserText(
     if (range.start < cursor) continue
     const { start: tokenStart, end, label, kind } = range
     if (tokenStart > cursor) pushPlain(cursor, tokenStart)
-    const referenceKind = kind === 'session'
-      ? 'session'
-      : label.startsWith('@')
-        ? label.replace(/^@"|"$/gu, '').endsWith('/') ? 'folder' : 'file'
-        : undefined
+    const referenceKind = kind === 'reference'
+      ? undefined
+      : kind === 'session'
+        ? 'session'
+        : label.startsWith('@')
+          ? label.replace(/^@"|"$/gu, '').endsWith('/') ? 'folder' : 'file'
+          : undefined
     const displayLabel = range.display
       !== undefined
       ? kind === 'reference' ? `@${range.display}` : range.display
@@ -140,15 +142,15 @@ export function projectUserText(
       )}
       {displayLabel}
     </>
-    const open = references === undefined ? undefined
+    const open = references === undefined || kind === 'reference' ? undefined
       : referenceKind === 'file'
         ? () => { references.openFile(label.slice(1).replace(/^"|"$/gu, '')) }
         : referenceKind === undefined && slashKind === 'skill'
           ? () => { references.openSkill(label.slice(1)) }
           : undefined
-    const className = clsx(css.refChip, referenceKind === undefined && css.slashChip)
+    const className = clsx(css.refChip, kind === 'plain' && referenceKind === undefined && css.slashChip)
     parts.push(open === undefined
-      ? <span key={tokenStart} className={className} data-ref-chip={referenceKind ?? slashKind} title={label}>
+      ? <span key={tokenStart} className={className} data-ref-chip={kind === 'reference' ? kind : referenceKind ?? slashKind} title={label}>
         {contents}
       </span>
       : <button

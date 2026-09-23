@@ -71,17 +71,12 @@ export class SessionControlController {
     scopeKey: string | undefined,
   ): Promise<SessionControlBaseline> {
     if (owner === undefined) return this.baseline()
-    if (scopeKey === undefined) return { jobs: {}, projections: {} }
+    if (scopeKey === undefined) return { projections: {} }
     const sessions: Session[] = []
     for (const session of this.ctx.sessions.list()) {
       if (await owner.owns('session', String(session.id), scopeKey)) sessions.push(session)
     }
-    const jobs = Object.create(null) as Record<SessionId, readonly SessionJob[]>
-    for (const session of sessions) {
-      const agent = this.ctx.agents.get(session.id)
-      jobs[session.id] = this.jobsFor(agent)
-    }
-    return { jobs, projections: this.projectionBaseline(sessions) }
+    return { projections: this.projectionBaseline(sessions) }
   }
 
   private projectionBaseline(
