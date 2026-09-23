@@ -2,6 +2,8 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
+import { mkdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
@@ -64,6 +66,8 @@ export interface Config {
   readonly defaultBaseUrl?: string
   /** Network deadline for login and prompt validation requests. */
   readonly requestTimeoutMs?: number
+  /** Persistent parent directory for tenant-user workspaces. */
+  readonly userWorkspaceDirectory?: string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -80,10 +84,12 @@ export class JdcloudAuthController extends TypertRemoteService {
   static Config: z<Config> = z.object({
     defaultBaseUrl: z.string().default(''),
     requestTimeoutMs: z.number().step(1).min(1).default(15_000),
+    userWorkspaceDirectory: z.string().default(''),
   })
 
   private readonly defaultBaseUrl: string
   private readonly requestTimeoutMs: number
+  private readonly userWorkspaceDirectory: string | undefined
   private readonly fetcher: typeof fetch
 
   /** @param ctx - Host context carrying durable credentials. @param config - service address and timeout policy. */
@@ -93,6 +99,9 @@ export class JdcloudAuthController extends TypertRemoteService {
       ? ''
       : normalizeJdcloudBaseUrl(config.defaultBaseUrl)
     this.requestTimeoutMs = config.requestTimeoutMs ?? 15_000
+    this.userWorkspaceDirectory = config.userWorkspaceDirectory === undefined || config.userWorkspaceDirectory.trim() === ''
+      ? undefined
+      : resolve(config.userWorkspaceDirectory)
     this.fetcher = globalThis.fetch
     ctx.on('api-session/prompt-admission', async (request, next) => {
       await this.validateStoredLogin(request.signal)
@@ -344,6 +353,44 @@ export class JdcloudAuthController extends TypertRemoteService {
     const auth = await this.readAuth()
     if (auth === undefined || auth.userId === undefined) return undefined
     return createHash('sha256').update(auth.baseUrl).update('\0').update(auth.corpId).update('\0').update(auth.userId).digest('hex')
+  }
+
+  /**
+   * Create and return the current tenant-user's persistent directory.
+   * @returns Canonical directory selected by service address, tenant id, and user id.
+   */
+  async workspaceRoot(): Promise<string | undefined> {
+    if (this.userWorkspaceDirectory === undefined) return undefined
+    const scopeKey = await this.currentScopeKey()
+    if (scopeKey === undefined) {
+      throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
+    }
+    await mkdir(this.userWorkspaceDirectory, { recursive: true })
+    const parent = await realpath(this.userWorkspaceDirectory)
+    const directory = join(parent, scopeKey)
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const canonical = await realpath(directory)
+    if (relative(parent, canonical) !== scopeKey) {
+      throw new RemoteError('gateway/bad-request', 'JDCloud user workspace is not a private directory', {})
+    }
+    return canonical
+  }
+
+  /**
+   * Reject an existing directory outside the current tenant-user's workspace tree.
+   * @param path - Absolute directory supplied by a browser or selected by the Host.
+   */
+  async assertWorkspacePath(path: string): Promise<void> {
+    const root = await this.workspaceRoot()
+    if (root === undefined) return
+    if (!isAbsolute(path)) {
+      throw new RemoteError('gateway/bad-request', 'JDCloud workspace path must be absolute', {})
+    }
+    const canonical = await realpath(path)
+    const suffix = relative(root, canonical)
+    if (suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+      throw new RemoteError('gateway/bad-request', 'JDCloud workspace path is outside the current user directory', {})
+    }
   }
 
   /**

@@ -33,6 +33,7 @@ import type {
 interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
   claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+  assertWorkspacePath(path: string): Promise<void>
 }
 
 /** Implements Workspace mutations against the authoritative registry. */
@@ -51,6 +52,7 @@ export class WorkspaceCommands {
     return this.enqueue(async () => {
       try {
         const owner = this.owner()
+        await owner?.assertWorkspacePath(request.path)
         if (owner === undefined) {
           const existing = await this.ctx.workspaceRegistry.resolveByPath(request.path)
           if (existing !== undefined) return { workspace: workspaceView(existing), created: false }
@@ -114,6 +116,7 @@ export class WorkspaceCommands {
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
+      await this.assertOwned(request.workspaceId)
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
@@ -128,6 +131,8 @@ export class WorkspaceCommands {
    */
   async insertBefore(request: WorkspaceInsertBeforeRequest): Promise<WorkspaceOrderValue> {
     try {
+      await this.assertOwned(request.workspaceId)
+      if (request.beforeWorkspaceId !== undefined) await this.assertOwned(request.beforeWorkspaceId)
       const workspaceIds = await this.ctx.workspaceRegistry.insertBefore(
         WorkspaceId(request.workspaceId),
         request.beforeWorkspaceId === undefined
@@ -178,6 +183,7 @@ export class WorkspaceCommands {
    */
   async archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     try {
+      await this.assertSessionOwned(request.sessionId)
       await this.ctx.workspaceRegistry.archiveSession(
         request.sessionId,
         request.stopActivity === true ? { stopActivity: true } : {},
@@ -207,6 +213,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting archive set.
    */
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
+    await this.assertSessionOwned(request.sessionId)
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
@@ -218,6 +225,7 @@ export class WorkspaceCommands {
    */
   async pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue> {
     try {
+      await this.assertSessionOwned(request.sessionId)
       await this.ctx.workspaceRegistry.pinSession(request.sessionId)
     } catch (error) {
       if (error instanceof WorkspaceUnknownSessionError) {
@@ -239,6 +247,7 @@ export class WorkspaceCommands {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   async unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
+    await this.assertSessionOwned(request.sessionId)
     await this.ctx.workspaceRegistry.unpinSession(request.sessionId)
     return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds] }
   }
@@ -253,6 +262,14 @@ export class WorkspaceCommands {
   private async assertOwned(workspaceId: WorkspaceId): Promise<void> {
     const owner = this.owner()
     if (owner !== undefined && !(await owner.owns('workspace', String(workspaceId)))) throw workspaceNotFound(workspaceId)
+  }
+
+  /** Refuse a Session id outside the current JDCloud owner when mutating global navigation. */
+  private async assertSessionOwned(sessionId: WorkspaceArchiveSessionRequest['sessionId']): Promise<void> {
+    const owner = this.owner()
+    if (owner !== undefined && !(await owner.owns('session', sessionId))) {
+      throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
+    }
   }
 
   private owner(): ScopeOwner | undefined {

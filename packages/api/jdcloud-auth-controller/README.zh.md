@@ -36,6 +36,8 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 
 在 JDCloud 部署中，登录记录按不透明的浏览器会话键保存。稳定归属由外部 `userInfo.id`、规范化服务地址和当前租户 ID 共同决定；用户名只用于显示。每台浏览器必须独立登录，同一租户和用户在不同电脑登录后可共享新创建的 Session 与 Workspace；没有归属记录的旧数据会被忽略。
 
+配置 `userWorkspaceDirectory` 时，`workspaceRoot()` 在其下按 SHA-256 归属键创建用户目录。`assertWorkspacePath()` 解析已有路径和符号链接，仅接受该用户目录内的路径。这些检查用于工作区和会话创建以及目录选择器，不限制终端命令或通过完整路径读取文件。
+
 登录后，浏览器可以读取 `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }`；Token 永不经过 Remote wire。版本 3 record 会在使用前通过一次 `currentUser` 升级。`logout()` 会删除完整 credential record。密码只在登录调用期间存在，本包不会保存密码。
 
 浏览器可以调用 `writableMenus()` 刷新 `/api/oauth/currentUser`，并且只接收当前租户 id，以及至少拥有一项已识别 `readData`、`addData`、`editData` 或 `deleteData` 授权的 type `3` 表单和 type `4` 流程。每个返回菜单包含其 id、名称、解析后的父级路径、类型、可选图标字符串与全部已识别数据授权。该方法使用 Host 中保存的登录信息，永不返回资料字段、服务地址或 Token。
@@ -49,6 +51,7 @@ Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartF
 |---|---:|---|
 | `defaultBaseUrl` | 空 | 尚未保存登录时显示的初始服务地址 |
 | `requestTimeoutMs` | `15,000` | 登录、租户、当前用户、租户切换与 Host 已认证请求的截止时间 |
+| `userWorkspaceDirectory` | 未设置 | 用户独立目录的持久化父目录；共享部署中应设置该项，Docker bundle 使用 `/workspace/jdcloud-users` |
 
 <a id="model-experience"></a>
 ## 模型体验

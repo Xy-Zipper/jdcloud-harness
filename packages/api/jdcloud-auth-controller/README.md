@@ -36,6 +36,8 @@ Before Session Controller changes a Session model, the controller reads the stor
 
 In the JDCloud deployment, login records are keyed by an opaque browser session. The stable owner identity is the external `userInfo.id` together with the normalized service address and current tenant id; usernames are display labels only. A browser must log in independently, while browsers using the same tenant and user share newly-owned Sessions and Workspaces. Records without an owner are ignored.
 
+When `userWorkspaceDirectory` is configured, `workspaceRoot()` creates a directory named by the SHA-256 owner key under it. `assertWorkspacePath()` resolves existing paths and symlinks before accepting paths inside that user's directory. These checks apply to Workspace and Session creation and the directory picker, not to terminal commands or unrestricted file reads by absolute path.
+
 The browser can read `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }` for an authenticated login; the token never crosses the Remote wire. Version-3 records are upgraded once through `currentUser` before use. `logout()` deletes the complete credential record. Passwords exist only for the duration of the login call and are never stored by this package.
 
 The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and receive only the current tenant id plus type `3` forms and type `4` workflows that carry at least one recognized `readData`, `addData`, `editData`, or `deleteData` grant. Each returned menu contains its id, name, resolved parent path, type, optional icon string, and all recognized data grants. The method uses the stored Host login and never returns profile fields, the service address, or the Token.
@@ -49,6 +51,7 @@ Host plugins can call `requestAuthenticated({ path, method, body? | multipartFil
 |---|---:|---|
 | `defaultBaseUrl` | empty | Initial service address shown before a login is stored |
 | `requestTimeoutMs` | `15,000` | Deadline for login, tenant, current-user, tenant-switch, and Host authenticated requests |
+| `userWorkspaceDirectory` | unset | Persistent parent for per-user directories; set it in a shared deployment, where the Docker bundle selects `/workspace/jdcloud-users` |
 
 <a id="model-experience"></a>
 ## Model Experience

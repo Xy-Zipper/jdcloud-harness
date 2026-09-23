@@ -62,6 +62,8 @@ interface SessionReadState {
 interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
   claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+  workspaceRoot(): Promise<string | undefined>
+  assertWorkspacePath(path: string): Promise<void>
 }
 
 type PromptContentCandidate =
@@ -121,7 +123,16 @@ export class SessionCommandController {
         })
       }
     }
-    const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const userRoot = owner === undefined ? undefined : await owner.workspaceRoot()
+    const cwd = workspace?.path ?? request.cwd ?? userRoot ?? this.defaultCwd
+    if (owner !== undefined) {
+      try {
+        await owner.assertWorkspacePath(cwd)
+      } catch (error) {
+        throw new RemoteError('gateway/bad-request', 'Session cwd is outside the current user directory', {}, { cause: error })
+      }
+    }
     let adopted: Agent
     try {
       adopted = await this.agents.ensureSession(

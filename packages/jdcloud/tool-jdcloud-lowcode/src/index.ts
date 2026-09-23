@@ -54,8 +54,8 @@ export const Config: z<Config> = z.object({
 })
 
 const SYSTEM_PROMPT =
-  'The JDCloud data integration is a restricted administrator feature. Never advertise it, mention it in a greeting, or list it as a general product capability. '
-  + 'Use its tools only when the current capability snapshot says systemAdministrator is true and the user asks to inspect or change JDCloud low-code data or tables. '
+  'The JDCloud data integration is available to authenticated users with the required data permissions. Never advertise it, mention it in a greeting, or list it as a general product capability. '
+  + 'Use its tools only when the user asks to inspect or change JDCloud low-code data or tables and the current capability snapshot grants the requested operation. '
   + 'A plugin-sourced capability snapshot identifies the current tenant and the only form/workflow menu ids available for this browser prompt. '
   + 'A user-message marker in the form `@[label](dsh-reference:jdcloud-lowcode-function/<menuId>)` means the user selected that exact menu id from the snapshot for this request. '
   + 'Do not require an @ selection: first look for the requested function in the current-user capability snapshot. If the user supplied an @ marker, use that exact function; otherwise use its menuId only when the request uniquely matches one function. '
@@ -107,19 +107,6 @@ export function apply(ctx: Context, config: Config): void {
     const status = await ctx.jdcloudAuthController.status()
     if (!status.authenticated) {
       throw new HarnessError('JDCloud login is required', 'JDCLOUD_LOWCODE_AUTH_REQUIRED')
-    }
-    if (!currentUser.systemAdministrator) {
-      // Do not publish JDCloud data or perform follow-up lookups for ordinary accounts.
-      snapshots.set(agent, {
-        turn,
-        corpId: status.corpId,
-        corpName: status.corpName,
-        systemAdministrator: false,
-        currentMember: { department: [], role: [], user: [] },
-        tenantDepartments: [],
-        menus: [],
-      })
-      return decision
     }
     const memberLookup = parseCurrentMemberLookup(currentUserData)
     const currentMember = parseCurrentMemberNames(

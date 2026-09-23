@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join, relative, sep } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { DirectoryPicker, DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type { DirectoryPickerCapability } from '@deepseek-ai/dsh-host-directory-picker'
@@ -6,9 +9,11 @@ import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { DirectoryPickerController } from '../src/directory-picker.ts'
 
 const roots: Context[] = []
+const tempDirs: string[] = []
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(ctx => ctx.fiber.dispose()))
+  for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true })
 })
 
 /** A backend serving exactly the capability one case is about. */
@@ -47,11 +52,12 @@ const BROWSE_STUB: DirectoryPickerCapability = {
   },
 }
 
-async function harness(capability: DirectoryPickerCapability = NATIVE_STUB) {
+async function harness(capability: DirectoryPickerCapability = NATIVE_STUB, owner?: object) {
   StubPicker.capabilityStub = capability
   const ctx = new Context()
   roots.push(ctx)
   await ctx.plugin(StubPicker).await()
+  if (owner !== undefined) ctx.provide('jdcloudAuthController', owner as never)
   return new DirectoryPickerController(ctx)
 }
 
@@ -104,6 +110,47 @@ describe('directoryPicker pick Remote', () => {
 })
 
 describe('directoryPicker browse Remotes', () => {
+  it('keeps browsing and creation inside the current user root', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'dsh-picker-owner-'))
+    tempDirs.push(parent)
+    const home = join(parent, 'user')
+    const other = join(parent, 'other')
+    mkdirSync(home)
+    mkdirSync(other)
+    mkdirSync(join(home, 'safe'))
+    symlinkSync(other, join(home, 'escape'), 'dir')
+    const list = vi.fn(async (path?: string) => ({
+      path: path ?? parent,
+      home: parent,
+      crumbs: [
+        { name: '/', path: parent, hidden: false },
+        { name: 'user', path: home, hidden: false },
+      ],
+      entries: [
+        { name: 'safe', path: join(home, 'safe'), hidden: false },
+        { name: 'escape', path: join(home, 'escape'), hidden: false },
+      ],
+      truncated: false,
+    }))
+    const createDirectory = vi.fn(async (path: string, name: string) => join(path, name))
+    const picker = await harness({ kind: 'browse', list, createDirectory }, {
+      workspaceRoot: () => Promise.resolve(home),
+      assertWorkspacePath: async (path: string) => {
+        const { realpath } = await import('node:fs/promises')
+        const rel = relative(home, await realpath(path))
+        if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error('outside root')
+      },
+    })
+    const signal = new AbortController().signal
+    await expect(picker.list(other, signal)).rejects.toThrow('outside root')
+    await expect(picker.createDirectory(other, 'new')).rejects.toThrow('outside root')
+    const result = await picker.list(undefined, signal)
+    expect(result.home).toBe(home)
+    expect(result.crumbs.map(crumb => crumb.path)).toEqual([home])
+    expect(result.entries.map(entry => entry.name)).toEqual(['safe'])
+    expect(list).toHaveBeenCalledWith(home, signal)
+    expect(createDirectory).not.toHaveBeenCalled()
+  })
   it('serves listings and creation, defaulting to the home directory', async () => {
     const picker = await harness(BROWSE_STUB)
     const signal = new AbortController().signal

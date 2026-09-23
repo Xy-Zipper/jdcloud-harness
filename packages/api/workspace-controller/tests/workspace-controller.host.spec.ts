@@ -92,6 +92,7 @@ describe('WorkspaceController commands', () => {
     const owned = new Set<string>()
     ctx.provide('jdcloudAuthController', {
       owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(owned.has(id)),
+      assertWorkspacePath: () => Promise.resolve(),
       claimOwned: (_kind: 'session' | 'workspace', id: string) => {
         owned.add(id)
         return Promise.resolve()
@@ -110,6 +111,45 @@ describe('WorkspaceController commands', () => {
     expect(second.workspace.workspaceId).not.toBe(first.workspace.workspaceId)
     expect(reused).toMatchObject({ created: false, workspace: { workspaceId: second.workspace.workspaceId } })
     expect(ctx.workspaceRegistry.list().map(workspace => workspace.path)).toEqual([path, path])
+  })
+
+  it('refuses another user path before registering a Workspace', async () => {
+    const { controller, ctx, root } = await harness()
+    const own = stageDir(root, 'own')
+    const other = stageDir(root, 'other')
+    ctx.provide('jdcloudAuthController', {
+      assertWorkspacePath: (path: string) => path === own
+        ? Promise.resolve()
+        : Promise.reject(new Error('outside root')),
+      owns: () => Promise.resolve(false),
+      claimOwned: () => Promise.resolve(),
+      workspaceRoot: () => Promise.resolve(own),
+    } as never)
+    await expect(controller.create({ path: other })).rejects.toThrow('outside root')
+    expect(ctx.workspaceRegistry.list()).toEqual([])
+    await expect(controller.initializeDefault({ directoryName: 'Default', title: 'Default' }, new AbortController().signal))
+      .resolves.toBeUndefined()
+    expect(ctx.workspaceRegistry.list()).toEqual([])
+  })
+
+  it('refuses mutations by foreign Workspace and Session ids', async () => {
+    const { controller, ctx, root } = await harness()
+    const foreignWorkspace = await ctx.workspaceRegistry.create(stageDir(root, 'foreign'))
+    const foreignSession = ctx.sessions.create(SessionId('foreign'), { meta: { cwd: root } })
+    ctx.provide('jdcloudAuthController', {
+      owns: () => Promise.resolve(false),
+      claimOwned: () => Promise.resolve(),
+      assertWorkspacePath: () => Promise.resolve(),
+    } as never)
+    await expect(controller.delete({ workspaceId: foreignWorkspace.id }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(controller.insertBefore({ workspaceId: foreignWorkspace.id }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(controller.archiveSession({ sessionId: foreignSession.id }))
+      .rejects.toMatchObject({ code: 'session/not-found' })
+    await expect(controller.pinSession({ sessionId: foreignSession.id }))
+      .rejects.toMatchObject({ code: 'session/not-found' })
+    expect(ctx.workspaceRegistry.get(foreignWorkspace.id)).toBeDefined()
   })
 
   it('serializes concurrent path adoption and preserves an existing title', async () => {

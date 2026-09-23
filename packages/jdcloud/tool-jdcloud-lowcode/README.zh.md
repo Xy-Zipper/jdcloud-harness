@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-jdcloud-lowcode` 是仅限管理员使用的 JDCloud 集成，用于对话检查和修改某个租户的表单与流程。普通账号不会获得低代码菜单，Host 也会拒绝所有调用。管理员通过准入后会获得菜单和已解析的当前成员选择值，随后八个工具可描述字段、上传附件、读取或修改记录以及创建表单。Host 只接受当前轮次（Turn）快照中的菜单 id，在执行时强制校验 `systemAdministrator` 以及 `readData`、`addData`、`editData`、`deleteData`，并拒绝遗漏必填值或使用错误组件值类型的写入。此包只适用于受控的 JDCloud 部署；流程审批操作不在其范围内。
+`dsh-tool-jdcloud-lowcode` 允许已登录的 JDCloud 用户按其数据权限在对话中查看和修改租户的表单与流程。每个通过准入的浏览器 Prompt 都会获得菜单和已解析的当前成员选择值；八个工具可描述字段、上传附件、读取或修改记录以及创建表单。Host 只接受当前轮次（Turn）快照中的菜单 id，在执行时强制校验 `readData`、`addData`、`editData`、`deleteData`，建表时另需 `systemAdministrator`，并拒绝遗漏必填值或使用错误组件值类型的写入。此包只适用于受控的 JDCloud 部署；流程审批操作不在其范围内。
 
 ## 目录
 
@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 何时选择
 
-仅当已认证的 JDCloud 系统管理员需要通过对话访问表单和流程时选择此插件。普通用户、无法提交由 Host 准入的浏览器 Prompt、需要不受限制的 JDCloud API，或需要流程审批、驳回、退回操作时，不要选择它。
+当已认证的 JDCloud 用户需要通过对话访问其有权限的表单和流程时选择此插件。无法提交由 Host 准入的浏览器 Prompt、需要不受限制的 JDCloud API，或需要流程审批、驳回、退回操作时，不要选择它。
 
 ### 最小配置
 
@@ -52,7 +52,7 @@ kind: "package-reference"
 
 ### 每个 Prompt 的能力快照
 
-认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，即使没有使用 `@` 选择，此插件也会调用 `/api/oauth/currentUser`；只有系统管理员才会继续请求成员名称和部门数据、筛选菜单并发布能力快照。普通账号不会获得低代码快照。管理员快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值、带完整路径的全部 `tenantDepartments` 选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料和全部认证值都会被排除。
+认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，即使没有使用 `@` 选择，此插件也会调用 `/api/oauth/currentUser`，解析成员名称和部门数据，并为每个已登录用户发布能力快照。快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值、带完整路径的全部 `tenantDepartments` 选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料和全部认证值都会被排除。
 
 未使用 `@` 的低代码请求可直接使用快照中唯一匹配的功能（查询要求 `readData`）。如果找不到或有多个候选项，模型才会要求用户用 `@` 选择，而不会猜测菜单 id 或声称已经查询数据。缺少权限时说明无法操作，而不是要求重新选择。显式 `@` 选择仍可准确指定功能。
 
@@ -60,7 +60,7 @@ kind: "package-reference"
 
 ### 操作与授权
 
-Host 会在每次操作前检查系统管理员状态、当前轮次、当前租户和菜单成员关系。普通账号不能通过这些工具读取或写入数据。缺失或为空的 `agentPermissions` 不授予写访问。
+Host 会在每次操作前检查当前轮次、当前租户和菜单成员关系。数据读取及写入需对应的 `agentPermissions`，只有建表要求系统管理员身份。缺失或为空的 `agentPermissions` 不授予数据访问权限。
 
 | 工具 | 操作 | Host 要求 |
 |---|---|---|
@@ -79,7 +79,7 @@ Host 会在每次操作前检查系统管理员状态、当前轮次、当前租
 
 ### 失败与恢复
 
-任何认证请求返回 `600`、`601` 或 `602` 时都会删除已存储登录，并以需要认证失败；Web 登录页是恢复路径。其他业务错误或传输失败会保留登录。非管理员工具调用会在发起 JDCloud 数据请求前返回 `JDCLOUD_LOWCODE_ADMIN_REQUIRED`。如果成员名称响应缺少当前用户，或者部门选择器响应无效，Prompt 刷新会失败。无法再解析的部门或角色 id（例如已删除角色的 id）会从 `currentMember` 中省略，其余已查到的选择值仍会发布。如果当前租户与快照不同，工具不会发起 JDCloud 网络请求，并返回 `JDCLOUD_LOWCODE_TENANT_CHANGED`；用户需提交新的浏览器 Prompt 以刷新能力。未知菜单、陈旧轮次快照、缺失的写入或管理员授权、持久化用户消息中不存在的附件 id、存在歧义的短附件摘要、无效上传响应，以及未通过实时组件类型校验的记录值，都会在依赖它们的修改前失败。无效值返回 `JDCLOUD_LOWCODE_FIELD_TYPE`；新增时缺失值返回 `JDCLOUD_LOWCODE_REQUIRED_FIELDS`，两者都包含易读的字段标签和代码。
+任何认证请求返回 `600`、`601` 或 `602` 时都会删除已存储登录，并以需要认证失败；Web 登录页是恢复路径。其他业务错误或传输失败会保留登录。非管理员建表会在发起 JDCloud 数据请求前返回 `JDCLOUD_LOWCODE_ADMIN_REQUIRED`。如果成员名称响应缺少当前用户，或者部门选择器响应无效，Prompt 刷新会失败。无法再解析的部门或角色 id（例如已删除角色的 id）会从 `currentMember` 中省略，其余已查到的选择值仍会发布。如果当前租户与快照不同，工具不会发起 JDCloud 网络请求，并返回 `JDCLOUD_LOWCODE_TENANT_CHANGED`；用户需提交新的浏览器 Prompt 以刷新能力。未知菜单、陈旧轮次快照、缺失的数据或管理员授权、持久化用户消息中不存在的附件 id、存在歧义的短附件摘要、无效上传响应，以及未通过实时组件类型校验的记录值，都会在依赖它们的修改前失败。无效值返回 `JDCLOUD_LOWCODE_FIELD_TYPE`；新增时缺失值返回 `JDCLOUD_LOWCODE_REQUIRED_FIELDS`，两者都包含易读的字段标签和代码。
 
 建表会发送三个有序请求，上游不提供事务。如果菜单创建后保存 schema 或创建权限失败，工具会返回带已创建菜单 id 的 `JDCLOUD_LOWCODE_TABLE_PARTIAL`，运维人员可检查并修复保留的资源。
 

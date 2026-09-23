@@ -41,6 +41,28 @@ async function baseContext(): Promise<Context> {
 }
 
 describe('Session creation failures', () => {
+  it("uses the current user's root and rejects a different user's cwd", async () => {
+    const ctx = await baseContext()
+    const ensureSession = vi.fn((sessionId: SessionId, cwd: string) => {
+      const session = ctx.sessions.create(sessionId, { meta: { cwd } })
+      return Promise.resolve({ id: sessionId, session } as Agent)
+    })
+    ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
+    ctx.provide('jdcloudAuthController', {
+      workspaceRoot: () => Promise.resolve('/users/mine'),
+      assertWorkspacePath: (path: string) => path === '/users/mine'
+        ? Promise.resolve()
+        : Promise.reject(new Error('outside root')),
+      claimOwned: () => Promise.resolve(),
+      owns: () => Promise.resolve(true),
+    } as never)
+    const controller = new SessionCommandController(ctx, controllerAgents({ ensureSession }), '/shared')
+    await expectFailure(controller.create({ cwd: '/users/other' }), 'gateway/bad-request')
+    expect(ensureSession).not.toHaveBeenCalled()
+    await controller.create({})
+    expect(ensureSession).toHaveBeenCalledWith(expect.any(String), '/users/mine', false, undefined)
+    await ctx.fiber.dispose()
+  })
   it('mints an identity with the default cwd when no explicit target is supplied', async () => {
     const ctx = await baseContext()
     ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)

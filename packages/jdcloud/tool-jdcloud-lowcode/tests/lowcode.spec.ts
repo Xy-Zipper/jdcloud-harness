@@ -645,6 +645,8 @@ describe('prompt refresh and plugin lifecycle', () => {
     const assembled = await mounted.ctx.systemPrompt.assemble()
     expect(assembled.sections.map(section => section.name)).toContain('tool:jdcloud-lowcode')
     const guidance = assembled.sections.find(section => section.name === 'tool:jdcloud-lowcode')?.text ?? ''
+    expect(guidance).toContain('available to authenticated users with the required data permissions')
+    expect(guidance).not.toContain('restricted administrator feature')
     expect(guidance).toContain('Do not require an @ selection')
     expect(guidance).toContain('ask the user to select the function with @')
     expect(guidance).toContain('dsh-reference:jdcloud-lowcode-function/<menuId>')
@@ -684,7 +686,77 @@ describe('prompt refresh and plugin lifecycle', () => {
 })
 
 describe('Host-authorized tool execution', () => {
-  it('rejects every low-code operation for a non-administrator before any JDCloud request', async () => {
+  it('lets a non-administrator query an authorized menu without an @ selection', async () => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['readData'], false),
+      response: request => request.path === '/api/visualdev/form/list'
+        ? { pagination: { total: 2 }, list: [] }
+        : { ok: true },
+    })
+    const entered = await mounted.preStepWith([createUserMessage({
+      content: [{ type: 'text', text: '查询打卡记录' }],
+      source: { kind: 'user', rpcId: 'non-admin-query' } as never,
+    })])
+    expect(entered[1]?.content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('"systemAdministrator":false'),
+    })
+    expect(entered[1]?.content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('"menuId":"form-clock"'),
+    })
+    expect(mounted.requests.map(request => request.path)).toEqual([
+      '/api/oauth/currentUser',
+      '/api/system/permission/users/getMemberName',
+      '/api/system/permission/organize/selector',
+    ])
+    mounted.requestAuthenticated.mockClear()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_query', { menu_id: 'form-clock' })
+
+    expect(result.isError).toBe(false)
+    expect(resultText(result)).toContain('"total":2')
+    expect(mounted.requests.map(request => request.path)).toEqual(['/api/visualdev/form/list'])
+  })
+
+  it('lets a non-administrator perform each data operation granted by currentUser', async () => {
+    const mounted = await mountLowcode({
+      currentUser: currentUser(['readData', 'addData', 'editData', 'deleteData'], false),
+      response: request => request.path === '/api/visualdev/base/fields/form-clock'
+        ? [{ enCode: 'title', value: 'string', jdcloudKey: 'comInput', fullName: '标题' }]
+        : { ok: true },
+    })
+    await mounted.browserPrompt()
+    expect(mounted.requests.map(request => request.path)).toEqual([
+      '/api/oauth/currentUser',
+      '/api/system/permission/users/getMemberName',
+      '/api/system/permission/organize/selector',
+    ])
+    mounted.requests.splice(0)
+
+    const operations = [
+      ['jdcloud_lowcode_query', { menu_id: 'form-clock' }],
+      ['jdcloud_lowcode_get', { menu_id: 'form-clock', record_id: 'row-1' }],
+      ['jdcloud_lowcode_create', { menu_id: 'form-clock', data: { title: 'new' } }],
+      ['jdcloud_lowcode_update', { menu_id: 'form-clock', record_id: 'row-1', data: { title: 'edited' } }],
+      ['jdcloud_lowcode_delete', { menu_id: 'form-clock', record_id: 'row-1' }],
+    ] as const
+    for (const [name, args] of operations) {
+      expect((await mounted.call(name, args)).isError).toBe(false)
+    }
+    expect(mounted.requests.map(request => request.path)).toEqual([
+      '/api/visualdev/form/list',
+      '/api/visualdev/form/info',
+      '/api/visualdev/base/fields/form-clock',
+      '/api/visualdev/form/create',
+      '/api/visualdev/base/fields/form-clock',
+      '/api/visualdev/form/update',
+      '/api/visualdev/form/delete',
+    ])
+  })
+
+  it('rejects a non-administrator query without readData before any JDCloud request', async () => {
     const mounted = await mountLowcode({ currentUser: currentUser([], false) })
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
@@ -692,7 +764,21 @@ describe('Host-authorized tool execution', () => {
 
     const result = await mounted.call('jdcloud_lowcode_query', { menu_id: 'form-clock' })
 
-    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_ADMIN_REQUIRED')
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_PERMISSION_REQUIRED')
+    expect(mounted.requests).toEqual([])
+  })
+
+  it('rejects a menu missing from a non-administrator currentUser response', async () => {
+    const mounted = await mountLowcode({
+      currentUser: { ...currentUser(['readData', 'addData', 'editData', 'deleteData'], false), menuList: [] },
+    })
+    await mounted.browserPrompt()
+    mounted.requestAuthenticated.mockClear()
+    mounted.requests.splice(0)
+
+    const result = await mounted.call('jdcloud_lowcode_query', { menu_id: 'form-clock' })
+
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_MENU_REQUIRED')
     expect(mounted.requests).toEqual([])
   })
 
@@ -700,7 +786,7 @@ describe('Host-authorized tool execution', () => {
     ['jdcloud_lowcode_query', { menu_id: 'form-clock' }],
     ['jdcloud_lowcode_get', { menu_id: 'form-clock', record_id: 'row-1' }],
   ] as const)('rejects %s before any data request when readData is absent', async (name, args) => {
-    const mounted = await mountLowcode({ currentUser: currentUser(['addData']) })
+    const mounted = await mountLowcode({ currentUser: currentUser(['addData'], false) })
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
     mounted.requests.splice(0)
@@ -770,7 +856,7 @@ describe('Host-authorized tool execution', () => {
     ['jdcloud_lowcode_update', { menu_id: 'form-clock', record_id: 'row-1', data: { title: 'x' } }, '修改'],
     ['jdcloud_lowcode_delete', { menu_id: 'form-clock', record_id: 'row-1' }, '删除'],
   ])('rejects %s before any request when the %s grant is absent', async (name, args, action) => {
-    const mounted = await mountLowcode()
+    const mounted = await mountLowcode({ currentUser: currentUser([], false) })
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
     mounted.requests.splice(0)
@@ -1089,7 +1175,7 @@ describe('Host-authorized tool execution', () => {
   })
 
   it('rejects table creation for a non-administrator before any modifying request', async () => {
-    const mounted = await mountLowcode({ currentUser: currentUser([], false) })
+    const mounted = await mountLowcode({ currentUser: currentUser(['readData', 'addData', 'editData', 'deleteData'], false) })
     await mounted.browserPrompt()
     mounted.requestAuthenticated.mockClear()
     mounted.requests.splice(0)

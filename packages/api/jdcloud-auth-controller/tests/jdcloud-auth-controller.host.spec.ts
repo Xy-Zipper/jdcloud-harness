@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
@@ -14,9 +17,11 @@ import JdcloudAuthController, {
 import type { JdcloudAuthenticatedRequest, JdcloudLoginRequest } from '../src/index.ts'
 
 const contexts: Context[] = []
+const tempDirs: string[] = []
 
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true })
   vi.unstubAllGlobals()
 })
 
@@ -53,6 +58,7 @@ function currentUserData(
 async function boot(fetcher: typeof fetch, config: {
   defaultBaseUrl?: string
   requestTimeoutMs?: number
+  userWorkspaceDirectory?: string
 } = {
   defaultBaseUrl: 'https://kindoucloud.com',
 }) {
@@ -63,6 +69,47 @@ async function boot(fetcher: typeof fetch, config: {
   await ctx.plugin(JdcloudAuthController, config)
   return ctx
 }
+
+describe('JDCloud user directories', () => {
+  it('leaves local directory selection unrestricted without a configured user-directory parent', async () => {
+    const ctx = await boot(fetch)
+    await expect(ctx.jdcloudAuthController.workspaceRoot()).resolves.toBeUndefined()
+    await expect(ctx.jdcloudAuthController.assertWorkspacePath('D:\\local-project')).resolves.toBeUndefined()
+  })
+
+  it('assigns distinct roots for users, tenants, and service addresses, rejecting sibling and symlink paths', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'dsh-jdcloud-users-'))
+    tempDirs.push(parent)
+    const ctx = await boot(fetch, { userWorkspaceDirectory: parent })
+    await expect(ctx.jdcloudAuthController.workspaceRoot()).rejects.toMatchObject({ code: 'jdcloud/auth-required' })
+    const setLogin = async (baseUrl: string, corpId: string, userId: string): Promise<void> => {
+      await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+        kind: 'grant',
+        payload: {
+          version: 4, baseUrl, token: 'token', username: 'user', userId,
+          corpId, corpName: 'Tenant', corps: [{ corpId, corpName: 'Tenant' }],
+          systemAdministrator: false,
+        },
+      }))
+    }
+    await setLogin('https://example.com', 'corp-a', 'user-a')
+    const first = await ctx.jdcloudAuthController.workspaceRoot()
+    await setLogin('https://example.com', 'corp-a', 'user-b')
+    const second = await ctx.jdcloudAuthController.workspaceRoot()
+    await setLogin('https://example.com', 'corp-b', 'user-a')
+    const third = await ctx.jdcloudAuthController.workspaceRoot()
+    await setLogin('https://elsewhere.example', 'corp-a', 'user-a')
+    const fourth = await ctx.jdcloudAuthController.workspaceRoot()
+    expect(new Set([first, second, third, fourth]).size).toBe(4)
+    await setLogin('https://example.com', 'corp-a', 'user-a')
+    mkdirSync(join(first, 'project'))
+    symlinkSync(second, join(first, 'escape'), 'dir')
+    await expect(ctx.jdcloudAuthController.assertWorkspacePath(join(first, 'project'))).resolves.toBeUndefined()
+    await expect(ctx.jdcloudAuthController.assertWorkspacePath(second)).rejects.toMatchObject({ code: 'gateway/bad-request' })
+    await expect(ctx.jdcloudAuthController.assertWorkspacePath(join(first, 'escape')))
+      .rejects.toMatchObject({ code: 'gateway/bad-request' })
+  })
+})
 
 async function bootWithBrowserSession(fetcher: typeof fetch) {
   vi.stubGlobal('fetch', fetcher)

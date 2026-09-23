@@ -22,7 +22,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-启用 JDCloud 所有权时，`create` 只复用当前所有者的 Workspace；其他所有者可以独立登记同一规范目录。
+启用 JDCloud 所有权时，`create` 只接受当前租户用户目录内的路径，并且只复用当前所有者的 Workspace。目录选择器从该目录开始，隐藏指向目录外的符号链接，拒绝跳转或在目录外创建。按 Workspace 或 Session ID 修改时也必须属于当前用户。
 
 Host 控制器会串行执行正确性取决于当前注册表状态的变更，并为预期失败抛出带有稳定错误码的 `RemoteError`。它的 `follow()` 流会同步订阅持久 Workspace 变更，先发出一份完整 baseline，再按顺序发出 `upsert`、`remove`、`order`、`archived` 和 `pinned` 增量。归档与置顶集合都是会话 id 数组，置顶数组把最近置顶的 id 放在前面；租户范围的订阅者在 baseline 和增量中只收到本租户的会话 id。重连会以替换 baseline 开始新一代，因此消费方不依赖收到断线期间的每个增量。不带 `stopActivity` 的 `archiveSession` 会以 `workspace/session-active` 拒绝仍有工作在跑的会话，其 details 按族（`turn`、`subagent`、`job`、`schedule`）列出这些工作及各项的 id 与名称；带 `stopActivity: true` 时注册表的提供方先停止这些工作，归档集合持久化后即返回响应，停止在后台收敛。
 
@@ -34,6 +34,8 @@ Client 入口提供 `ClientWorkspaceModel` 和 `createWorkspaceStateStream()`。
 `workspace.initializeDefault({ directoryName, title })` 返回持久化的默认工作区；Client service 通过 `workspaces.initializeDefault(request, signal?)` 提供同一请求。[Workspace Client](../../client/ui-workspace/README.zh.md)按启动时的语言解析这些名称。Host 将目录放在其账户的 `<Documents>/deepseek-harness` 下，远程 Web Host 也遵循此规则。目录名必须是非空的单个片段，不能含分隔符、冒号、NUL、首尾空白或末尾句点；标题不能为空。操作系统的文件名限制同样适用。Linux 系统查询要求存在 `xdg-user-dir` 且启用了 Documents 目录；不具备该条件的 Host 必须配置 `documentsDirectory` 或使用文件夹选择器。
 
 [Workspace 注册表](../../workspace/workspace/README.zh.md#first-use-workspace)负责资格判断、目录创建和持久化初始化。已有默认工作区直接返回，不再查询 Documents；请求中的名称不会将其重命名。不满足首次使用条件时返回 `undefined`，启动流程可将目录选择留给用户。名称无效时以 `gateway/bad-request` 拒绝；查询和创建失败遵循标准 Remote 错误处理。初始化不创建 Session，也不发送消息。
+
+启用 JDCloud 所有权时，`initializeDefault` 返回 `undefined`，不会访问进程全局默认工作区；用户只能选择各自目录下的路径。
 
 | 配置 | 默认值 | 用途 |
 | --- | --- | --- |

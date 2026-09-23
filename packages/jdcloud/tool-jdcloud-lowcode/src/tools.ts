@@ -536,10 +536,6 @@ async function requireExecutionSnapshot(
       'JDCLOUD_LOWCODE_TENANT_CHANGED',
     )
   }
-  // Low-code data belongs to a separate product and is exposed only to JDCloud system administrators.
-  if (!snapshot.systemAdministrator) {
-    reject('JDCloud low-code tools require systemAdministrator access', 'JDCLOUD_LOWCODE_ADMIN_REQUIRED')
-  }
   return snapshot
 }
 

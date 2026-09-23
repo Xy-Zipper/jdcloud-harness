@@ -13,6 +13,7 @@
       config:
         defaultBaseUrl: !!js process.env.JDCLOUD_DEFAULT_BASE_URL
         requestTimeoutMs: 15000
+        userWorkspaceDirectory: !!js process.env.JDCLOUD_USER_WORKSPACE_DIR
 
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'

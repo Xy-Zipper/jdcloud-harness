@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-tool-jdcloud-lowcode` is an administrator-only integration for conversations that inspect and change a tenant's JDCloud forms and workflows. Ordinary accounts receive no low-code menu and Host execution rejects all calls. Each admitted administrator prompt adds menus and resolved current-member selections, then eight tools describe fields, upload attachments, read or mutate records, and create tables. The Host accepts menu ids only from the Turn snapshot, enforces `readData`, `addData`, `editData`, `deleteData`, or `systemAdministrator`, and rejects writes that omit required values or use the wrong component value type. Choose this package only for controlled JDCloud deployments; workflow approval actions remain outside its scope.
+`dsh-tool-jdcloud-lowcode` lets authenticated JDCloud users inspect and change their tenant's forms and workflows according to their data permissions. Each admitted browser prompt adds menus and resolved current-member selections; eight tools describe fields, upload attachments, read or mutate records, and create tables. The Host accepts menu ids only from the Turn snapshot, enforces `readData`, `addData`, `editData`, `deleteData`, or `systemAdministrator` for table creation, and rejects writes that omit required values or use the wrong component value type. Choose this package only for controlled JDCloud deployments; workflow approval actions remain outside its scope.
 
 ## Table of Contents
 
@@ -29,7 +29,7 @@ Mount the plugin after the JDCloud authentication controller in a Web compositio
 
 ### When to choose it
 
-Choose this plugin only when authenticated JDCloud system administrators need conversational access to forms and workflows. Avoid it for ordinary users, when a carrier cannot submit Host-admitted browser prompts, when the model needs unrestricted JDCloud APIs, or when workflow approval, rejection, or return is required.
+Choose this plugin when authenticated JDCloud users need conversational access to forms and workflows they are permitted to use. Avoid it when a carrier cannot submit Host-admitted browser prompts, when the model needs unrestricted JDCloud APIs, or when workflow approval, rejection, or return is required.
 
 ### Minimal configuration
 
@@ -52,7 +52,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md) is the ex
 
 ### Per-prompt capability snapshot
 
-The authentication controller calls `/api/system/corp/getCorpList` before a browser prompt enters its Session. After admission, this plugin calls `/api/oauth/currentUser` even without an `@` selection; only a system administrator continues to member-name and department lookups, menu filtering, and snapshot publication. Ordinary accounts receive no low-code snapshot. The administrator snapshot contains the current tenant id and name, `systemAdministrator`, the resolved `currentMember` field selections, every `tenantDepartments` selection with its complete path, and each visible type `3` form or type `4` workflow with its menu id, path, and recognized `agentPermissions`; it excludes the remaining user profile and all authentication values.
+The authentication controller calls `/api/system/corp/getCorpList` before a browser prompt enters its Session. After admission, this plugin calls `/api/oauth/currentUser` even without an `@` selection, resolves member names and departments, and publishes a capability snapshot for every authenticated user. The snapshot contains the current tenant id and name, `systemAdministrator`, the resolved `currentMember` field selections, every `tenantDepartments` selection with its complete path, and each visible type `3` form or type `4` workflow with its menu id, path, and recognized `agentPermissions`; it excludes the remaining user profile and all authentication values.
 
 For a low-code request without `@`, the model uses a uniquely matching function from that snapshot (queries require `readData`). If the function is absent or ambiguous, the model asks the user to select it with `@` rather than guessing a menu id or claiming to have queried data. A missing grant is reported as an unavailable operation, not a missing selection. An explicit `@` selection still identifies the exact function.
 
@@ -60,7 +60,7 @@ The snapshot belongs to the current open Turn. Tool continuations reuse it witho
 
 ### Operations and authorization
 
-The Host checks system-administrator status, the current Turn, current tenant, and menu membership before every operation. Ordinary accounts cannot read or write through these tools. Missing or empty `agentPermissions` grants no write access.
+The Host checks the current Turn, current tenant, and menu membership before every operation. Data reads and writes require the matching `agentPermissions`; only table creation requires system-administrator status. Missing or empty `agentPermissions` grants no data access.
 
 | Tool | Operation | Host requirement |
 |---|---|---|
@@ -79,7 +79,7 @@ Table creation supports `text`, `textarea`, `number`, `switch`, `single_select`,
 
 ### Failures and recovery
 
-Codes `600`, `601`, and `602` from any authenticated request delete the stored login and fail as authentication-required; the Web login page becomes the recovery path. Other business or transport failures preserve the login. Non-administrator tool calls return `JDCLOUD_LOWCODE_ADMIN_REQUIRED` before any JDCloud data request. A member-name response that omits the current user or an invalid department-selector response fails prompt refresh. Department or role ids that no longer resolve, such as ids for deleted roles, are omitted from `currentMember` while the remaining selections are published. If the current tenant differs from the snapshot, the tool returns `JDCLOUD_LOWCODE_TENANT_CHANGED` without a JDCloud network request; the user submits a new browser prompt to refresh capabilities. Unknown menus, stale Turn snapshots, missing write or administrator grants, attachment ids absent from durable user messages, ambiguous short attachment digests, invalid upload responses, and record values that fail live component-type validation fail before their dependent modification. Invalid values return `JDCLOUD_LOWCODE_FIELD_TYPE`; missing create values return `JDCLOUD_LOWCODE_REQUIRED_FIELDS`, with readable field labels and codes in both cases.
+Codes `600`, `601`, and `602` from any authenticated request delete the stored login and fail as authentication-required; the Web login page becomes the recovery path. Other business or transport failures preserve the login. Non-administrator table creation returns `JDCLOUD_LOWCODE_ADMIN_REQUIRED` before any JDCloud data request. A member-name response that omits the current user or an invalid department-selector response fails prompt refresh. Department or role ids that no longer resolve, such as ids for deleted roles, are omitted from `currentMember` while the remaining selections are published. If the current tenant differs from the snapshot, the tool returns `JDCLOUD_LOWCODE_TENANT_CHANGED` without a JDCloud network request; the user submits a new browser prompt to refresh capabilities. Unknown menus, stale Turn snapshots, missing data or administrator grants, attachment ids absent from durable user messages, ambiguous short attachment digests, invalid upload responses, and record values that fail live component-type validation fail before their dependent modification. Invalid values return `JDCLOUD_LOWCODE_FIELD_TYPE`; missing create values return `JDCLOUD_LOWCODE_REQUIRED_FIELDS`, with readable field labels and codes in both cases.
 
 Table creation sends three ordered requests without an upstream transaction. If schema storage or authority creation fails after menu creation, the tool returns `JDCLOUD_LOWCODE_TABLE_PARTIAL` with the created menu id so an operator can inspect and repair the retained resource.
 

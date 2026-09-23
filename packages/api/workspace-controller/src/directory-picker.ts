@@ -4,6 +4,8 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { realpath } from 'node:fs/promises'
+import { basename, dirname } from 'node:path'
 import { z } from 'zod'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type {
@@ -12,7 +14,7 @@ import type {
 // The seam owns the listing declaration; the generator requires the reference
 // site to name that package rather than this package's re-export of it.
 import type { DirectoryListing } from '@deepseek-ai/dsh-host-directory-picker/types'
-import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteErrorCode } from '@deepseek-ai/dsh-typert-protocol'
 
 const createDirectoryRequestSchema = z.object({
@@ -23,6 +25,11 @@ const createDirectoryRequestSchema = z.object({
     && !/[/\\]/.test(request.name),
   { message: 'host.createDirectory requires a single non-blank path segment name' },
 )
+
+interface WorkspaceOwner {
+  workspaceRoot(): Promise<string | undefined>
+  assertWorkspacePath(path: string): Promise<void>
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -55,8 +62,12 @@ export class DirectoryPickerController extends TypertRemoteService {
   async pick(signal: AbortSignal): Promise<string | null> {
     const capability = this.requireCapability('native', 'pick')
     try {
-      return await capability.pick(signal)
+      const chosen = await capability.pick(signal)
+      const owner = this.owner()
+      if (chosen !== null && owner !== undefined) await owner.assertWorkspacePath(chosen)
+      return chosen
     } catch (error: unknown) {
+      if (remoteErrorOf(error) !== undefined) throw error
       throw cancellableFailure(error, signal, 'directory picker was aborted', 'directory picker failed')
     }
   }
@@ -72,8 +83,30 @@ export class DirectoryPickerController extends TypertRemoteService {
   async list(path: string | undefined, signal: AbortSignal): Promise<DirectoryListing> {
     const capability = this.requireCapability('browse', 'list')
     try {
-      return await capability.list(path, signal)
+      const owner = this.owner()
+      if (owner === undefined) return await capability.list(path, signal)
+      const root = await owner.workspaceRoot()
+      if (root === undefined) return await capability.list(path, signal)
+      const target = path ?? root
+      await owner.assertWorkspacePath(target)
+      const listing = await capability.list(await realpath(target), signal)
+      const entries = []
+      for (const entry of listing.entries) {
+        try {
+          await owner.assertWorkspacePath(entry.path)
+          entries.push(entry)
+        } catch {
+          // A symlink leading outside the user's directory is not navigable.
+        }
+      }
+      const crumbs = []
+      for (let current = listing.path;; current = dirname(current)) {
+        crumbs.unshift({ name: basename(current) || current, path: current, hidden: false })
+        if (current === root) break
+      }
+      return { ...listing, home: root, crumbs, entries }
     } catch (error: unknown) {
+      if (remoteErrorOf(error) !== undefined) throw error
       throw cancellableFailure(error, signal, 'directory listing was aborted')
     }
   }
@@ -96,10 +129,17 @@ export class DirectoryPickerController extends TypertRemoteService {
     }
     const capability = this.requireCapability('browse', 'createDirectory')
     try {
+      await this.owner()?.assertWorkspacePath(request.data.path)
       return await capability.createDirectory(request.data.path, request.data.name)
     } catch (error: unknown) {
+      if (remoteErrorOf(error) !== undefined) throw error
       throw browseFailure(error)
     }
+  }
+
+  /** Return the JDCloud path owner only when its authentication layer is installed. */
+  private owner(): WorkspaceOwner | undefined {
+    return this.ctx.get('jdcloudAuthController') as WorkspaceOwner | undefined
   }
 
   /** Resolve the capability one wire verb needs, or refuse with the kind this backend serves. */

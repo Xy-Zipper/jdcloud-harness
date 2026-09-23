@@ -101,6 +101,8 @@ export class WorkspaceController extends TypertRemoteService {
       || directoryName.endsWith('.') || /[/\\:\0]/.test(directoryName) || title.trim() === '') {
       throw new RemoteError('gateway/bad-request', 'default Workspace requires a directory name and non-blank title', {})
     }
+    // The registry's default is process-global; JDCloud owners choose their own directories instead.
+    if (this.ctx.get('jdcloudAuthController') !== undefined) return undefined
     const workspace = await this.ctx.workspaceRegistry.initializeDefault(async () => {
       const timeout = AbortSignal.timeout(this.config.documentsLookupTimeoutMs)
       const path = await defaultWorkspaceDirectory(

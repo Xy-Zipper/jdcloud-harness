@@ -22,7 +22,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-With JDCloud ownership installed, `create` reuses only the current owner's Workspace; a different owner can register the same canonical directory independently.
+With JDCloud ownership installed, `create` accepts only paths inside the current tenant-user directory and reuses only the current owner's Workspace. The directory picker starts at that directory, omits symlinks leaving it, and refuses navigation or creation outside it. Mutations by Workspace or Session id require that owner.
 
 The Host controller serializes mutations whose correctness depends on current registry state and throws `RemoteError` with a stable error code for expected failures. Its `follow()` stream synchronously attaches to durable Workspace changes, emits one complete baseline first, then emits ordered `upsert`, `remove`, `order`, `archived`, and `pinned` increments. Archive and pin sets are Session id arrays, with the most recently pinned id first in the pin array; tenant-scoped followers receive only their own Session ids in both baselines and increments. A reconnect starts another generation with a replacement baseline, so consumers do not depend on receiving every increment while disconnected. `archiveSession` without `stopActivity` refuses a Session with running work as `workspace/session-active`, whose details list that work by family (`turn`, `subagent`, `job`, `schedule`) with item ids and labels; with `stopActivity: true` the registry's providers stop the work first and the response arrives once the archive set is durable, while the stops settle in the background.
 
@@ -34,6 +34,8 @@ The Client entry provides `ClientWorkspaceModel` and `createWorkspaceStateStream
 `workspace.initializeDefault({ directoryName, title })` returns the durable default Workspace; the Client service exposes the same request as `workspaces.initializeDefault(request, signal?)`. The [Workspace Client](../../client/ui-workspace/README.md) resolves these names from its startup language. The Host places the directory under its account's `<Documents>/deepseek-harness`, including on remote Web hosts. The directory name must be one non-blank segment without separators, colon, NUL, surrounding whitespace, or a trailing dot; the title must be non-blank. OS filename restrictions also apply. Linux system lookup requires `xdg-user-dir` with an enabled Documents directory; hosts without it must configure `documentsDirectory` or use the folder picker.
 
 The [Workspace registry](../../workspace/workspace/README.md#first-use-workspace) owns eligibility, directory creation, and durable initialization. An existing default Workspace is returned without another Documents lookup; request names do not rename it. Ineligible first use returns `undefined`, so startup can leave directory selection to the user. Invalid names reject with `gateway/bad-request`; lookup and creation failures use standard Remote error handling. Initialization creates no Session and sends no message.
+
+With JDCloud ownership installed, `initializeDefault` returns `undefined` instead of accessing the process-global default Workspace; users select directories within their own root.
 
 | Configuration | Default | Purpose |
 | --- | --- | --- |
