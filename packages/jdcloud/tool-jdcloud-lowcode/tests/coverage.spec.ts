@@ -179,14 +179,21 @@ async function toolHarness(options: {
   readonly maxPageSize?: number
   readonly maxOutputBytes?: number
   readonly departments?: readonly { readonly id: string; readonly fullName: string; readonly path: string }[]
+  readonly roles?: readonly { readonly id: string; readonly fullName: string; readonly path: string }[]
   readonly response?: RequestResponder
 } = {}): Promise<ToolHarness> {
   const mounted = await services(options)
   const snapshots: LowcodeSnapshotStore = new WeakMap()
-  registerLowcodeTools(mounted.ctx, snapshots, async () => options.departments ?? [], {
-    maxPageSize: options.maxPageSize ?? 20,
-    maxOutputBytes: options.maxOutputBytes ?? 8_192,
-  })
+  registerLowcodeTools(
+    mounted.ctx,
+    snapshots,
+    async () => options.departments ?? [],
+    async () => options.roles ?? [],
+    {
+      maxPageSize: options.maxPageSize ?? 20,
+      maxOutputBytes: options.maxOutputBytes ?? 8_192,
+    },
+  )
   const agent = makeAgent(mounted.ctx, 'coverage-agent', options.status)
   if (options.registerAgent !== false) mounted.ctx.agents.register(agent)
   if (options.openTurn !== false) agent.session.append('turn/start', { turn: 1 })
@@ -249,7 +256,7 @@ describe('plugin configuration and prompt branches', () => {
   it('resolves omitted limits and rejects each unsafe or non-positive direct configuration', async () => {
     const mounted = await services()
     const fiber = await mounted.ctx.plugin(LowcodePlugin, {})
-    expect(mounted.ctx.tools.schemas()).toHaveLength(9)
+    expect(mounted.ctx.tools.schemas()).toHaveLength(11)
     await fiber.dispose()
 
     for (const maxPageSize of [0, 1.5]) {
@@ -346,7 +353,7 @@ describe('plugin configuration and prompt branches', () => {
     expect(mounted.status).not.toHaveBeenCalled()
   })
 
-  it('caches departments by tenant-user scope without adding them to the model snapshot', async () => {
+  it('caches department and role selectors by tenant-user scope without adding them to the model snapshot', async () => {
     let now = 1_000
     vi.spyOn(Date, 'now').mockImplementation(() => now)
     const mounted = await services({
@@ -358,29 +365,93 @@ describe('plugin configuration and prompt branches', () => {
         if (request.path === '/api/system/permission/organize/selector') {
           return [{ id: 'department-1', fullName: 'Engineering' }]
         }
+        if (request.path === '/api/system/permission/role/selector') {
+          return [{
+            id: 'group-1',
+            parentId: '-1',
+            fullName: 'Business',
+            children: [{ id: 'role-1', parentId: 'group-1', fullName: 'Approver' }],
+          }]
+        }
         throw new Error(`unexpected request ${request.path}`)
       },
     })
     await mounted.ctx.plugin(LowcodePlugin, { organizationCacheTtlMs: 100 })
     const agent = makeAgent(mounted.ctx)
     mounted.ctx.agents.register(agent)
+    agent.session.append('turn/start', { turn: 1 })
     const enter = () => Promise.resolve({ kind: 'enter' as const, messages: [browserMessage()] })
+    let calls = 0
+    const findRole = () => mounted.ctx.agents.withInitiator(agent, () => mounted.ctx.tools.execute({
+      name: 'jdcloud_lowcode_find_role',
+      arguments: { query: 'Approver' },
+      callId: ToolCallId(`role-cache-call-${String(++calls)}`),
+      signal: new AbortController().signal,
+      agent,
+    }))
 
     const first = await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
     const firstSnapshot = first.kind === 'enter' ? first.messages.at(-1) : undefined
     expect(firstSnapshot?.content[0]).toMatchObject({ type: 'text' })
     expect(JSON.stringify(firstSnapshot)).not.toContain('tenantDepartments')
+    expect(JSON.stringify(firstSnapshot)).not.toContain('tenantRoles')
+    expect((await findRole()).isError).toBe(false)
 
     await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    expect((await findRole()).isError).toBe(false)
     mounted.setScopeKey('scope-2')
     await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    expect((await findRole()).isError).toBe(false)
     now += 101
     await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    expect((await findRole()).isError).toBe(false)
 
     expect(mounted.requests.filter(request => request.path === '/api/system/permission/organize/selector'))
       .toHaveLength(3)
+    expect(mounted.requests.filter(request => request.path === '/api/system/permission/role/selector'))
+      .toHaveLength(3)
     expect(mounted.requests.filter(request => request.path === '/api/oauth/currentUser')).toHaveLength(4)
     expect(mounted.requests.filter(request => request.path === '/api/system/permission/users/getMemberName')).toHaveLength(4)
+  })
+
+  it('rejects role search when the tenant-user scope changes during selector loading', async () => {
+    const mounted = await services({
+      response: (request) => {
+        if (request.path === '/api/oauth/currentUser') return currentUser()
+        if (request.path === '/api/system/permission/users/getMemberName') {
+          return { department: [], role: [], user: [{ id: 'user-1', fullName: 'Tester', phone: '' }] }
+        }
+        if (request.path === '/api/system/permission/organize/selector') return []
+        throw new Error(`unexpected request ${request.path}`)
+      },
+    })
+    await mounted.ctx.plugin(LowcodePlugin, {})
+    const agent = makeAgent(mounted.ctx)
+    mounted.ctx.agents.register(agent)
+    agent.session.append('turn/start', { turn: 1 })
+    await preStep(
+      mounted.ctx,
+      agent,
+      [browserMessage()],
+      new AbortController().signal,
+      () => Promise.resolve({ kind: 'enter' as const, messages: [browserMessage()] }),
+    )
+    mounted.setResponder((request) => {
+      if (request.path !== '/api/system/permission/role/selector') {
+        throw new Error(`unexpected request ${request.path}`)
+      }
+      mounted.setScopeKey('scope-2')
+      return []
+    })
+
+    const result = await mounted.ctx.agents.withInitiator(agent, () => mounted.ctx.tools.execute({
+      name: 'jdcloud_lowcode_find_role',
+      arguments: { query: 'Approver' },
+      callId: ToolCallId('role-scope-change-call'),
+      signal: new AbortController().signal,
+      agent,
+    }))
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_TENANT_CHANGED')
   })
 })
 
@@ -432,6 +503,8 @@ describe('schemas, presenters, describe, and exact reads', () => {
 
     const concurrencyArguments = {
       jdcloud_lowcode_find_department: { query: 'Engineering' },
+      jdcloud_lowcode_find_role: { query: 'Approver' },
+      jdcloud_lowcode_find_user: { search_by: 'phone', query: '13800000000' },
       jdcloud_lowcode_describe: { menu_id: 'form-1' },
       jdcloud_lowcode_query: { menu_id: 'form-1' },
       jdcloud_lowcode_get: { menu_id: 'form-1', record_id: 'row-1' },
@@ -441,6 +514,14 @@ describe('schemas, presenters, describe, and exact reads', () => {
     }
     const presentations = [
       ['jdcloud_lowcode_find_department', { query: 'Engineering' }, 'Find JDCloud department', 'read', 'Engineering'],
+      ['jdcloud_lowcode_find_role', { query: 'Approver' }, 'Find JDCloud role', 'read', 'Approver'],
+      [
+        'jdcloud_lowcode_find_user',
+        { search_by: 'phone', query: '13800000000' },
+        'Find JDCloud user',
+        'read',
+        '13800000000',
+      ],
       ['jdcloud_lowcode_describe', { menu_id: 'form-1' }, 'Describe JDCloud function', 'read', 'form-1'],
       ['jdcloud_lowcode_query', { menu_id: 'form-1' }, 'Query JDCloud data', 'read', 'form-1'],
       ['jdcloud_lowcode_get', { menu_id: 'form-1', record_id: 'row-1' }, 'Read JDCloud record', 'read', 'row-1'],
@@ -482,6 +563,8 @@ describe('schemas, presenters, describe, and exact reads', () => {
       departments: [
         { id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' },
         { id: 'department-2', fullName: 'Engineering East', path: 'Tenant / Engineering East' },
+        { id: 'department-path', fullName: 'Operations', path: 'Tenant / Exact Path' },
+        { id: 'department-path-partial', fullName: 'Sales', path: 'Tenant / Searchable Path' },
         ...Array.from({ length: 20 }, (_, index) => ({
           id: `department-${String(index + 3)}`,
           fullName: `Engineering ${String(index + 3)}`,
@@ -498,10 +581,169 @@ describe('schemas, presenters, describe, and exact reads', () => {
     })
     expect(JSON.parse(resultText(departments).slice(resultText(departments).indexOf('\n') + 1)).departments)
       .toHaveLength(20)
+    for (const [query, expectedId] of [
+      ['Tenant / Exact Path', 'department-path'],
+      ['East', 'department-2'],
+      ['Searchable', 'department-path-partial'],
+    ] as const) {
+      const matched = await departmentSearch.call('jdcloud_lowcode_find_department', { query })
+      expect(JSON.parse(resultText(matched).slice(resultText(matched).indexOf('\n') + 1)).departments[0]?.id)
+        .toBe(expectedId)
+    }
+    const unmatched = await departmentSearch.call('jdcloud_lowcode_find_department', { query: 'Missing' })
+    expect(JSON.parse(resultText(unmatched).slice(resultText(unmatched).indexOf('\n') + 1))).toEqual({
+      departments: [],
+    })
+
+    const roleSearch = await toolHarness({
+      roles: [
+        { id: 'role-1', fullName: 'Approver', path: 'Business / Approver' },
+        { id: 'role-2', fullName: 'Approver East', path: 'Business / Approver East' },
+        { id: 'role-path', fullName: 'Operator', path: 'Regional / Exact Role Path' },
+        ...Array.from({ length: 20 }, (_, index) => ({
+          id: `role-${String(index + 3)}`,
+          fullName: `Approver ${String(index + 3)}`,
+          path: `Business / Approver ${String(index + 3)}`,
+        })),
+      ],
+    })
+    const roles = await roleSearch.call('jdcloud_lowcode_find_role', { query: 'Approver' })
+    expect(JSON.parse(resultText(roles).slice(resultText(roles).indexOf('\n') + 1)).roles)
+      .toHaveLength(20)
+    for (const [query, expectedId] of [
+      ['Business / Approver', 'role-1'],
+      ['East', 'role-2'],
+      ['Exact Role', 'role-path'],
+    ] as const) {
+      const matched = await roleSearch.call('jdcloud_lowcode_find_role', { query })
+      expect(JSON.parse(resultText(matched).slice(resultText(matched).indexOf('\n') + 1)).roles[0]?.id)
+        .toBe(expectedId)
+    }
+    const unmatchedRole = await roleSearch.call('jdcloud_lowcode_find_role', { query: 'Missing' })
+    expect(JSON.parse(resultText(unmatchedRole).slice(resultText(unmatchedRole).indexOf('\n') + 1))).toEqual({
+      roles: [],
+    })
 
     departmentSearch.setScopeKey('scope-2')
     const changedScope = await departmentSearch.call('jdcloud_lowcode_find_department', { query: 'Engineering' })
     expect(errorCode(changedScope)).toBe('JDCLOUD_LOWCODE_TENANT_CHANGED')
+
+    const userSearch = await toolHarness({
+      response: (request) => {
+        if (request.path === '/api/system/permission/organize/-1/user') {
+          const filter = (request.body as { readonly filter: readonly { readonly enCode: string }[] }).filter[0]
+          return filter?.enCode === 'phone'
+            ? {
+              list: [
+                {
+                  id: 'user-near', realName: '相似号码', phone: '13800000001',
+                  departmentId: [], roleId: [],
+                },
+                {
+                  id: 'user-1', realName: '舒畅', phone: '13800000000',
+                  departmentId: ['department-1'], roleId: ['role-1'],
+                },
+              ],
+              pagination: { currentPage: 1, pageSize: 20, total: 2 },
+            }
+            : {
+              list: [
+                {
+                  id: 'user-1', realName: '舒畅', phone: '13800000000',
+                  departmentId: ['department-1'], roleId: ['role-1'],
+                },
+                {
+                  id: 'user-2', realName: '舒畅', phone: '13900000000',
+                  departmentId: ['department-2'], roleId: [],
+                },
+              ],
+              pagination: { currentPage: 1, pageSize: 20, total: 2 },
+            }
+        }
+        if (request.path === '/api/system/permission/users/getMemberName') {
+          return {
+            department: [
+              { id: 'department-1', fullName: '研发部' },
+              { id: 'department-2', fullName: '市场部' },
+            ],
+            role: [{ id: 'role-1', fullName: '开发人员' }],
+            user: [],
+          }
+        }
+        throw new Error(`unexpected request ${request.path}`)
+      },
+    })
+    const byPhone = await userSearch.call('jdcloud_lowcode_find_user', {
+      search_by: 'phone',
+      query: '13800000000',
+    })
+    expect(byPhone.isError).toBe(false)
+    expect(JSON.parse(resultText(byPhone).slice(resultText(byPhone).indexOf('\n') + 1))).toEqual({
+      resolution: 'unique',
+      total: 1,
+      users: [{
+        id: 'user-1',
+        fullName: '舒畅',
+        phone: '13800000000',
+        department: [{ id: 'department-1', fullName: '研发部' }],
+        role: [{ id: 'role-1', fullName: '开发人员' }],
+      }],
+    })
+    expect(userSearch.requests.slice(0, 2)).toEqual([
+      {
+        path: '/api/system/permission/organize/-1/user',
+        method: 'POST',
+        body: {
+          currentPage: 1,
+          pageSize: 20,
+          connect: 'and',
+          filter: [{ enCode: 'phone', value: ['13800000000'], type: 'custom', method: 'like' }],
+        },
+      },
+      {
+        path: '/api/system/permission/users/getMemberName',
+        method: 'POST',
+        body: ['department-1', 'role-1'],
+      },
+    ])
+
+    const byName = await userSearch.call('jdcloud_lowcode_find_user', {
+      search_by: 'name',
+      query: '舒畅',
+    })
+    expect(byName.isError).toBe(false)
+    expect(JSON.parse(resultText(byName).slice(resultText(byName).indexOf('\n') + 1))).toMatchObject({
+      resolution: 'ambiguous',
+      total: 2,
+      users: [{ id: 'user-1' }, { id: 'user-2' }],
+    })
+    expect(userSearch.requests[2]).toEqual({
+      path: '/api/system/permission/organize/-1/user',
+      method: 'POST',
+      body: {
+        currentPage: 1,
+        pageSize: 20,
+        connect: 'and',
+        filter: [{ enCode: 'realName', value: ['舒畅'], type: 'custom', method: 'like' }],
+      },
+    })
+
+    const emptyUserSearch = await toolHarness({
+      response: request => request.path === '/api/system/permission/organize/-1/user'
+        ? { list: [], pagination: { currentPage: 1, pageSize: 20, total: 0 } }
+        : (() => { throw new Error(`unexpected request ${request.path}`) })(),
+    })
+    const noUsers = await emptyUserSearch.call('jdcloud_lowcode_find_user', {
+      search_by: 'name',
+      query: '不存在',
+    })
+    expect(noUsers.isError).toBe(false)
+    expect(JSON.parse(resultText(noUsers).slice(resultText(noUsers).indexOf('\n') + 1))).toEqual({
+      resolution: 'none',
+      total: 0,
+      users: [],
+    })
+    expect(emptyUserSearch.requests).toHaveLength(1)
 
     const described = await mounted.call('jdcloud_lowcode_describe', { menu_id: 'form-1' })
     expect(described.isError).toBe(false)

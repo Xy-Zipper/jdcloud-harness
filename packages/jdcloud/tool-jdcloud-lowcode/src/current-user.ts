@@ -43,6 +43,29 @@ export interface LowcodeTenantDepartment extends LowcodeNamedMember {
   readonly path: string
 }
 
+/** One role selectable in the current JDCloud tenant. */
+export interface LowcodeTenantRole extends LowcodeNamedMember {
+  readonly path: string
+}
+
+/** One user returned by tenant-directory search before related member names are resolved. */
+export interface LowcodeTenantUserLookup extends LowcodeUserMember {
+  readonly departmentIds: readonly string[]
+  readonly roleIds: readonly string[]
+}
+
+/** One tenant user with exact selections suitable for user, department, and role fields. */
+export interface LowcodeTenantUser extends LowcodeUserMember {
+  readonly department: readonly LowcodeNamedMember[]
+  readonly role: readonly LowcodeNamedMember[]
+}
+
+/** One bounded page returned by tenant-directory user search. */
+export interface LowcodeTenantUserSearch {
+  readonly total: number
+  readonly users: readonly LowcodeTenantUserLookup[]
+}
+
 /** IDs sent in one `/getMemberName` request for the current account. */
 export interface LowcodeCurrentMemberLookup {
   readonly ids: readonly string[]
@@ -153,6 +176,108 @@ export function parseTenantDepartments(value: unknown): LowcodeTenantDepartment[
 }
 
 /**
+ * Flatten `/api/system/permission/role/selector` into exact role selections.
+ * @param value - Unwrapped recursive role-selector response data.
+ * @returns Selectable roles in response order with their complete display paths.
+ */
+export function parseTenantRoles(value: unknown): LowcodeTenantRole[] {
+  if (!Array.isArray(value)) throw new Error('JDCloud role selector list is invalid')
+  const ids = new Set<string>()
+  const roles: LowcodeTenantRole[] = []
+
+  /** Visit one external selector level while preserving the upstream tree order. */
+  function visit(entries: readonly unknown[], parents: readonly string[]): void {
+    for (const entry of entries) {
+      const role = requireRecord(entry, 'JDCloud role selector item')
+      const id = requireNonEmptyString(Reflect.get(role, 'id'), 'JDCloud role selector id')
+      if (ids.has(id)) throw new Error(`JDCloud role selector repeats id ${JSON.stringify(id)}`)
+      ids.add(id)
+      const fullName = requireNonEmptyString(
+        Reflect.get(role, 'fullName'),
+        `JDCloud role selector ${JSON.stringify(id)} name`,
+      )
+      const parentId = requireNonEmptyString(
+        Reflect.get(role, 'parentId'),
+        `JDCloud role selector ${JSON.stringify(id)} parent id`,
+      )
+      const path = [...parents, fullName]
+      if (parentId !== '-1') roles.push({ id, fullName, path: path.join(' / ') })
+      const children = Reflect.get(role, 'children')
+      if (children === undefined || children === null) continue
+      if (!Array.isArray(children)) {
+        throw new Error(`JDCloud role selector ${JSON.stringify(id)} child list is invalid`)
+      }
+      visit(children, path)
+    }
+  }
+
+  visit(value, [])
+  return roles
+}
+
+/**
+ * Parse `/api/system/permission/organize/-1/user` into bounded user candidates.
+ * @param value - Unwrapped JDCloud organization-user response data.
+ * @returns Search total and user selections with unresolved department and role ids.
+ */
+export function parseTenantUserSearch(value: unknown): LowcodeTenantUserSearch {
+  const root = requireRecord(value, 'JDCloud tenant-user response')
+  const list = Reflect.get(root, 'list')
+  if (!Array.isArray(list)) throw new Error('JDCloud tenant-user list is invalid')
+  const pagination = requireRecord(Reflect.get(root, 'pagination'), 'JDCloud tenant-user pagination')
+  const total = requireNonNegativeSafeInteger(
+    Reflect.get(pagination, 'total'),
+    'JDCloud tenant-user pagination total',
+  )
+  const ids = new Set<string>()
+  const users = list.map((entry): LowcodeTenantUserLookup => {
+    const user = requireRecord(entry, 'JDCloud tenant-user item')
+    const id = requireNonEmptyString(Reflect.get(user, 'id'), 'JDCloud tenant-user id')
+    if (ids.has(id)) throw new Error(`JDCloud tenant-user response repeats user ${JSON.stringify(id)}`)
+    ids.add(id)
+    return {
+      id,
+      fullName: requireNonEmptyString(
+        Reflect.get(user, 'realName'),
+        `JDCloud tenant-user ${JSON.stringify(id)} name`,
+      ),
+      phone: requireString(Reflect.get(user, 'phone'), `JDCloud tenant-user ${JSON.stringify(id)} phone`),
+      departmentIds: requireIdList(
+        Reflect.get(user, 'departmentId'),
+        `JDCloud tenant-user ${JSON.stringify(id)} department ids`,
+      ),
+      roleIds: requireIdList(
+        Reflect.get(user, 'roleId'),
+        `JDCloud tenant-user ${JSON.stringify(id)} role ids`,
+      ),
+    }
+  })
+  return { total, users }
+}
+
+/**
+ * Resolve searched users' department and role ids from one `/getMemberName` response.
+ * @param users - User candidates returned by tenant-directory search.
+ * @param value - Unwrapped member-name response data for their department and role ids.
+ * @returns Exact user, department, and role selections in search-result order.
+ */
+export function resolveTenantUserSearch(
+  users: readonly LowcodeTenantUserLookup[],
+  value: unknown,
+): LowcodeTenantUser[] {
+  const root = requireRecord(value, 'JDCloud member-name response')
+  const departments = readNamedMembers(Reflect.get(root, 'department'), 'department')
+  const roles = readNamedMembers(Reflect.get(root, 'role'), 'role')
+  return users.map(user => ({
+    id: user.id,
+    fullName: user.fullName,
+    phone: user.phone,
+    department: resolvedMembers(departments, user.departmentIds),
+    role: resolvedMembers(roles, user.roleIds),
+  }))
+}
+
+/**
  * Render tenant identity, current member selections, and filtered menu authorization facts for the model.
  * @param snapshot - Host-attested capabilities for the current turn.
  * @returns Model-visible untrusted-data snapshot text.
@@ -255,5 +380,13 @@ function requireNonEmptyString(value: unknown, label: string): string {
 /** Require one external string while allowing an empty optional display value. */
 function requireString(value: unknown, label: string): string {
   if (typeof value !== 'string') throw new Error(`${label} is invalid`)
+  return value
+}
+
+/** Require one external non-negative safe integer. */
+function requireNonNegativeSafeInteger(value: unknown, label: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} is invalid`)
+  }
   return value
 }

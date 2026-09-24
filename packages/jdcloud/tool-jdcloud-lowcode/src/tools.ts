@@ -13,11 +13,16 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import mime from 'mime-types'
+import {
+  parseTenantUserSearch,
+  resolveTenantUserSearch,
+} from './current-user.ts'
 import type {
   LowcodeCapabilitySnapshot,
   LowcodeMenuCapability,
   LowcodePermission,
   LowcodeTenantDepartment,
+  LowcodeTenantRole,
 } from './current-user.ts'
 import { buildFormData } from './table-schema.ts'
 import type { TableFieldInput } from './table-schema.ts'
@@ -38,8 +43,20 @@ export type LowcodeDepartmentSearch = (
   signal: AbortSignal,
 ) => Promise<readonly LowcodeTenantDepartment[]>
 
+/** Resolve the current tenant-user's cached JDCloud roles for one tool call. */
+export type LowcodeRoleSearch = (
+  scopeKey: string,
+  signal: AbortSignal,
+) => Promise<readonly LowcodeTenantRole[]>
+
 /** Maximum department candidates exposed in one model-visible search result. */
 const DEPARTMENT_SEARCH_LIMIT = 20
+
+/** Maximum role candidates exposed in one model-visible search result. */
+const ROLE_SEARCH_LIMIT = 20
+
+/** Maximum tenant-user candidates exposed in one model-visible search result. */
+const USER_SEARCH_LIMIT = 20
 
 const FILTER_METHODS = [
   'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'nin',
@@ -147,12 +164,14 @@ const TEXT_OUTPUT = {
  * @param ctx - Plugin context carrying tool, Agent, projection, and authentication services.
  * @param snapshots - Per-Agent current-turn authorization snapshots.
  * @param findDepartments - Scope-isolated department lookup supplied by the prompt plugin.
+ * @param findRoles - Scope-isolated role lookup supplied by the prompt plugin.
  * @param config - Resolved query and output limits.
  */
 export function registerLowcodeTools(
   ctx: Context,
   snapshots: LowcodeSnapshotStore,
   findDepartments: LowcodeDepartmentSearch,
+  findRoles: LowcodeRoleSearch,
   config: LowcodeToolConfig,
 ): void {
   ctx.tools.register(defineTool({
@@ -175,6 +194,92 @@ export function registerLowcodeTools(
       return renderResult({ departments: matchedDepartments(departments, query) }, config.maxOutputBytes)
     },
     presentCall: args => present('Find JDCloud department', 'read', args.query),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'jdcloud_lowcode_find_role',
+    description: 'Find up to 20 roles by exact or partial name or group path in the current JDCloud tenant. Use an exact returned id for roleSelect values.',
+    parameters: {
+      query: {
+        type: 'string',
+        required: true,
+        description: 'Role name or group-path fragment to match.',
+      },
+    },
+    output: TEXT_OUTPUT,
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const query = requireText(args.query, 'query')
+      const snapshot = await requireExecutionSnapshot(ctx, snapshots, exec)
+      const roles = await findRoles(snapshot.scopeKey, exec.signal)
+      await requireExecutionSnapshot(ctx, snapshots, exec)
+      return renderResult({ roles: matchedRoles(roles, query) }, config.maxOutputBytes)
+    },
+    presentCall: args => present('Find JDCloud role', 'read', args.query),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'jdcloud_lowcode_find_user',
+    description: 'Find up to 20 users by phone or real name in the current JDCloud tenant. '
+      + 'A unique result can supply userSelect, department, and role ids. When multiple users match, ask the user to choose one or provide a phone number.',
+    parameters: {
+      search_by: {
+        type: 'string',
+        required: true,
+        enum: ['phone', 'name'] as const,
+        description: 'Whether query is a phone number or real name.',
+      },
+      query: {
+        type: 'string',
+        required: true,
+        description: 'Phone number or real-name fragment to match.',
+      },
+    },
+    output: TEXT_OUTPUT,
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const query = requireText(args.query, 'query')
+      await requireExecutionSnapshot(ctx, snapshots, exec)
+      const search = parseTenantUserSearch(
+        await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+          path: '/api/system/permission/organize/-1/user',
+          method: 'POST',
+          body: {
+            currentPage: 1,
+            pageSize: USER_SEARCH_LIMIT,
+            connect: 'and',
+            filter: [{
+              enCode: args.search_by === 'phone' ? 'phone' : 'realName',
+              value: [query],
+              type: 'custom',
+              method: 'like',
+            }],
+          },
+        }, exec.signal),
+      )
+      const candidates = search.users
+        .filter(user => args.search_by !== 'phone' || user.phone === query)
+        .slice(0, USER_SEARCH_LIMIT)
+      const memberIds = [...new Set(candidates.flatMap(user => [
+        ...user.departmentIds,
+        ...user.roleIds,
+      ]))]
+      const memberNames = memberIds.length === 0
+        ? { department: [], role: [] }
+        : await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+          path: '/api/system/permission/users/getMemberName',
+          method: 'POST',
+          body: memberIds,
+        }, exec.signal)
+      const users = resolveTenantUserSearch(candidates, memberNames)
+      await requireExecutionSnapshot(ctx, snapshots, exec)
+      const total = args.search_by === 'phone' ? candidates.length : search.total
+      const resolution = total === 0
+        ? 'none'
+        : total === 1 && users.length === 1 ? 'unique' : 'ambiguous'
+      return renderResult({ resolution, total, users }, config.maxOutputBytes)
+    },
+    presentCall: args => present('Find JDCloud user', 'read', args.query),
   }))
 
   ctx.tools.register(defineTool({
@@ -601,6 +706,35 @@ function matchedDepartments(
 function departmentMatchRank(department: LowcodeTenantDepartment, query: string): number | undefined {
   const fullName = department.fullName.toLocaleLowerCase()
   const path = department.path.toLocaleLowerCase()
+  if (fullName === query) return 0
+  if (path === query) return 1
+  if (fullName.includes(query)) return 2
+  if (path.includes(query)) return 3
+  return undefined
+}
+
+/** Match roles in stable response order with exact names and paths first. */
+function matchedRoles(
+  roles: readonly LowcodeTenantRole[],
+  query: string,
+): readonly LowcodeTenantRole[] {
+  const normalized = query.toLocaleLowerCase()
+  return roles
+    .map((role, index) => ({ role, index, rank: roleMatchRank(role, normalized) }))
+    .filter((candidate): candidate is {
+      readonly role: LowcodeTenantRole
+      readonly index: number
+      readonly rank: number
+    } => candidate.rank !== undefined)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .slice(0, ROLE_SEARCH_LIMIT)
+    .map(candidate => candidate.role)
+}
+
+/** Rank a role match so an exact selection is always presented first. */
+function roleMatchRank(role: LowcodeTenantRole, query: string): number | undefined {
+  const fullName = role.fullName.toLocaleLowerCase()
+  const path = role.path.toLocaleLowerCase()
   if (fullName === query) return 0
   if (path === query) return 1
   if (fullName.includes(query)) return 2

@@ -306,6 +306,47 @@
       }
     },
     {
+      "name": "jdcloud_lowcode_find_role",
+      "description": "Find up to 20 roles by exact or partial name or group path in the current JDCloud tenant. Use an exact returned id for roleSelect values.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Role name or group-path fragment to match."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "jdcloud_lowcode_find_user",
+      "description": "Find up to 20 users by phone or real name in the current JDCloud tenant. A unique result can supply userSelect, department, and role ids. When multiple users match, ask the user to choose one or provide a phone number.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_by": {
+            "type": "string",
+            "description": "Whether query is a phone number or real name.",
+            "enum": [
+              "phone",
+              "name"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "description": "Phone number or real-name fragment to match."
+          }
+        },
+        "required": [
+          "search_by",
+          "query"
+        ]
+      }
+    },
+    {
       "name": "jdcloud_lowcode_get",
       "description": "Read one JDCloud form or workflow record by its exact _id.",
       "parameters": {

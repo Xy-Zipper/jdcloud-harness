@@ -3,8 +3,11 @@ import {
   parseCurrentMemberLookup,
   parseCurrentMemberNames,
   parseTenantDepartments,
+  parseTenantRoles,
+  parseTenantUserSearch,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
+  resolveTenantUserSearch,
 } from '../src/current-user.ts'
 
 /** Build the unwrapped `/api/oauth/currentUser` data used by parser cases. */
@@ -283,6 +286,156 @@ describe('tenant-department wire validation coverage', () => {
     expect(() => parseTenantDepartments([
       { id: 'same', fullName: 'Root', children: [{ id: 'same', fullName: 'Child' }] },
     ])).toThrow('department selector repeats id "same"')
+  })
+})
+
+describe('tenant-role wire validation coverage', () => {
+  it('flattens role groups into selectable roles with complete paths', () => {
+    expect(parseTenantRoles([
+      {
+        id: 'group-1',
+        parentId: '-1',
+        fullName: '业务角色',
+        children: [
+          { id: 'role-1', parentId: 'group-1', fullName: '审批人' },
+          { id: 'role-2', parentId: 'group-1', fullName: '经办人', children: null },
+        ],
+      },
+      { id: 'role-root', parentId: '0', fullName: '独立角色', children: [] },
+    ])).toEqual([
+      { id: 'role-1', fullName: '审批人', path: '业务角色 / 审批人' },
+      { id: 'role-2', fullName: '经办人', path: '业务角色 / 经办人' },
+      { id: 'role-root', fullName: '独立角色', path: '独立角色' },
+    ])
+  })
+
+  it('rejects malformed selector containers, entries, names, parents, children, and duplicate ids', () => {
+    expect(() => parseTenantRoles(null)).toThrow('role selector list is invalid')
+    expect(() => parseTenantRoles([null])).toThrow('role selector item is invalid')
+    expect(() => parseTenantRoles([{ id: '', parentId: '-1', fullName: 'Group' }]))
+      .toThrow('role selector id is invalid')
+    expect(() => parseTenantRoles([{ id: 'group', parentId: '-1', fullName: '' }]))
+      .toThrow('role selector "group" name is invalid')
+    expect(() => parseTenantRoles([{ id: 'group', parentId: '', fullName: 'Group' }]))
+      .toThrow('role selector "group" parent id is invalid')
+    expect(() => parseTenantRoles([{ id: 'group', parentId: '-1', fullName: 'Group', children: {} }]))
+      .toThrow('role selector "group" child list is invalid')
+    expect(() => parseTenantRoles([
+      {
+        id: 'same',
+        parentId: '-1',
+        fullName: 'Group',
+        children: [{ id: 'same', parentId: 'same', fullName: 'Role' }],
+      },
+    ])).toThrow('role selector repeats id "same"')
+  })
+})
+
+describe('tenant-user search wire validation coverage', () => {
+  it('parses user candidates and resolves their department and role selections', () => {
+    const search = parseTenantUserSearch({
+      list: [
+        {
+          id: ' user-1 ',
+          realName: ' 舒畅 ',
+          phone: '13800000000',
+          departmentId: ['department-2', 'department-1', 'department-2'],
+          roleId: ['role-1'],
+        },
+        {
+          id: 'user-2',
+          realName: '舒畅',
+          phone: '',
+          departmentId: ['department-deleted'],
+          roleId: [],
+        },
+      ],
+      pagination: { total: 2 },
+    })
+    expect(search).toEqual({
+      total: 2,
+      users: [
+        {
+          id: 'user-1',
+          fullName: '舒畅',
+          phone: '13800000000',
+          departmentIds: ['department-2', 'department-1'],
+          roleIds: ['role-1'],
+        },
+        {
+          id: 'user-2',
+          fullName: '舒畅',
+          phone: '',
+          departmentIds: ['department-deleted'],
+          roleIds: [],
+        },
+      ],
+    })
+    expect(resolveTenantUserSearch(search.users, {
+      department: [
+        { id: 'department-1', fullName: '研发部' },
+        { id: 'department-2', fullName: '市场部' },
+      ],
+      role: [{ id: 'role-1', fullName: '开发人员' }],
+    })).toEqual([
+      {
+        id: 'user-1',
+        fullName: '舒畅',
+        phone: '13800000000',
+        department: [
+          { id: 'department-2', fullName: '市场部' },
+          { id: 'department-1', fullName: '研发部' },
+        ],
+        role: [{ id: 'role-1', fullName: '开发人员' }],
+      },
+      {
+        id: 'user-2',
+        fullName: '舒畅',
+        phone: '',
+        department: [],
+        role: [],
+      },
+    ])
+  })
+
+  it('rejects malformed user-search containers and entries', () => {
+    expect(() => parseTenantUserSearch(null)).toThrow('tenant-user response is invalid')
+    expect(() => parseTenantUserSearch({ list: null, pagination: { total: 0 } }))
+      .toThrow('tenant-user list is invalid')
+    expect(() => parseTenantUserSearch({ list: [], pagination: null }))
+      .toThrow('tenant-user pagination is invalid')
+    expect(() => parseTenantUserSearch({ list: [], pagination: { total: -1 } }))
+      .toThrow('pagination total is invalid')
+    expect(() => parseTenantUserSearch({ list: [null], pagination: { total: 1 } }))
+      .toThrow('tenant-user item is invalid')
+    expect(() => parseTenantUserSearch({
+      list: [{ id: '', realName: 'User', phone: '', departmentId: [], roleId: [] }],
+      pagination: { total: 1 },
+    })).toThrow('tenant-user id is invalid')
+    expect(() => parseTenantUserSearch({
+      list: [
+        { id: 'user-1', realName: 'User', phone: '', departmentId: [], roleId: [] },
+        { id: 'user-1', realName: 'Other', phone: '', departmentId: [], roleId: [] },
+      ],
+      pagination: { total: 2 },
+    })).toThrow('repeats user "user-1"')
+    expect(() => parseTenantUserSearch({
+      list: [{ id: 'user-1', realName: '', phone: '', departmentId: [], roleId: [] }],
+      pagination: { total: 1 },
+    })).toThrow('tenant-user "user-1" name is invalid')
+    expect(() => parseTenantUserSearch({
+      list: [{ id: 'user-1', realName: 'User', phone: null, departmentId: [], roleId: [] }],
+      pagination: { total: 1 },
+    })).toThrow('tenant-user "user-1" phone is invalid')
+    expect(() => parseTenantUserSearch({
+      list: [{ id: 'user-1', realName: 'User', phone: '', departmentId: null, roleId: [] }],
+      pagination: { total: 1 },
+    })).toThrow('department ids are invalid')
+    expect(() => parseTenantUserSearch({
+      list: [{ id: 'user-1', realName: 'User', phone: '', departmentId: [], roleId: [1] }],
+      pagination: { total: 1 },
+    })).toThrow('role ids is invalid')
+    expect(() => resolveTenantUserSearch([], null)).toThrow('member-name response is invalid')
   })
 })
 

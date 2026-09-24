@@ -32,7 +32,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-fs-search` | `glob`, `grep` | `ctx.tools`, `ctx.subprocess`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | glob and grep are unconditional discovery tools that spawn the packaged ripgrep binary (`@vscode/ripgrep`) through ctx.subprocess as ordinary foreground calls (never background jobs) — no host `rg` install and no shell layer. The catalog uses `sampleOverCapGlobResults: true`; deployments must choose that behavior explicitly. Capped results save the complete formatted list through the optional ctx.spillStore backend; returned locators are follow-up-readable/searchable when the backend exposes local paths in co-located deployments. |
 | `@deepseek-ai/dsh-tool-terminal` | `terminal_close`, `terminal_list`, `terminal_open`, `terminal_read`, `terminal_send`, `terminal_signal` | `ctx.tools`, `ctx.terminals`, `ctx.systemPrompt`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The six terminal tools are opt-in and complement one-shot shell/filesystem tools. `terminal_send(run_in_background: true)` registers with `ctx.jobs`; TUI, named key sequences, BEL, resize, auto-start, and cross-agent sharing are absent from the schema. |
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
-| `@deepseek-ai/dsh-tool-jdcloud-lowcode` | `jdcloud_lowcode_create`, `jdcloud_lowcode_create_table`, `jdcloud_lowcode_delete`, `jdcloud_lowcode_describe`, `jdcloud_lowcode_find_department`, `jdcloud_lowcode_get`, `jdcloud_lowcode_query`, `jdcloud_lowcode_update`, `jdcloud_lowcode_upload_file` | `ctx.tools`, `ctx.agents`, `ctx.attachments`, `ctx.jdcloudAuthController`, `ctx.sessionProjections`, `ctx.systemPrompt`, `an admitted browser prompt for current-Turn capability authority` | `user/message capability snapshot`, `tool/call`, `authenticated JDCloud file upload`, `tool/result`, `authorized JDCloud data mutations` | - | The nine tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes. |
+| `@deepseek-ai/dsh-tool-jdcloud-lowcode` | `jdcloud_lowcode_create`, `jdcloud_lowcode_create_table`, `jdcloud_lowcode_delete`, `jdcloud_lowcode_describe`, `jdcloud_lowcode_find_department`, `jdcloud_lowcode_find_role`, `jdcloud_lowcode_find_user`, `jdcloud_lowcode_get`, `jdcloud_lowcode_query`, `jdcloud_lowcode_update`, `jdcloud_lowcode_upload_file` | `ctx.tools`, `ctx.agents`, `ctx.attachments`, `ctx.jdcloudAuthController`, `ctx.sessionProjections`, `ctx.systemPrompt`, `an admitted browser prompt for current-Turn capability authority` | `user/message capability snapshot`, `tool/call`, `authenticated JDCloud file upload`, `tool/result`, `authorized JDCloud data mutations` | - | The eleven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`, `ctx.lsp`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema. |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
@@ -1567,6 +1567,57 @@ Find up to 20 departments by exact or partial name or path in the current JDClou
 
 Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
 
+### `jdcloud_lowcode_find_role`
+
+Find up to 20 roles by exact or partial name or group path in the current JDCloud tenant. Use an exact returned id for roleSelect values.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Role name or group-path fragment to match."
+    }
+  },
+  "required": [
+    "query"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
+### `jdcloud_lowcode_find_user`
+
+Find up to 20 users by phone or real name in the current JDCloud tenant. A unique result can supply userSelect, department, and role ids. When multiple users match, ask the user to choose one or provide a phone number.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "search_by": {
+      "type": "string",
+      "description": "Whether query is a phone number or real name.",
+      "enum": [
+        "phone",
+        "name"
+      ]
+    },
+    "query": {
+      "type": "string",
+      "description": "Phone number or real-name fragment to match."
+    }
+  },
+  "required": [
+    "search_by",
+    "query"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
+
 ### `jdcloud_lowcode_get`
 
 Read one JDCloud form or workflow record by its exact _id.
@@ -1775,7 +1826,7 @@ Upload one file or image already attached in this Session to JDCloud. Host execu
 
 Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts`](../packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts)
 
-The nine tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.
+The eleven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.
 
 <a id="deepseek-aidsh-schedule"></a>
 

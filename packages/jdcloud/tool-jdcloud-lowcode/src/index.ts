@@ -11,13 +11,19 @@ import {
   parseCurrentMemberLookup,
   parseCurrentMemberNames,
   parseTenantDepartments,
+  parseTenantRoles,
   parseCurrentUserCapabilities,
   renderCapabilitySnapshot,
 } from './current-user.ts'
-import type { LowcodeCapabilitySnapshot, LowcodeTenantDepartment } from './current-user.ts'
+import type {
+  LowcodeCapabilitySnapshot,
+  LowcodeTenantDepartment,
+  LowcodeTenantRole,
+} from './current-user.ts'
 import { registerLowcodeTools } from './tools.ts'
 import type {
   LowcodeDepartmentSearch,
+  LowcodeRoleSearch,
   LowcodeSnapshotStore,
   LowcodeToolConfig,
 } from './tools.ts'
@@ -43,7 +49,7 @@ export const DEFAULT_MAX_PAGE_SIZE = 100
 /** Default maximum UTF-8 bytes rendered from one JDCloud response. */
 export const DEFAULT_MAX_OUTPUT_BYTES = 65_536
 
-/** Default lifetime for one tenant-user department tree in Host memory. */
+/** Default lifetime for tenant-user department and role selectors in Host memory. */
 export const DEFAULT_ORGANIZATION_CACHE_TTL_MS = 300_000
 
 /** Deployment-owned JDCloud result limits. */
@@ -52,7 +58,7 @@ export interface Config {
   readonly maxPageSize?: number
   /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
   readonly maxOutputBytes?: number
-  /** Host-memory lifetime for one tenant-user department tree in milliseconds. Defaults to 300000. */
+  /** Host-memory lifetime for tenant-user department and role selectors in milliseconds. Defaults to 300000. */
   readonly organizationCacheTtlMs?: number
 }
 
@@ -74,7 +80,9 @@ const SYSTEM_PROMPT =
   + 'For create and update data, follow each described writeType exactly. Single-select fields use one id string, while multi-select fields, including userSelect, depSelect, and roleSelect, use arrays of id strings; expanded read objects such as `{id,fullName}` are not writable values. '
   + 'For create requests, infer every field value that is directly supported by facts in the user message or its attachments—not only titles, but also values such as amounts, dates, purposes, descriptions, and nested detail fields. Mark each inferred value in the confirmation instead of asking for information that the evidence already supplies. '
   + 'The snapshot currentMember contains Host-resolved current-user, department, and role selections. When a field semantically refers to the current applicant, requester, submitter, reimbursement claimant, employee, or their department or role, use those exact selections before treating those fields as missing, and never infer identity from unrelated records. Never invent opaque ids, other person or department selections, or attachment upload values that the available evidence does not determine. '
+  + 'For another requested user, call jdcloud_lowcode_find_user. Search by phone when the user provides one; otherwise search by real name. A unique result supplies exact user, department, and role selections. If multiple users match, show the candidates and ask the user to choose one or provide a phone number before writing any selection id. '
   + 'For another requested department, call jdcloud_lowcode_find_department with its name or path fragment, then use an exact returned id and fullName; use path to disambiguate duplicate names. Never invent a department id or search business records for one. '
+  + 'For another requested role, call jdcloud_lowcode_find_role with its name or group-path fragment, then use an exact returned id and fullName; use path to disambiguate duplicate names. Never invent a role id or search business records for one. '
   + 'If required information is missing, ask naturally in the user language; in Chinese prefer “目前还缺少关键信息” over rigid or legalistic wording. '
   + 'Before create, show one confirmation table containing every described field, including required and optional fields, nested fields, applicant and department fields, and attachment fields. Show an unprovided optional value as not provided, and call create only after the user confirms the complete table. '
   + 'Every create, update, and delete call needs its own confirmation in the user language, and one confirmation never authorizes a second call. '
@@ -93,6 +101,7 @@ export function apply(ctx: Context, config: Config): void {
   const resolved = resolveConfig(config)
   const snapshots: LowcodeSnapshotStore = new WeakMap()
   const departmentsByScope = new Map<string, LowcodeDepartmentCacheEntry>()
+  const rolesByScope = new Map<string, LowcodeRoleCacheEntry>()
   const findDepartments: LowcodeDepartmentSearch = async (scopeKey, signal) => {
     const cached = departmentsByScope.get(scopeKey)
     if (cached !== undefined && cached.expiresAt > Date.now()) return cached.departments
@@ -115,6 +124,28 @@ export function apply(ctx: Context, config: Config): void {
     })
     return departments
   }
+  const findRoles: LowcodeRoleSearch = async (scopeKey, signal) => {
+    const cached = rolesByScope.get(scopeKey)
+    if (cached !== undefined && cached.expiresAt > Date.now()) return cached.roles
+    const roles = parseTenantRoles(
+      await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+        path: '/api/system/permission/role/selector',
+        method: 'GET',
+      }, signal),
+    )
+    signal.throwIfAborted()
+    if (await requireScopeKey(ctx) !== scopeKey) {
+      throw new HarnessError(
+        'JDCloud account changed while loading roles; submit a new browser prompt before using low-code tools',
+        'JDCLOUD_LOWCODE_TENANT_CHANGED',
+      )
+    }
+    rolesByScope.set(scopeKey, {
+      roles,
+      expiresAt: Date.now() + resolved.organizationCacheTtlMs,
+    })
+    return roles
+  }
 
   ctx.systemPrompt.section({
     name: 'tool:jdcloud-lowcode',
@@ -122,7 +153,7 @@ export function apply(ctx: Context, config: Config): void {
     text: SYSTEM_PROMPT,
   })
 
-  registerLowcodeTools(ctx, snapshots, findDepartments, resolved)
+  registerLowcodeTools(ctx, snapshots, findDepartments, findRoles, resolved)
 
   ctx.on('agent/pre-step', async (
     { agent, turn, signal },
@@ -295,7 +326,13 @@ interface LowcodeDepartmentCacheEntry {
   readonly expiresAt: number
 }
 
-/** Require the active tenant-user scope used to isolate Host-memory departments. */
+/** One cached tenant role tree and its Host-memory expiry time. */
+interface LowcodeRoleCacheEntry {
+  readonly roles: readonly LowcodeTenantRole[]
+  readonly expiresAt: number
+}
+
+/** Require the active tenant-user scope used to isolate Host-memory selectors. */
 async function requireScopeKey(ctx: Context): Promise<string> {
   const scopeKey = await ctx.jdcloudAuthController.currentScopeKey()
   if (scopeKey === undefined) {

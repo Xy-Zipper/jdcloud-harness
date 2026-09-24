@@ -636,6 +636,8 @@ describe('prompt refresh and plugin lifecycle', () => {
     const mounted = await mountLowcode()
     expect(mounted.ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'jdcloud_lowcode_find_department',
+      'jdcloud_lowcode_find_role',
+      'jdcloud_lowcode_find_user',
       'jdcloud_lowcode_describe',
       'jdcloud_lowcode_query',
       'jdcloud_lowcode_get',
@@ -662,6 +664,10 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(guidance).toContain('currentMember')
     expect(guidance).toContain('reimbursement claimant')
     expect(guidance).toContain('before treating those fields as missing')
+    expect(guidance).toContain('call jdcloud_lowcode_find_user')
+    expect(guidance).toContain('If multiple users match')
+    expect(guidance).toContain('call jdcloud_lowcode_find_role')
+    expect(guidance).toContain('Never invent a role id')
     expect(guidance).toContain('目前还缺少关键信息')
     expect(guidance).toContain('every described field, including required and optional fields')
     expect(guidance).toContain('Every create, update, and delete call needs its own confirmation')

@@ -481,7 +481,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolJdcloudLowcode)
     },
     note:
-      'The nine tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
+      'The eleven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-schedule',

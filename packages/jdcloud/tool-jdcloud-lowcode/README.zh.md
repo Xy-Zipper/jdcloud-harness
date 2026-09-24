@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-jdcloud-lowcode` 允许已登录的 JDCloud 用户按其数据权限在对话中查看和修改租户的表单与流程。每个通过准入的浏览器 Prompt 都会获得菜单和已解析的当前成员选择值；九个工具可搜索部门、描述字段、上传附件、读取或修改记录以及创建表单。Host 只接受当前轮次（Turn）快照中的菜单 id，在执行时强制校验 `readData`、`addData`、`editData`、`deleteData`，建表时另需 `systemAdministrator`，并拒绝遗漏必填值或使用错误组件值类型的写入。此包只适用于受控的 JDCloud 部署；流程审批操作不在其范围内。
+`dsh-tool-jdcloud-lowcode` 允许已登录的 JDCloud 用户按其数据权限在对话中查看和修改租户的表单与流程。每个通过准入的浏览器 Prompt 都会获得菜单和已解析的当前成员选择值；十一个工具可搜索用户、部门和角色、描述字段、上传附件、读取或修改记录以及创建表单。Host 只接受当前轮次（Turn）快照中的菜单 id，在执行时强制校验 `readData`、`addData`、`editData`、`deleteData`，建表时另需 `systemAdministrator`，并拒绝遗漏必填值或使用错误组件值类型的写入。此包只适用于受控的 JDCloud 部署；流程审批操作不在其范围内。
 
 ## 目录
 
@@ -48,17 +48,17 @@ kind: "package-reference"
 |---|---:|---|
 | `maxPageSize` | `100` | `jdcloud_lowcode_query` 接受的最大 `page_size`；省略时最多请求 20 行 |
 | `maxOutputBytes` | `65,536` | 完整成功工具结果字符串的最大 UTF-8 字节数；空间足够时，其中包含 JSON 或截断提示和预览 |
-| `organizationCacheTtlMs` | `300,000` | 一个部门树在 Host 内存中的保留时间；按服务地址、租户和登录用户隔离 |
+| `organizationCacheTtlMs` | `300,000` | 部门和角色选择器在 Host 内存中的保留时间；按服务地址、租户和登录用户隔离 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md)是全部可接受字段及其 JSDoc 的详尽真源。
 
 ### 每个 Prompt 的能力快照
 
-认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，即使没有使用 `@` 选择，此插件也会调用 `/api/oauth/currentUser`，解析当前成员名称，并为每个已登录用户发布能力快照。快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料、全部认证值和租户部门树都会被排除。
+认证控制器会在浏览器 Prompt 进入 Session 前调用 `/api/system/corp/getCorpList`。通过准入后，即使没有使用 `@` 选择，此插件也会调用 `/api/oauth/currentUser`，解析当前成员名称，并为每个已登录用户发布能力快照。快照包含当前租户 id 与名称、`systemAdministrator`、已解析的 `currentMember` 字段选择值，以及每个可见的 type `3` 表单或 type `4` 流程及其菜单 id、路径和已识别的 `agentPermissions`；其余用户资料、全部认证值和租户部门及角色树都会被排除。
 
 未使用 `@` 的低代码请求可直接使用快照中唯一匹配的功能（查询要求 `readData`）。如果找不到或有多个候选项，模型才会要求用户用 `@` 选择，而不会猜测菜单 id 或声称已经查询数据。缺少权限时说明无法操作，而不是要求重新选择。显式 `@` 选择仍可准确指定功能。
 
-快照属于当前开放轮次。工具续步复用该快照，不会再次请求 current-user 或成员名称；后续浏览器 Prompt 会为对应轮次替换快照。Host 会按认证控制器的服务地址、租户和用户 scope 将部门选择器缓存在内存中，缓存期限为 `organizationCacheTtlMs`，其他 scope 无法读取此项。`jdcloud_lowcode_find_department` 最多返回 20 个精确或部分名称/路径匹配项及其 `id`、`fullName` 和 `path`。每次工具操作前，Host 本地认证状态和 scope 都必须仍与快照一致。菜单标签和每个上游值都会标为不可信数据，而不是指令。
+快照属于当前开放轮次。工具续步复用该快照，不会再次请求 current-user 或成员名称；后续浏览器 Prompt 会为对应轮次替换快照。Host 会按认证控制器的服务地址、租户和用户 scope 将部门及角色选择器缓存在内存中，缓存期限为 `organizationCacheTtlMs`，其他 scope 无法读取这些缓存项。`jdcloud_lowcode_find_department` 和 `jdcloud_lowcode_find_role` 各自最多返回 20 个精确或部分名称/路径匹配项及其 `id`、`fullName` 和 `path`。`jdcloud_lowcode_find_user` 会按手机号或真实姓名实时请求租户用户目录，最多返回 20 个用户，并通过成员名称接口解析每个候选人的部门和角色 id；用户搜索结果不会缓存到 Host。结果唯一时可直接使用；存在多个结果时，必须让用户选择候选人或补充手机号。每次工具操作前，Host 本地认证状态和 scope 都必须仍与快照一致。菜单标签和每个上游值都会标为不可信数据，而不是指令。
 
 ### 操作与授权
 
@@ -67,6 +67,8 @@ Host 会在每次操作前检查当前轮次、当前租户和菜单成员关系
 | 工具 | 操作 | Host 要求 |
 |---|---|---|
 | `jdcloud_lowcode_find_department` | 返回至多 20 个匹配部门的 id、名称和路径 | 当前 Turn 与当前租户用户 scope |
+| `jdcloud_lowcode_find_role` | 返回至多 20 个匹配角色的 id、名称和分组路径 | 当前 Turn 与当前租户用户 scope |
+| `jdcloud_lowcode_find_user` | 按手机号或真实姓名搜索，并返回用户、部门和角色选择值 | 当前 Turn 与当前租户用户 scope |
 | `jdcloud_lowcode_describe` | 读取字段代码、组件类型和记录写入类型 | 菜单在快照中可见 |
 | `jdcloud_lowcode_query` | 查询有上限的一页；全部过滤器使用 `AND` | 菜单授予 `readData` |
 | `jdcloud_lowcode_get` | 按 `_id` 读取单条记录 | 菜单授予 `readData` |
@@ -82,7 +84,7 @@ Host 会在每次操作前检查当前轮次、当前租户和菜单成员关系
 
 ### 失败与恢复
 
-任何认证请求返回 `600`、`601` 或 `602` 时都会删除已存储登录，并以需要认证失败；Web 登录页是恢复路径。其他业务错误或传输失败会保留登录。非管理员建表会在发起 JDCloud 数据请求前返回 `JDCLOUD_LOWCODE_ADMIN_REQUIRED`。如果成员名称响应缺少当前用户，或者缓存刷新时部门选择器响应无效，浏览器 Prompt 会失败。无法再解析的部门或角色 id（例如已删除角色的 id）会从 `currentMember` 中省略，其余已查到的选择值仍会发布。如果当前租户用户 scope 与快照不同，工具不会发起 JDCloud 数据请求，并返回 `JDCLOUD_LOWCODE_TENANT_CHANGED`；用户需提交新的浏览器 Prompt 以刷新能力。未知菜单、陈旧轮次快照、缺失的数据或管理员授权、持久化用户消息中不存在的附件 id、存在歧义的短附件摘要、无效上传响应，以及未通过实时组件类型校验的记录值，都会在依赖它们的修改前失败。无效值返回 `JDCLOUD_LOWCODE_FIELD_TYPE`；新增时缺失值返回 `JDCLOUD_LOWCODE_REQUIRED_FIELDS`，两者都包含易读的字段标签和代码。
+任何认证请求返回 `600`、`601` 或 `602` 时都会删除已存储登录，并以需要认证失败；Web 登录页是恢复路径。其他业务错误或传输失败会保留登录。非管理员建表会在发起 JDCloud 数据请求前返回 `JDCLOUD_LOWCODE_ADMIN_REQUIRED`。成员名称响应缺少当前用户、Prompt 刷新时部门选择器响应无效，或者角色搜索时角色选择器响应无效，都会使当前操作失败。无法再解析的部门或角色 id（例如已删除角色的 id）会从 `currentMember` 中省略，其余已查到的选择值仍会发布。如果当前租户用户 scope 与快照不同，工具不会发起 JDCloud 数据请求，并返回 `JDCLOUD_LOWCODE_TENANT_CHANGED`；用户需提交新的浏览器 Prompt 以刷新能力。未知菜单、陈旧轮次快照、缺失的数据或管理员授权、持久化用户消息中不存在的附件 id、存在歧义的短附件摘要、无效上传响应，以及未通过实时组件类型校验的记录值，都会在依赖它们的修改前失败。无效值返回 `JDCLOUD_LOWCODE_FIELD_TYPE`；新增时缺失值返回 `JDCLOUD_LOWCODE_REQUIRED_FIELDS`，两者都包含易读的字段标签和代码。
 
 建表会发送三个有序请求，上游不提供事务。如果菜单创建后保存 schema 或创建权限失败，工具会返回带已创建菜单 id 的 `JDCLOUD_LOWCODE_TABLE_PARTIAL`，运维人员可检查并修复保留的资源。
 
@@ -98,7 +100,7 @@ Host 会在每次操作前检查当前轮次、当前租户和菜单成员关系
 
 ### 设计概念
 
-Prompt 监听器复用认证控制器的 current-user 解析器，通过一次批量请求解析当前账号的用户、部门和角色名称。它会将租户部门选择器展平后存入以认证控制器 scope key 为键、带 TTL 的 Host 内存 Map，而按 Agent 区分的快照只保留当前成员和菜单事实。部门搜索会读取匹配 scope 的缓存项，并限制模型可见候选数。工具执行会先将 Host 快照与 Session 投影中的开放轮次及认证控制器的当前租户用户 scope 比较，再解析菜单或发送请求。认证控制器仍是 base URL、Token、菜单解析和浏览器安全可写菜单投影的唯一所有者。
+Prompt 监听器复用认证控制器的 current-user 解析器，通过一次批量请求解析当前账号的用户、部门和角色名称。它会将租户部门及角色选择器展平后存入以认证控制器 scope key 为键、带 TTL 的 Host 内存 Map，而按 Agent 区分的快照只保留当前成员和菜单事实。部门和角色搜索会读取各自匹配 scope 的缓存项，并限制模型可见候选数。用户搜索会实时请求组织用户接口，再通过一次成员名称请求解析返回的部门和角色 id；结果不会保留在 Host 内存中。工具执行会先将 Host 快照与 Session 投影中的开放轮次及认证控制器的当前租户用户 scope 比较，再解析菜单或发送请求。认证控制器仍是 base URL、Token、菜单解析和浏览器安全可写菜单投影的唯一所有者。
 
 工具会静态注册，但没有实时 Agent 和匹配的浏览器 Prompt 快照就无法执行。描述字段要求菜单可见，查询和读取记录要求 `readData`。每个修改操作都在执行器中校验其确切授权。文件上传还会先从调用 Agent 的持久化用户消息历史中解析附件 id，再由附件服务返回经过验证的图片字节或普通文件分块。新增操作随后加载实时表单定义，并校验顶层和子表行中的必填值；建表还会在第一次写入前单独检查管理员状态。
 
@@ -123,7 +125,7 @@ Prompt 监听器复用认证控制器的 current-user 解析器，通过一次�
 - [JDCloud 包组](../README.zh.md)——集成映射与职责划分。
 - [JDCloud 认证控制器](../../api/jdcloud-auth-controller/README.zh.md)——登录、租户切换、凭据所有权和 Host 认证请求。
 - [JDCloud Web bundle](../../bundle/jdcloud-login/README.zh.md)——可安装的 Web profile 组合。
-- [生成的工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)——全部九个工具的准确 schema。
+- [生成的工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)——全部十一个工具的准确 schema。
 - [低代码对话工具决策](../../../.agents/notes/implemented/feature/2026-09-07-jdcloud-low-code-conversation-tools.zh.md)——快照时点与 Host 授权权衡。
 
 -----
@@ -139,7 +141,7 @@ Prompt 监听器复用认证控制器的 current-user 解析器，通过一次�
 
 #### Token 影响
 
-每个通过准入的浏览器 Prompt 会增加一条依赖数据的消息。其大小随当前成员选择值以及可见的 type `3` 和 type `4` 菜单项增长，并保留在对话历史中，直到压缩移除它。只有模型需要其他部门时，部门搜索才会增加至多 20 个候选项。
+每个通过准入的浏览器 Prompt 会增加一条依赖数据的消息。其大小随当前成员选择值以及可见的 type `3` 和 type `4` 菜单项增长，并保留在对话历史中，直到压缩移除它。只有模型需要其他选择值时，部门、角色或用户搜索才会增加至多 20 个候选项。
 
 #### KV Cache 影响
 
@@ -169,7 +171,7 @@ Use the JDCloud low-code tools only when the user asks to inspect or change JDCl
 
 #### 模型看到的内容
 
-生成的[九工具 schema 集](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)公开部门搜索、描述、查询、读取、文件上传、新增、更新、删除和建表操作。schema 会说明 Host 权限要求、实时字段类型与必填字段检查，以及可接受的字段词汇，但执行过程仍是授权真源。
+生成的[十一工具 schema 集](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)公开用户、部门与角色搜索、描述、查询、读取、文件上传、新增、更新、删除和建表操作。schema 会说明 Host 权限要求、实时字段类型与必填字段检查，以及可接受的字段词汇，但执行过程仍是授权真源。
 
 #### Token 影响
 
