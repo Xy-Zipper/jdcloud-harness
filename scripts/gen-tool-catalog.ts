@@ -108,6 +108,11 @@ class CatalogJdcloudAuthController extends Service {
   constructor(ctx: Context) {
     super(ctx, 'jdcloudAuthController')
   }
+
+  /** Schema collection never executes a JDCloud low-code tool. */
+  async currentScopeKey(): Promise<undefined> {
+    return undefined
+  }
 }
 
 const root = resolve(import.meta.dirname, '..')
@@ -476,7 +481,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolJdcloudLowcode)
     },
     note:
-      'The eight tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
+      'The nine tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-schedule',

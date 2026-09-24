@@ -1,5 +1,4 @@
-// Keyless Web-profile coverage for current-account and tenant-department form
-// selections: the Host resolves both sources before the first model call.
+// Keyless Web-profile coverage for current-account form selections before the first model call.
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
@@ -182,7 +181,7 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
     if (failures.length > 1) throw new AggregateError(failures, 'JDCloud current-member teardown failed')
   })
 
-  it('batches current-user member ids before the model sees the prompt', async () => {
+  it('resolves current-user member ids before the model sees the prompt', async () => {
     expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
     expect(jdcloud.requests).toEqual([
       {
@@ -217,17 +216,13 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
         role: [{ id: 'role-1', fullName: '普通员工' }],
         user: [{ id: 'user-1', fullName: '测试用户', phone: '18100000000' }],
       },
-      tenantDepartments: [
-        { id: 'tenant-root', fullName: '测试租户', path: '测试租户' },
-        { id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' },
-      ],
     })
     if (settledSessionId === undefined) throw new Error('JDCloud current-member turn did not settle')
     const agent = scaffold.ctx.agents.get(settledSessionId)
     if (agent === undefined) throw new Error('JDCloud current-member Agent is not live')
     expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('研发部'))).toBe(true)
     expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('测试用户'))).toBe(true)
-    expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('IT部门'))).toBe(true)
+    expect(agent.session.deriveMessages().some(message => JSON.stringify(message).includes('IT部门'))).toBe(false)
     const answer = sessionEvents.find(event => event.type === 'assistant/message')
     expect(answer?.type === 'assistant/message'
       ? answer.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')

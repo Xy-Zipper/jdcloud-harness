@@ -45,13 +45,13 @@ const SNAPSHOT: LowcodeCapabilitySnapshot = {
   turn: 1,
   corpId: 'corp-1',
   corpName: 'Tenant One',
+  scopeKey: 'scope-1',
   systemAdministrator: true,
   currentMember: {
     department: [],
     role: [],
     user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
   },
-  tenantDepartments: [],
   menus: [
     {
       menuId: 'form-1',
@@ -111,7 +111,9 @@ interface Services {
   readonly requests: RecordedRequest[]
   readonly requestAuthenticated: ReturnType<typeof vi.fn>
   readonly status: ReturnType<typeof vi.fn>
+  readonly currentScopeKey: ReturnType<typeof vi.fn>
   setStatus(value: JdcloudAuthStatus): void
+  setScopeKey(value: string | undefined): void
   setResponder(value: RequestResponder): void
 }
 
@@ -135,6 +137,7 @@ async function services(options: {
   } as never)
 
   let statusValue: JdcloudAuthStatus = AUTHENTICATED
+  let scopeKeyValue: string | undefined = 'scope-1'
   let responder: RequestResponder = options.response ?? (() => ({ ok: true }))
   const requests: RecordedRequest[] = []
   const requestAuthenticated = vi.fn(async (request: RecordedRequest): Promise<unknown> => {
@@ -142,13 +145,16 @@ async function services(options: {
     return await responder(request, requests.length - 1)
   })
   const status = vi.fn((): Promise<JdcloudAuthStatus> => Promise.resolve(statusValue))
-  ctx.provide('jdcloudAuthController', { requestAuthenticated, status } as never)
+  const currentScopeKey = vi.fn((): Promise<string | undefined> => Promise.resolve(scopeKeyValue))
+  ctx.provide('jdcloudAuthController', { requestAuthenticated, status, currentScopeKey } as never)
   return {
     ctx,
     requests,
     requestAuthenticated,
     status,
+    currentScopeKey,
     setStatus(value) { statusValue = value },
+    setScopeKey(value) { scopeKeyValue = value },
     setResponder(value) { responder = value },
   }
 }
@@ -172,11 +178,12 @@ async function toolHarness(options: {
   readonly status?: Agent['status']
   readonly maxPageSize?: number
   readonly maxOutputBytes?: number
+  readonly departments?: readonly { readonly id: string; readonly fullName: string; readonly path: string }[]
   readonly response?: RequestResponder
 } = {}): Promise<ToolHarness> {
   const mounted = await services(options)
   const snapshots: LowcodeSnapshotStore = new WeakMap()
-  registerLowcodeTools(mounted.ctx, snapshots, {
+  registerLowcodeTools(mounted.ctx, snapshots, async () => options.departments ?? [], {
     maxPageSize: options.maxPageSize ?? 20,
     maxOutputBytes: options.maxOutputBytes ?? 8_192,
   })
@@ -242,7 +249,7 @@ describe('plugin configuration and prompt branches', () => {
   it('resolves omitted limits and rejects each unsafe or non-positive direct configuration', async () => {
     const mounted = await services()
     const fiber = await mounted.ctx.plugin(LowcodePlugin, {})
-    expect(mounted.ctx.tools.schemas()).toHaveLength(8)
+    expect(mounted.ctx.tools.schemas()).toHaveLength(9)
     await fiber.dispose()
 
     for (const maxPageSize of [0, 1.5]) {
@@ -252,6 +259,10 @@ describe('plugin configuration and prompt branches', () => {
     for (const maxOutputBytes of [0, 1.5]) {
       expect(() => { LowcodePlugin.apply(new Context(), { maxOutputBytes }) })
         .toThrow('maxOutputBytes must be a positive safe integer')
+    }
+    for (const organizationCacheTtlMs of [0, 1.5]) {
+      expect(() => { LowcodePlugin.apply(new Context(), { organizationCacheTtlMs }) })
+        .toThrow('organizationCacheTtlMs must be a positive safe integer')
     }
   })
 
@@ -334,6 +345,43 @@ describe('plugin configuration and prompt branches', () => {
     )).rejects.toThrow('cancelled during current-user request')
     expect(mounted.status).not.toHaveBeenCalled()
   })
+
+  it('caches departments by tenant-user scope without adding them to the model snapshot', async () => {
+    let now = 1_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const mounted = await services({
+      response: (request) => {
+        if (request.path === '/api/oauth/currentUser') return currentUser()
+        if (request.path === '/api/system/permission/users/getMemberName') {
+          return { department: [], role: [], user: [{ id: 'user-1', fullName: 'Tester', phone: '' }] }
+        }
+        if (request.path === '/api/system/permission/organize/selector') {
+          return [{ id: 'department-1', fullName: 'Engineering' }]
+        }
+        throw new Error(`unexpected request ${request.path}`)
+      },
+    })
+    await mounted.ctx.plugin(LowcodePlugin, { organizationCacheTtlMs: 100 })
+    const agent = makeAgent(mounted.ctx)
+    mounted.ctx.agents.register(agent)
+    const enter = () => Promise.resolve({ kind: 'enter' as const, messages: [browserMessage()] })
+
+    const first = await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    const firstSnapshot = first.kind === 'enter' ? first.messages.at(-1) : undefined
+    expect(firstSnapshot?.content[0]).toMatchObject({ type: 'text' })
+    expect(JSON.stringify(firstSnapshot)).not.toContain('tenantDepartments')
+
+    await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    mounted.setScopeKey('scope-2')
+    await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+    now += 101
+    await preStep(mounted.ctx, agent, [browserMessage()], new AbortController().signal, enter)
+
+    expect(mounted.requests.filter(request => request.path === '/api/system/permission/organize/selector'))
+      .toHaveLength(3)
+    expect(mounted.requests.filter(request => request.path === '/api/oauth/currentUser')).toHaveLength(4)
+    expect(mounted.requests.filter(request => request.path === '/api/system/permission/users/getMemberName')).toHaveLength(4)
+  })
 })
 
 describe('schemas, presenters, describe, and exact reads', () => {
@@ -383,6 +431,7 @@ describe('schemas, presenters, describe, and exact reads', () => {
     })
 
     const concurrencyArguments = {
+      jdcloud_lowcode_find_department: { query: 'Engineering' },
       jdcloud_lowcode_describe: { menu_id: 'form-1' },
       jdcloud_lowcode_query: { menu_id: 'form-1' },
       jdcloud_lowcode_get: { menu_id: 'form-1', record_id: 'row-1' },
@@ -391,6 +440,7 @@ describe('schemas, presenters, describe, and exact reads', () => {
       expect(mounted.ctx.tools.get(name)?.isConcurrencySafe?.(args)).toBe(true)
     }
     const presentations = [
+      ['jdcloud_lowcode_find_department', { query: 'Engineering' }, 'Find JDCloud department', 'read', 'Engineering'],
       ['jdcloud_lowcode_describe', { menu_id: 'form-1' }, 'Describe JDCloud function', 'read', 'form-1'],
       ['jdcloud_lowcode_query', { menu_id: 'form-1' }, 'Query JDCloud data', 'read', 'form-1'],
       ['jdcloud_lowcode_get', { menu_id: 'form-1', record_id: 'row-1' }, 'Read JDCloud record', 'read', 'row-1'],
@@ -427,6 +477,31 @@ describe('schemas, presenters, describe, and exact reads', () => {
         card: 'generic', title, kind, rawInput,
       })
     }
+
+    const departmentSearch = await toolHarness({
+      departments: [
+        { id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' },
+        { id: 'department-2', fullName: 'Engineering East', path: 'Tenant / Engineering East' },
+        ...Array.from({ length: 20 }, (_, index) => ({
+          id: `department-${String(index + 3)}`,
+          fullName: `Engineering ${String(index + 3)}`,
+          path: `Tenant / Engineering ${String(index + 3)}`,
+        })),
+      ],
+    })
+    const departments = await departmentSearch.call('jdcloud_lowcode_find_department', { query: 'engineering' })
+    expect(departments.isError).toBe(false)
+    expect(JSON.parse(resultText(departments).slice(resultText(departments).indexOf('\n') + 1))).toEqual({
+      departments: expect.arrayContaining([
+        { id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' },
+      ]),
+    })
+    expect(JSON.parse(resultText(departments).slice(resultText(departments).indexOf('\n') + 1)).departments)
+      .toHaveLength(20)
+
+    departmentSearch.setScopeKey('scope-2')
+    const changedScope = await departmentSearch.call('jdcloud_lowcode_find_department', { query: 'Engineering' })
+    expect(errorCode(changedScope)).toBe('JDCLOUD_LOWCODE_TENANT_CHANGED')
 
     const described = await mounted.call('jdcloud_lowcode_describe', { menu_id: 'form-1' })
     expect(described.isError).toBe(false)

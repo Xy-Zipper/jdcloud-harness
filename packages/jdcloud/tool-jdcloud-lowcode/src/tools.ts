@@ -17,6 +17,7 @@ import type {
   LowcodeCapabilitySnapshot,
   LowcodeMenuCapability,
   LowcodePermission,
+  LowcodeTenantDepartment,
 } from './current-user.ts'
 import { buildFormData } from './table-schema.ts'
 import type { TableFieldInput } from './table-schema.ts'
@@ -30,6 +31,15 @@ export interface LowcodeToolConfig {
 
 /** Per-agent authority snapshots refreshed by the prompt listener. */
 export type LowcodeSnapshotStore = WeakMap<Agent, LowcodeCapabilitySnapshot>
+
+/** Resolve the current tenant-user's cached JDCloud departments for one tool call. */
+export type LowcodeDepartmentSearch = (
+  scopeKey: string,
+  signal: AbortSignal,
+) => Promise<readonly LowcodeTenantDepartment[]>
+
+/** Maximum department candidates exposed in one model-visible search result. */
+const DEPARTMENT_SEARCH_LIMIT = 20
 
 const FILTER_METHODS = [
   'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'nin',
@@ -136,13 +146,37 @@ const TEXT_OUTPUT = {
  * Register the complete JDCloud low-code tool surface.
  * @param ctx - Plugin context carrying tool, Agent, projection, and authentication services.
  * @param snapshots - Per-Agent current-turn authorization snapshots.
+ * @param findDepartments - Scope-isolated department lookup supplied by the prompt plugin.
  * @param config - Resolved query and output limits.
  */
 export function registerLowcodeTools(
   ctx: Context,
   snapshots: LowcodeSnapshotStore,
+  findDepartments: LowcodeDepartmentSearch,
   config: LowcodeToolConfig,
 ): void {
+  ctx.tools.register(defineTool({
+    name: 'jdcloud_lowcode_find_department',
+    description: 'Find up to 20 departments by exact or partial name or path in the current JDCloud tenant. Use an exact returned id for depSelect values.',
+    parameters: {
+      query: {
+        type: 'string',
+        required: true,
+        description: 'Department name or path fragment to match.',
+      },
+    },
+    output: TEXT_OUTPUT,
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const query = requireText(args.query, 'query')
+      const snapshot = await requireExecutionSnapshot(ctx, snapshots, exec)
+      const departments = await findDepartments(snapshot.scopeKey, exec.signal)
+      await requireExecutionSnapshot(ctx, snapshots, exec)
+      return renderResult({ departments: matchedDepartments(departments, query) }, config.maxOutputBytes)
+    },
+    presentCall: args => present('Find JDCloud department', 'read', args.query),
+  }))
+
   ctx.tools.register(defineTool({
     name: 'jdcloud_lowcode_describe',
     description: 'Read field codes and field types for one authorized JDCloud form or workflow before querying or writing it.',
@@ -536,7 +570,42 @@ async function requireExecutionSnapshot(
       'JDCLOUD_LOWCODE_TENANT_CHANGED',
     )
   }
+  if (await ctx.jdcloudAuthController.currentScopeKey() !== snapshot.scopeKey) {
+    reject(
+      'JDCloud account changed after this Turn capability snapshot; submit a new browser prompt before using low-code tools',
+      'JDCLOUD_LOWCODE_TENANT_CHANGED',
+    )
+  }
   return snapshot
+}
+
+/** Match departments in stable response order with exact names and paths first. */
+function matchedDepartments(
+  departments: readonly LowcodeTenantDepartment[],
+  query: string,
+): readonly LowcodeTenantDepartment[] {
+  const normalized = query.toLocaleLowerCase()
+  return departments
+    .map((department, index) => ({ department, index, rank: departmentMatchRank(department, normalized) }))
+    .filter((candidate): candidate is {
+      readonly department: LowcodeTenantDepartment
+      readonly index: number
+      readonly rank: number
+    } => candidate.rank !== undefined)
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .slice(0, DEPARTMENT_SEARCH_LIMIT)
+    .map(candidate => candidate.department)
+}
+
+/** Rank a department match so an exact selection is always presented first. */
+function departmentMatchRank(department: LowcodeTenantDepartment, query: string): number | undefined {
+  const fullName = department.fullName.toLocaleLowerCase()
+  const path = department.path.toLocaleLowerCase()
+  if (fullName === query) return 0
+  if (path === query) return 1
+  if (fullName.includes(query)) return 2
+  if (path.includes(query)) return 3
+  return undefined
 }
 
 /** Resolve a menu only from the current Host-attested capability snapshot. */

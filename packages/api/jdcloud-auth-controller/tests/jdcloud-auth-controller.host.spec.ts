@@ -100,6 +100,9 @@ describe('JDCloud user directories', () => {
     const third = await ctx.jdcloudAuthController.workspaceRoot()
     await setLogin('https://elsewhere.example', 'corp-a', 'user-a')
     const fourth = await ctx.jdcloudAuthController.workspaceRoot()
+    if (first === undefined || second === undefined || third === undefined || fourth === undefined) {
+      throw new Error('configured JDCloud user-directory parent did not create a user directory')
+    }
     expect(new Set([first, second, third, fourth]).size).toBe(4)
     await setLogin('https://example.com', 'corp-a', 'user-a')
     mkdirSync(join(first, 'project'))

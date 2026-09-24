@@ -56,9 +56,10 @@ export interface LowcodeCapabilitySnapshot {
   readonly turn: number
   readonly corpId: string
   readonly corpName: string
+  /** Host-only tenant-user scope that owns this capability snapshot. */
+  readonly scopeKey: string
   readonly systemAdministrator: boolean
   readonly currentMember: LowcodeCurrentMember
-  readonly tenantDepartments: readonly LowcodeTenantDepartment[]
   readonly menus: readonly LowcodeMenuCapability[]
 }
 
@@ -161,7 +162,6 @@ export function renderCapabilitySnapshot(snapshot: LowcodeCapabilitySnapshot): s
     tenant: { id: snapshot.corpId, name: snapshot.corpName },
     systemAdministrator: snapshot.systemAdministrator,
     currentMember: snapshot.currentMember,
-    tenantDepartments: snapshot.tenantDepartments,
     functions: snapshot.menus.map(menu => ({
       menuId: menu.menuId,
       fullName: menu.fullName,

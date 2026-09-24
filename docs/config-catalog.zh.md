@@ -211,10 +211,12 @@ export interface Config {
   readonly defaultBaseUrl?: string
   /** Network deadline for login and prompt validation requests. */
   readonly requestTimeoutMs?: number
+  /** Persistent parent directory for tenant-user workspaces. */
+  readonly userWorkspaceDirectory?: string
 }
 ```
 
-来源：[`packages/api/jdcloud-auth-controller/src/index.ts:62`](../packages/api/jdcloud-auth-controller/src/index.ts)
+来源：[`packages/api/jdcloud-auth-controller/src/index.ts:64`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-job-controller"></a>
 
@@ -3446,10 +3448,12 @@ export interface Config {
   readonly maxPageSize?: number
   /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
   readonly maxOutputBytes?: number
+  /** Host-memory lifetime for one tenant-user department tree in milliseconds. Defaults to 300000. */
+  readonly organizationCacheTtlMs?: number
 }
 ```
 
-来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:43`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:50`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 

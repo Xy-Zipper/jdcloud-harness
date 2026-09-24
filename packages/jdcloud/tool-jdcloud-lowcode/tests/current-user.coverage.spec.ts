@@ -292,13 +292,13 @@ describe('current-user model snapshot coverage', () => {
       turn: 8,
       corpId: 'corp-1',
       corpName: 'Tenant',
+      scopeKey: 'scope-1',
       systemAdministrator: true,
       currentMember: {
         department: [],
         role: [],
         user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
       },
-      tenantDepartments: [{ id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' }],
       menus: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 3, agentPermissions: ['addData'],
@@ -317,7 +317,6 @@ describe('current-user model snapshot coverage', () => {
         role: [],
         user: [{ id: 'user-1', fullName: 'Tester', phone: '' }],
       },
-      tenantDepartments: [{ id: 'department-1', fullName: 'Engineering', path: 'Tenant / Engineering' }],
       functions: [
         {
           menuId: 'form', fullName: 'Form', path: 'Folder / Form', type: 'form', agentPermissions: ['addData'],

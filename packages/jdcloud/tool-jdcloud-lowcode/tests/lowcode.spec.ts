@@ -45,6 +45,7 @@ interface MountedLowcode {
   readonly requests: RecordedRequest[]
   readonly requestAuthenticated: ReturnType<typeof vi.fn>
   readonly status: ReturnType<typeof vi.fn>
+  readonly currentScopeKey: ReturnType<typeof vi.fn>
   readonly readFileStream: ReturnType<typeof vi.fn>
   readonly readImage: ReturnType<typeof vi.fn>
   browserPrompt(turn?: number, step?: number): Promise<UserMessage[]>
@@ -186,7 +187,8 @@ async function mountLowcode(options: {
     corps: [{ corpId: 'corp-1', corpName: '测试租户' }],
     systemAdministrator: true,
   }))
-  ctx.provide('jdcloudAuthController', { requestAuthenticated, status } as never)
+  const currentScopeKey = vi.fn((): Promise<string> => Promise.resolve('scope-1'))
+  ctx.provide('jdcloudAuthController', { requestAuthenticated, status, currentScopeKey } as never)
   const fiber = await ctx.plugin(LowcodePlugin, { maxPageSize: 50, maxOutputBytes: 8_192 })
   const agent = createRunningAgent(ctx)
   ctx.agents.register(agent)
@@ -211,6 +213,7 @@ async function mountLowcode(options: {
     requests,
     requestAuthenticated,
     status,
+    currentScopeKey,
     readFileStream,
     readImage,
     async browserPrompt(turn = 1, step = 1) {
@@ -379,13 +382,13 @@ describe('current-user capability parsing', () => {
       turn: 7,
       corpId: 'corp-1',
       corpName: '测试租户',
+      scopeKey: 'scope-1',
       systemAdministrator: false,
       currentMember: {
         department: [{ id: 'department-1', fullName: '研发部' }],
         role: [{ id: 'role-1', fullName: '开发人员' }],
         user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
       },
-      tenantDepartments: [{ id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' }],
       menus: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -404,7 +407,6 @@ describe('current-user capability parsing', () => {
         role: [{ id: 'role-1', fullName: '开发人员' }],
         user: [{ id: 'user-secret', fullName: '测试用户', phone: '13800000000' }],
       },
-      tenantDepartments: [{ id: 'department-it', fullName: 'IT部门', path: '测试租户 / IT部门' }],
       functions: [{
         menuId: 'form-clock',
         fullName: '打卡记录',
@@ -550,7 +552,7 @@ describe('prompt refresh and plugin lifecycle', () => {
     expect(JSON.stringify(entered[1])).not.toContain('board-overview')
     expect(JSON.stringify(entered[1])).toContain('测试用户')
     expect(JSON.stringify(entered[1])).toContain('研发部')
-    expect(JSON.stringify(entered[1])).toContain('测试租户 / IT部门')
+    expect(JSON.stringify(entered[1])).not.toContain('测试租户 / IT部门')
     expect(JSON.stringify(entered[1])).not.toContain('role-deleted')
     expect(JSON.stringify(entered[1])).not.toContain('private-account')
 
@@ -633,6 +635,7 @@ describe('prompt refresh and plugin lifecycle', () => {
   it('disposes its tools, prompt section, and browser-prompt listener with the plugin fiber', async () => {
     const mounted = await mountLowcode()
     expect(mounted.ctx.tools.schemas().map(schema => schema.name)).toEqual([
+      'jdcloud_lowcode_find_department',
       'jdcloud_lowcode_describe',
       'jdcloud_lowcode_query',
       'jdcloud_lowcode_get',
