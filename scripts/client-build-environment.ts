@@ -16,11 +16,8 @@ const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
 /** Non-public selector used by build orchestration to request a named client profile. */
 export const CLIENT_BUILD_PROFILE_SELECTOR = 'DSH_BUILD_CLIENT_PROFILE'
 
-/** Public client environment required by official DSH artifacts. */
-const OFFICIAL_CLIENT_BUILD_ENVIRONMENT = {
-  DSH_CLIENT_BUILD_PROFILE: 'official',
-  DSH_CLIENT_TITLE: 'DeepSeek Harness',
-} as const
+/** Default browser title embedded by a deployment build. */
+const DEFAULT_CLIENT_TITLE = 'LSY-Agent'
 
 /** Public variable carrying the source commit embedded in client artifacts. */
 const CLIENT_COMMIT_HASH_VARIABLE = 'DSH_CLIENT_COMMIT_HASH'
@@ -110,7 +107,7 @@ export function repositoryGitDirty(root: string): boolean | undefined {
 
 /**
  * Resolve the public environment for a complete default build from one checkout.
- * Repository-owned metadata replaces inherited values; other public values pass through.
+ * Repository-owned metadata and the default title replace inherited build metadata; other public values pass through.
  * @param root - repository root supplying version and Git metadata.
  * @param environment - caller environment supplying optional commit and public extensions.
  * @returns complete public client environment for the default build.
@@ -128,6 +125,7 @@ export function repositoryClientBuildEnvironment(
     ...inherited,
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     ...(dirty === true ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
+    DSH_CLIENT_TITLE: inherited.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
     DSH_CLIENT_VERSION: repositoryVersion(root),
   }
 }
@@ -145,7 +143,8 @@ export function officialClientBuildEnvironment(
   return {
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     DSH_CLIENT_VERSION: repositoryVersion(root),
-    ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
+    DSH_CLIENT_BUILD_PROFILE: 'official',
+    DSH_CLIENT_TITLE: environment.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
   }
 }
 
@@ -201,7 +200,8 @@ export function resolveClientBuildEnvironment(
     return {
       DSH_CLIENT_COMMIT_HASH: commitHash,
       DSH_CLIENT_VERSION: version,
-      ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
+      DSH_CLIENT_BUILD_PROFILE: 'official',
+      DSH_CLIENT_TITLE: environment.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
     }
   }
   throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official"`)

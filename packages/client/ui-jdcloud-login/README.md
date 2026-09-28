@@ -1,5 +1,5 @@
 ---
-description: "JDCloud login, account controls, and JDCloud Harness branding for the Web client."
+description: "JDCloud login, account controls, and deployment-configured Web branding."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-client-ui-jdcloud-login` presents the JDCloud password and token-transfer login pages while the Host has no stored login, an account summary while it is authenticated, and the JDCloud Harness brand across the Web shell. It mounts the generated JDCloud Remote contribution itself, so the general API Remote assembly stays independent of this optional integration.
+`@deepseek-ai/dsh-client-ui-jdcloud-login` presents the JDCloud password and token-transfer login pages while the Host has no stored login, an account summary while it is authenticated, and the deployment-configured product name across the Web shell. It mounts the generated JDCloud Remote contribution itself, so the general API Remote assembly stays independent of this optional integration.
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ While authenticated, the package occupies `sidebar.account`. The expanded sideba
 
 The authenticated status also carries `systemAdministrator`. A non-administrator shadows `sidebar.settings`, `conversation.input.model`, `conversation.input.permission`, and `conversation.hero.agentPreset` at priority `-100`; refuses `/model` and `/permission`; filters the `terminal` tab type from the guide, rendering, recovery, and direct browser navigation; and registers a new-Session initializer that runs `/permission workspace-write` before the Session is opened. If that command is unavailable or fails, the navigation fails closed. Switching tenants reapplies the policy immediately. An administrator sees the underlying controls and does not install the initializer. An existing Session keeps its durable model and permission selections.
 
-The package also fills `sidebar.brand.mark`, `sidebar.brand.name`, and `conversation.hero.brand.mark` at priority `-10`. The blue-to-cyan hexagonal J mark keeps the size requested by each host, and the login page reuses the same artwork. Lower priority wins for these single slots, so the JDCloud occupants replace generic or official brand entries while this plugin is active and reveal them again on teardown.
+The package also fills `sidebar.brand.mark`, `sidebar.brand.name`, and `conversation.hero.brand.mark` at priority `-10`. The blue-to-cyan hexagonal J mark keeps the size requested by each host, and the login page reuses the same artwork. The name uses build-time `DSH_CLIENT_TITLE`, falling back to `LSY-Agent`; Docker Compose sets it from `JDCLOUD_PRODUCT_NAME`. Lower priority wins for these single slots, so the JDCloud occupants replace generic or official brand entries while this plugin is active and reveal them again on teardown.
 
 The password stays in component-local state, is cleared after success, and never enters a shared store. All product copy is owned by the `jdcloud.login` locale namespace.
 

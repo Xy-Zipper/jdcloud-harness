@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "JDCloud Harness",
-  "short_name": "JDCloud",
+  "name": "LSY-Agent",
+  "short_name": "LSY-Agent",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",

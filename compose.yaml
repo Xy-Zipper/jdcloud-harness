@@ -14,6 +14,8 @@ services:
       args:
         # `.git` is excluded from the build context, so pass the source revision explicitly.
         DSH_CLIENT_COMMIT_HASH: ${DSH_CLIENT_COMMIT_HASH:?Set DSH_CLIENT_COMMIT_HASH to `git rev-parse HEAD` before building}
+        # The browser title is embedded into the frontend during image build.
+        DSH_CLIENT_TITLE: ${JDCLOUD_PRODUCT_NAME:-LSY-Agent}
     init: true
     restart: unless-stopped
     working_dir: /workspace
@@ -31,6 +33,8 @@ services:
     environment:
       # Every browser user connected to this service shares settings.yaml below this directory.
       DSH_HOME: /var/lib/jdcloud-harness
+      # Runtime prompt and Web-surface branding.
+      DSH_PRODUCT_NAME: ${JDCLOUD_PRODUCT_NAME:-LSY-Agent}
       # Keep the deployment's unified key while satisfying the shipped DeepSeek routes.
       GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}

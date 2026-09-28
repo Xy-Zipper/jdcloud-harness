@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JdcloudBrandMark, JdcloudBrandName } from '../src/client/Brand.tsx'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllEnvs()
+})
 
 describe('JDCloud brand artwork', () => {
   it('keeps the host-requested mark size and uses instance-safe gradients', () => {
@@ -19,9 +22,16 @@ describe('JDCloud brand artwork', () => {
       .not.toBe(secondSvg?.querySelector('linearGradient')?.id)
   })
 
-  it('renders the localized product name independently from the mark', () => {
-    const rendered = render(<JdcloudBrandName t={() => 'JDCloud Harness'} />)
-    expect(rendered.getByText('JDCloud Harness')).toBeTruthy()
+  it('renders the configured client title independently from the mark', () => {
+    vi.stubEnv('DSH_CLIENT_TITLE', 'Configured Agent')
+    const rendered = render(<JdcloudBrandName t={() => 'LSY-Agent'} />)
+    expect(rendered.getByText('Configured Agent')).toBeTruthy()
+    expect(rendered.container.querySelector('svg')).toBeNull()
+  })
+
+  it('uses the locale product name when a client title is absent', () => {
+    const rendered = render(<JdcloudBrandName t={() => 'LSY-Agent'} />)
+    expect(rendered.getByText('LSY-Agent')).toBeTruthy()
     expect(rendered.container.querySelector('svg')).toBeNull()
   })
 })

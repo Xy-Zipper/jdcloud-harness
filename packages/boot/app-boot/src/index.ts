@@ -1021,6 +1021,8 @@ export async function boot(
 
 /** Prompt-section name for the harness-source location line an app bin adds after boot. */
 export const HARNESS_SOURCE_SECTION = 'harness:source'
+/** Deployment product name used in model-visible source guidance. */
+const PRODUCT_NAME = process.env.DSH_PRODUCT_NAME ?? 'LSY-Agent'
 
 /**
  * Add a global prompt section naming the on-disk harness source checkout while
@@ -1043,6 +1045,6 @@ export function addHarnessSourceSection(ctx: Context, sourceRoot: string): (() =
   return systemPrompt.section({
     name: HARNESS_SOURCE_SECTION,
     order: systemPrompt.getSectionOrder('HARNESS_SOURCE'),
-    text: `The JDCloud Harness implementation checkout is at ${sourceRoot}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend JDCloud Harness itself.`,
+    text: `The ${PRODUCT_NAME} implementation checkout is at ${sourceRoot}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend ${PRODUCT_NAME} itself.`,
   })
 }

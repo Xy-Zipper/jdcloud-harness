@@ -15,9 +15,9 @@
 
 - id: system-prompt
   config:
+    includeHarnessIdentity: false
     personaSuffix: Your working directory is {{cwd}}.
-    personaPrefix: >-
-      You are a coding agent powered by the {{model}} model, running on JDCloud Harness.
+    personaPrefix: !!js "'You are a coding agent powered by the {{model}} model, running on ' + (process.env.DSH_PRODUCT_NAME ?? 'LSY-Agent') + '.'"
 
 # Full-text session search is opt-in (the base row's `openAt: never`). This
 # restatement keeps the Web values on one ephemeral in-memory index; a

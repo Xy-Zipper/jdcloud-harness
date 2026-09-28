@@ -1268,7 +1268,7 @@ describe('boot', () => {
 
 describe('addHarnessSourceSection', () => {
   const SOURCE_ROOT = `${sep}opt${sep}harness-src`
-  const EXPECTED = `The JDCloud Harness implementation checkout is at ${SOURCE_ROOT}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend JDCloud Harness itself.`
+  const EXPECTED = `The LSY-Agent implementation checkout is at ${SOURCE_ROOT}. The checkout location and current working directory are separate values and may differ; never infer the working directory from this path. Use pwd to determine the current working directory. Use this checkout only to inspect or extend LSY-Agent itself.`
 
   it('distinguishes the source path from the current workdir after reusable instructions', async () => {
     const ctx = new Context()

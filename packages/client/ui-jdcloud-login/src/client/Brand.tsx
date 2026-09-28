@@ -57,5 +57,5 @@ export function JdcloudBrandMark({ size, className }: JdcloudBrandMarkProps) {
  * @returns the sidebar wordmark text.
  */
 export function JdcloudBrandName({ t }: JdcloudBrandNameProps) {
-  return <span className={css.name}>{t('brandName')}</span>
+  return <span className={css.name}>{process.env.DSH_CLIENT_TITLE ?? t('brandName')}</span>
 }
