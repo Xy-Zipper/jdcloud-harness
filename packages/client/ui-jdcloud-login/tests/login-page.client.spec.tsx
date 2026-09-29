@@ -6,6 +6,7 @@ import { zh, type JdcloudLoginKey } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllEnvs()
 })
 
 const t = (key: JdcloudLoginKey): string => zh[key]
@@ -23,6 +24,17 @@ function renderPage(overrides: Partial<JdcloudLoginPageProps> = {}) {
 }
 
 describe('JDCloud login page', () => {
+  it('renders the configured client title in the brand panel', () => {
+    vi.stubEnv('DSH_CLIENT_TITLE', 'Configured Agent')
+    renderPage()
+    expect(screen.getByText('Configured Agent')).toBeTruthy()
+  })
+
+  it('uses the localized product name when a client title is absent', () => {
+    renderPage()
+    expect(screen.getByText('LSY-Agent')).toBeTruthy()
+  })
+
   it('uses the shared JDCloud mark in the brand panel', () => {
     const rendered = renderPage()
     expect(document.querySelector('[data-jdcloud-brand-mark="true"]')).not.toBeNull()

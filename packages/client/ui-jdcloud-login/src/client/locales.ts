@@ -5,7 +5,7 @@ export const NS = 'jdcloud.login'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
-  eyebrow: 'JDCloud 低代码平台',
+  eyebrow: 'LSY-Agent',
   brandName: 'LSY-Agent',
   title: '欢迎登录',
   description: '登录后即可继续使用低代码智能助手。',
@@ -35,7 +35,7 @@ export const zh = {
 
 /** English dictionary, key-identical to the Chinese source of truth. */
 export const en: Record<JdcloudLoginKey, string> = {
-  eyebrow: 'JDCloud Low-Code Platform',
+  eyebrow: 'LSY-Agent',
   brandName: 'LSY-Agent',
   title: 'Welcome back',
   description: 'Sign in to continue using the low-code assistant.',

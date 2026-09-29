@@ -31,7 +31,7 @@ kind: "package-reference"
 
 认证状态还携带 `systemAdministrator`。非管理员会以 priority `-100` 覆盖 `sidebar.settings`、`conversation.input.model`、`conversation.input.permission` 和 `conversation.hero.agentPreset`，拒绝 `/model` 与 `/permission`，从引导页、渲染、恢复和浏览器直接导航中过滤 `terminal` 标签页类型，并注册一个新 Session 初始化器，在 Session 打开前执行 `/permission workspace-write`。命令不可用或执行失败时，导航会拒绝打开该 Session。切换租户会立即重新应用该策略。管理员可看到底层控件，也不会注册这个初始化器。已有 Session 保留其持久模型与权限选择。
 
-本包还以优先级 `-10` 填充 `sidebar.brand.mark`、`sidebar.brand.name` 与 `conversation.hero.brand.mark`。蓝青渐变的六边形 J 标志遵循各宿主请求的尺寸，登录页复用同一图形。名称读取构建期 `DSH_CLIENT_TITLE`，未配置时回退为 `LSY-Agent`；Docker Compose 会把 `JDCLOUD_PRODUCT_NAME` 传入该变量。这些 single slot 选择更低优先级的填充，因此插件激活时 JDCloud 品牌会替换通用或官方品牌，卸载时自动恢复原填充。
+本包还以优先级 `-10` 填充 `sidebar.brand.mark`、`sidebar.brand.name` 与 `conversation.hero.brand.mark`。蓝青渐变的六边形 J 标志遵循各宿主请求的尺寸，登录页复用同一图形。登录页标签与侧栏名称读取构建期 `DSH_CLIENT_TITLE`，未配置时回退为 `LSY-Agent`；Docker Compose 会把 `JDCLOUD_PRODUCT_NAME` 传入该变量。这些 single slot 选择更低优先级的填充，因此插件激活时 JDCloud 品牌会替换通用或官方品牌，卸载时自动恢复原填充。
 
 密码只保存在组件本地 state 中，成功后清空，永不进入共享 store。所有产品文案归 `jdcloud.login` locale namespace 所有。
 

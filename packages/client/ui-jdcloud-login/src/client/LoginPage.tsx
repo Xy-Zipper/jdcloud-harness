@@ -69,7 +69,7 @@ export function LoginPage({ initialize, login, t }: JdcloudLoginPageProps) {
       <section className={css.brandPanel} aria-label={t('markLabel')}>
         <div className={css.brandContent}>
           <div className={css.mark}><JdcloudBrandMark size={56} /></div>
-          <p className={css.eyebrow}>{t('eyebrow')}</p>
+          <p className={css.eyebrow}>{process.env.DSH_CLIENT_TITLE ?? t('eyebrow')}</p>
           <h1 className={css.brandTitle}>{t('description')}</h1>
         </div>
       </section>
