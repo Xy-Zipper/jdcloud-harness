@@ -8,10 +8,15 @@ FROM ${NODE_IMAGE} AS builder
 ARG DSH_CLIENT_COMMIT_HASH
 ARG DSH_CLIENT_TITLE=Ontology Agent
 
+# Keep pnpm version files in a path readable by both root and node.
+ENV COREPACK_HOME=/opt/corepack
+
 WORKDIR /app
 
-RUN corepack enable \
-  && corepack prepare pnpm@11.7.0 --activate
+RUN mkdir -p "$COREPACK_HOME" \
+  && corepack enable \
+  && corepack prepare pnpm@11.7.0 --activate \
+  && chmod -R a+rX "$COREPACK_HOME"
 
 COPY . .
 
@@ -24,13 +29,17 @@ RUN DSH_CLIENT_COMMIT_HASH="$DSH_CLIENT_COMMIT_HASH" DSH_CLIENT_TITLE="$DSH_CLIE
 # Keep the complete workspace closure because the private Ontology bundle loads local packages at runtime.
 FROM ${NODE_IMAGE} AS runtime
 
+# The profile updater runs as node and reuses the prepared pnpm version.
 ENV NODE_ENV=production \
-  DSH_HOME=/var/lib/jdcloud-harness
+  DSH_HOME=/var/lib/jdcloud-harness \
+  COREPACK_HOME=/opt/corepack
 
 WORKDIR /app
 
-RUN corepack enable \
-  && corepack prepare pnpm@11.7.0 --activate
+RUN mkdir -p "$COREPACK_HOME" \
+  && corepack enable \
+  && corepack prepare pnpm@11.7.0 --activate \
+  && chmod -R a+rX "$COREPACK_HOME"
 
 COPY --from=builder --chown=node:node /app /app
 

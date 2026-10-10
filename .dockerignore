@@ -13,6 +13,7 @@ node_modules
 lib
 **/lib
 apps/web/dist
+jdcloud-harness.tar
 .dsh-build
 dist
 dist-exe

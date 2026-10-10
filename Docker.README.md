@@ -29,6 +29,8 @@ docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
 
 镜像包含当前仓库的 Ontology controller、工具、登录 UI 与 Bundle。不要把 `.env`、`data/` 或其他凭证文件复制进镜像。
 
+根目录的 `jdcloud-harness.tar` 不会进入 Docker 构建上下文，可以在导出旧镜像后直接重建新镜像。Builder 与 Runtime 均固定使用 pnpm 11.7.0，且运行用户 `node` 可以读取共享 Corepack 安装；容器启动时不会临时下载其他 pnpm 版本。
+
 ## 3. 创建服务器环境配置
 
 上传镜像、Compose 文件与环境变量模板：
@@ -78,6 +80,8 @@ docker compose ps
 ```bash
 docker compose up -d --no-build --pull never --force-recreate
 ```
+
+`proxy` 使用 `network_mode: service:jdcloud-harness` 共享 Harness 的网络命名空间。不要只执行 `docker restart jdcloud-harness`；需要重启时使用上面的 Compose 命令同时重建两个服务，否则代理仍会连接旧网络命名空间。
 
 ## 5. 阶段 9 生产验收
 
