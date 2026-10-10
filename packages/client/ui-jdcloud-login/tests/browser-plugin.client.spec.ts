@@ -230,6 +230,41 @@ describe('JDCloud login browser plugin', () => {
     expect(disposeRoute).toHaveBeenCalledOnce()
   })
 
+  it('allows the configured parent origin to frame the transfer bootstrap', async () => {
+    const register = vi.fn((_route: WebRoute) => vi.fn())
+    const ctx = new Context()
+    ctx.provide('webServer', { register } as never)
+    const fiber = ctx.plugin({ inject: [...hostInject], apply: applyHost }, {
+      transferFrameAncestor: 'http://172.18.5.1:8081/',
+    })
+    await fiber.await()
+    const route = register.mock.calls[0]?.[0]
+    const writeHead = vi.fn((_status: number, _headers: Record<string, string>) => {})
+    await route?.handler({ method: 'GET', url: '/login/transfer' } as never, {
+      writeHead,
+      end: vi.fn(),
+    } as never)
+    expect(writeHead.mock.calls[0]?.[1]['content-security-policy']).toMatch(
+      /^default-src 'none'; base-uri 'none'; frame-ancestors http:\/\/172\.18\.5\.1:8081; script-src 'nonce-[a-f0-9]{36}'$/u,
+    )
+    await fiber.dispose()
+  })
+
+  it.each([
+    'not a URL',
+    'ftp://parent.example',
+    'https://user:secret@parent.example',
+    'https://parent.example/path',
+    'https://parent.example/?query=1',
+    'https://parent.example/#fragment',
+  ])('rejects invalid transfer frame ancestor %s', (transferFrameAncestor) => {
+    const ctx = new Context()
+    ctx.provide('webServer', { register: vi.fn() } as never)
+    expect(() => applyHost(ctx, { transferFrameAncestor })).toThrow(
+      'ui-jdcloud-login: transferFrameAncestor must be an HTTP(S) origin without credentials, path, query or fragment',
+    )
+  })
+
   it('declares its browser services', () => {
     expect(hostInject).toEqual(['webServer'])
     expect(clientInject).toEqual(['remote'])

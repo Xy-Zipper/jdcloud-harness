@@ -2,12 +2,24 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import z from '@deepseek-ai/schemastery'
 
 /** Stable Cordis plugin name. */
 export const name = 'ui-jdcloud-login'
 
 /** Host route service required for the transfer entry point. */
 export const inject = ['webServer']
+
+/** Deployment policy for the token-transfer bootstrap document. */
+export interface Config {
+  /** Exact HTTP(S) parent origin allowed to embed the transfer page; empty blocks framing. */
+  readonly transferFrameAncestor?: string
+}
+
+/** Validated token-transfer embedding policy. */
+export const Config: z<Config> = z.object({
+  transferFrameAncestor: z.string().default(''),
+})
 
 /** Public route accepted from a JDCloud source page. */
 const JDCLOUD_TRANSFER_PATH = '/login/transfer'
@@ -20,8 +32,25 @@ function scriptString(value: string): string {
     .replaceAll('\u2029', '\\u2029')
 }
 
+/** Resolve the configured CSP source while rejecting paths and injected directives. */
+function resolveTransferFrameAncestor(value: string | undefined): string {
+  if (value === undefined || value.trim() === '') return "'none'"
+  let parsed: URL
+  try { parsed = new URL(value) } catch {
+    throw new Error(
+      'ui-jdcloud-login: transferFrameAncestor must be an HTTP(S) origin without credentials, path, query or fragment',
+    )
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.href !== `${parsed.origin}/`) {
+    throw new Error(
+      'ui-jdcloud-login: transferFrameAncestor must be an HTTP(S) origin without credentials, path, query or fragment',
+    )
+  }
+  return parsed.origin
+}
+
 /** Build the no-store document that turns a cross-site entry into a same-site index navigation. */
-function transferBootstrap(target: string): { readonly body: string; readonly policy: string } {
+function transferBootstrap(target: string, frameAncestor: string): { readonly body: string; readonly policy: string } {
   const nonce = Array.from(crypto.getRandomValues(new Uint8Array(18)), byte =>
     byte.toString(16).padStart(2, '0')).join('')
   const body = '<!doctype html><html><head><meta charset="utf-8">'
@@ -30,12 +59,16 @@ function transferBootstrap(target: string): { readonly body: string; readonly po
     + '</body></html>'
   return {
     body,
-    policy: `default-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'nonce-${nonce}'`,
+    policy: `default-src 'none'; base-uri 'none'; frame-ancestors ${frameAncestor}; script-src 'nonce-${nonce}'`,
   }
 }
 
-/** Host plugin body; establishes a same-site navigation to the authenticated Web shell. */
-export function apply(ctx: Context): void {
+/** Host plugin body; establishes a same-site navigation to the authenticated Web shell.
+ * @param ctx Host plugin context carrying the Web route registry.
+ * @param config Transfer bootstrap embedding policy.
+ */
+export function apply(ctx: Context, config: Config = {}): void {
+  const frameAncestor = resolveTransferFrameAncestor(config.transferFrameAncestor)
   const route: WebRoute = {
     kind: 'exact',
     path: JDCLOUD_TRANSFER_PATH,
@@ -50,7 +83,7 @@ export function apply(ctx: Context): void {
       target.set('jdcloudTransfer', '1')
       target.set('jdcloudToken', source.searchParams.get('token') ?? '')
       target.set('baseUrl', source.searchParams.get('baseUrl') ?? '')
-      const bootstrap = transferBootstrap(`/#${target.toString()}`)
+      const bootstrap = transferBootstrap(`/#${target.toString()}`, frameAncestor)
       res.writeHead(200, {
         'cache-control': 'no-store',
         'content-security-policy': bootstrap.policy,
