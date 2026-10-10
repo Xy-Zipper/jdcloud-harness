@@ -402,6 +402,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when no turn is open or either audit event fails before the session append commit point.'],
       },
       {
+        signature: 'policyOf(session: Session): ApprovalPolicy',
+        description: 'The session\'s effective policy: its own `approval/policy` fold, else the configured default (the schema already defaulted an omitted policy to `\'ask\'`; the `??` only narrows the optional-input TYPE).',
+        parameters: [{ name: 'session', description: 'the exact accepted session whose policy applies.' }],
+        returns: 'the policy every ask for this session resolves under right now.',
+      },
+      {
         signature: 'overrideOf(session: Session): ApprovalPolicy | undefined',
         description: 'Read the session override without applying the configured default.',
         parameters: [{ name: 'session', description: 'session whose log supplies the override.' }],
@@ -743,6 +749,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Admit one request: it passes requestRejection and speaks for the operator, or it is refused with that status.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }],
         returns: 'the operator Peer, or the rejection status.',
+      },
+      {
+        signature: 'runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value',
+        description: 'Run an admitted operation with the optional JDCloud browser identity.',
+        parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }, { name: 'operation', description: 'operation that may await request-scoped work.' }],
+        returns: 'the operation result.',
       },
       {
         signature: 'authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean',
@@ -1248,6 +1260,89 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'jdcloudAuthController',
+    summary: 'Store credentials, expose login commands, and validate each browser prompt.',
+    description: 'Store credentials, expose login commands, and validate each browser prompt.',
+    methods: [
+      {
+        signature: '@Remote async status(): Promise<JdcloudAuthStatus>',
+        description: 'Read redacted stored authentication state.',
+        parameters: [],
+        returns: 'Current redacted authentication state.',
+      },
+      {
+        signature: '@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>',
+        description: 'Read the current tenant\'s forms and workflows carrying a supported data permission.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'Browser-safe menu identities, labels, paths, types, icons, and data permissions.',
+      },
+      {
+        signature: '@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Authenticate, validate the resulting token, and commit it to Host credentials.',
+        parameters: [{ name: 'request', description: 'Service address and password credentials.' }, { name: 'signal', description: 'Caller cancellation for login and validation requests.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
+        signature: '@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Replace the stored login after synchronizing a transferred token to its reported current tenant.',
+        parameters: [{ name: 'request', description: 'Absolute HTTP(S) service address and raw transfer token.' }, { name: 'signal', description: 'Caller cancellation for tenant synchronization and current-user validation.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
+        signature: '@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>',
+        description: 'Select another tenant for the stored JDCloud login.',
+        parameters: [{ name: 'corpId', description: 'Tenant identity from the current authenticated status.' }, { name: 'signal', description: 'Caller cancellation for the switch and confirmation requests.' }],
+        returns: 'Redacted authenticated state with the confirmed current tenant.',
+      },
+      {
+        signature: '@Remote async logout(): Promise<JdcloudAuthStatus>',
+        description: 'Delete the stored JDCloud token.',
+        parameters: [],
+        returns: 'Redacted unauthenticated state.',
+      },
+      {
+        signature: 'async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>',
+        description: 'Send one Host-only JDCloud API request with the stored login.',
+        parameters: [{ name: 'request', description: 'Fixed API path, method, and one optional JSON or multipart-file body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'JDCloud response data without exposing the stored token.',
+      },
+      {
+        signature: 'async currentScopeKey(): Promise<string | undefined>',
+        description: 'Return the deterministic tenant-user owner key for the current browser login.',
+        parameters: [],
+        returns: 'The owner key, or undefined when no user login is active.',
+      },
+      {
+        signature: 'async workspaceRoot(): Promise<string | undefined>',
+        description: 'Create and return the current tenant-user\'s persistent directory.',
+        parameters: [],
+        returns: 'Canonical directory selected by service address, tenant id, and user id.',
+      },
+      {
+        signature: 'async assertWorkspacePath(path: string): Promise<void>',
+        description: 'Reject an existing directory outside the current tenant-user\'s workspace tree.',
+        parameters: [{ name: 'path', description: 'Absolute directory supplied by a browser or selected by the Host.' }],
+      },
+      {
+        signature: 'async isCurrentAdministrator(): Promise<boolean>',
+        description: 'Return whether the current login has system-administrator terminal access.',
+        parameters: [],
+        returns: 'Whether the current login is a system administrator.',
+      },
+      {
+        signature: 'async claimOwned(kind: \'session\' | \'workspace\', id: string): Promise<void>',
+        description: 'Claim a newly-created Session or Workspace for the current tenant-user.',
+        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }],
+      },
+      {
+        signature: 'async owns(kind: \'session\' | \'workspace\', id: string, expectedScopeKey?: string): Promise<boolean>',
+        description: 'Check whether a durable Session or Workspace belongs to the current tenant-user.',
+        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }, { name: 'expectedScopeKey', description: 'Optional owner key to check instead of the current login.' }],
+        returns: 'Whether the resource belongs to the selected tenant-user owner.',
+      },
+    ],
+  },
+  {
     key: 'jobController',
     summary: 'Host service backing the generated `ctx.remote.job` namespace.',
     description: 'Host service backing the generated `ctx.remote.job` namespace.',
@@ -1520,6 +1615,43 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read the current rendering generation before reusing a Client PDF.',
         parameters: [{ name: 'signal', description: 'Remote caller cancellation.' }],
         returns: 'provider lifetime, replaced with rendering, font, or engine configuration.',
+      },
+    ],
+  },
+  {
+    key: 'ontologyAuthController',
+    summary: 'Authenticate each browser independently and validate every submitted prompt.',
+    description: 'Authenticate each browser independently and validate every submitted prompt.',
+    methods: [
+      {
+        signature: '@Remote async status(): Promise<OntologyAuthStatus>',
+        description: 'Read and validate redacted authentication state for the current browser.',
+        parameters: [],
+        returns: 'Current redacted authentication state.',
+      },
+      {
+        signature: '@Remote async login(request: OntologyLoginRequest, signal: AbortSignal): Promise<OntologyAuthStatus>',
+        description: 'Create, validate, and store one Runtime Session for the current browser.',
+        parameters: [{ name: 'request', description: 'Ontology account credentials.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
+        signature: '@Remote async logout(): Promise<OntologyAuthStatus>',
+        description: 'Revoke and delete only the current browser\'s Runtime Session.',
+        parameters: [],
+        returns: 'Redacted unauthenticated state.',
+      },
+      {
+        signature: 'async currentScopeKey(): Promise<string | undefined>',
+        description: 'Return the stable user owner key for the current browser login.',
+        parameters: [],
+        returns: 'SHA-256 of service address and stable Ontology user id, or undefined while logged out.',
+      },
+      {
+        signature: 'async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown>',
+        description: 'Send one Runtime request with the current browser\'s stored login.',
+        parameters: [{ name: 'request', description: 'Fixed Runtime API path, method, and optional JSON body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'Untrusted JSON for the owning consumer to validate at the wire boundary.',
       },
     ],
   },
@@ -2923,7 +3055,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Typed Remote control of transient Session-owned terminal processes.',
     methods: [
       {
-        signature: '@Remote environment(agent: Agent, signal: AbortSignal): TerminalEnvironment',
+        signature: '@Remote async environment(agent: Agent, signal: AbortSignal): Promise<TerminalEnvironment>',
         description: 'Read the Session working directory and terminal limits without resolving a shell.',
         parameters: [{ name: 'agent', description: 'Session owner supplied by the Gateway.' }, { name: 'signal', description: 'request cancellation.' }],
         returns: 'the Session workspace directory and terminal limits.',
@@ -2971,7 +3103,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'after the resize completes.',
       },
       {
-        signature: '@Remote rename(agent: Agent, id: WebTerminalId, title: string): void',
+        signature: '@Remote async rename(agent: Agent, id: WebTerminalId, title: string): Promise<void>',
         description: 'Rename a terminal without changing its shell.',
         parameters: [{ name: 'agent', description: 'Session owner supplied by the Gateway.' }, { name: 'id', description: 'terminal identity.' }, { name: 'title', description: 'nonempty display title, at most 120 characters.' }],
       },
@@ -3530,9 +3662,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Durable workspace registry. Startup waits for `sessionPersistence`, builds one canonical-cwd header index, and completes the one-time history bootstrap before the service becomes active. The persistence dependency is mandatory so an unavailable peer can never be mistaken for an empty history and commit the initialized marker.',
     methods: [
       {
-        signature: 'async create(path: string, title?: string): Promise<Workspace>',
-        description: 'Create or reuse a workspace for an existing directory. The fully qualified path is canonicalized through `fs.realpath`; a relative, nonexistent, or non-directory path rejects. Repeated calls for the same canonical path return the existing entity without changing its title. A newly created workspace is prepended to the durable registry order. Different canonical paths may share a display title.',
-        parameters: [{ name: 'path', description: 'Existing directory to own, in a fully qualified path spelling.' }, { name: 'title', description: 'Display title used only when a new record is created.' }],
+        signature: 'async create(path: string, title?: string, options: WorkspaceCreateOptions = {}): Promise<Workspace>',
+        description: 'Create or reuse a workspace for an existing directory. The fully qualified path is canonicalized through `fs.realpath`; a relative, nonexistent, or non-directory path rejects. Repeated calls for the same canonical path return the existing entity without changing its title, unless duplicate registration is requested. A newly created workspace is prepended to the durable registry order. Different canonical paths may share a display title.',
+        parameters: [{ name: 'path', description: 'Existing directory to own, in a fully qualified path spelling.' }, { name: 'title', description: 'Display title used only when a new record is created.' }, { name: 'options', description: 'Allow another owner to register the same canonical directory.' }],
         returns: 'the existing or newly durable workspace.',
       },
       {
@@ -3594,6 +3726,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
         parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
         returns: 'the workspace owning the canonical path, when one exists.',
+      },
+      {
+        signature: 'async resolveAllByPath(path: string): Promise<readonly Workspace[]>',
+        description: 'Resolve every registration for the canonical directory.',
+        parameters: [{ name: 'path', description: 'Existing directory path.' }],
+        returns: 'matching Workspaces in registry order.',
       },
     ],
   },
@@ -3738,6 +3876,22 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'message', description: 'user-safe failure chain.' }],
   },
   {
+    name: 'api-session/model-selection-admission',
+    mode: 'waterfall',
+    signature: '\'api-session/model-selection-admission\'( request: SessionSelectModelRequest, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one browser model selection before validation or Session mutation.',
+    description: 'Admit one browser model selection before validation or Session mutation. Listeners call `next()` after their policy accepts the request; rejection preserves the Session and deployment default model selections.',
+    parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }],
+  },
+  {
+    name: 'api-session/prompt-admission',
+    mode: 'waterfall',
+    signature: '\'api-session/prompt-admission\'( request: { readonly sessionId: SessionId; readonly signal: AbortSignal }, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one browser prompt before attachment persistence or Agent inbox delivery.',
+    description: 'Admit one browser prompt before attachment persistence or Agent inbox delivery. Listeners call `next()` after their policy accepts the request; rejection leaves the submitted content outside the Session and Agent lifecycle.',
+    parameters: [{ name: 'request', description: '.signal - caller cancellation for admission work.' }],
+  },
+  {
     name: 'api-session/removed',
     mode: 'emit',
     signature: '\'api-session/removed\'(sessionId: SessionId): void',
@@ -3776,6 +3930,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     summary: 'One authorization attempt has finished and released its key.',
     description: 'One authorization attempt has finished and released its key. Fires for every terminal outcome, failures included, so a surface watching a key it did not start (a second browser tab) learns the attempt is over.',
     parameters: [{ name: 'key', description: 'the credential record the finished attempt was authorizing.' }, { name: 'settlement', description: 'how it ended, including the `failed` case its caller sees as a thrown error.' }],
+  },
+  {
+    name: 'commands/admission',
+    mode: 'waterfall',
+    signature: '\'commands/admission\'( request: { readonly sessionId: SessionId; readonly name: string; readonly rawInput: string }, next: () => Promise<void>, ): Promise<void>',
+    summary: 'Admit one resolved browser command before its lifecycle event is logged or its handler runs.',
+    description: 'Admit one resolved browser command before its lifecycle event is logged or its handler runs.',
+    parameters: [{ name: 'request', description: 'the resolved command invocation.' }],
   },
   {
     name: 'commands/change',
@@ -5154,6 +5316,54 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly uplink?: AsyncIterable<unknown>;\n    readonly peer?: PeerScope;\n    readonly signal?: AbortSignal;\n}',
   },
   {
+    name: 'JdcloudAuthenticatedRequest',
+    declaration: 'export type JdcloudAuthenticatedRequest = JdcloudAuthenticatedRequestBase & {\n    readonly body?: unknown;\n    readonly multipartFile?: never;\n} | Omit<JdcloudAuthenticatedRequestBase, \'method\'> & {\n    readonly method: \'POST\';\n    readonly body?: never;\n    readonly multipartFile: JdcloudMultipartFile;\n};',
+  },
+  {
+    name: 'JdcloudAuthStatus',
+    declaration: 'export type JdcloudAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly corpId: string;\n    readonly corpName: string;\n    readonly corps: readonly JdcloudCorp[];\n    readonly systemAdministrator: boolean;\n};',
+  },
+  {
+    name: 'JdcloudCorp',
+    declaration: 'export interface JdcloudCorp {\n    readonly corpId: string;\n    readonly corpName: string;\n}',
+  },
+  {
+    name: 'JdcloudLoginRequest',
+    declaration: 'export interface JdcloudLoginRequest {\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly password: string;\n}',
+  },
+  {
+    name: 'JdcloudLowcodeMenuType',
+    declaration: 'export type JdcloudLowcodeMenuType = 3 | 4;',
+  },
+  {
+    name: 'JdcloudLowcodePermission',
+    declaration: 'export type JdcloudLowcodePermission = JdcloudLowcodeReadPermission | JdcloudLowcodeWritePermission;',
+  },
+  {
+    name: 'JdcloudLowcodeReadPermission',
+    declaration: 'export type JdcloudLowcodeReadPermission = \'readData\';',
+  },
+  {
+    name: 'JdcloudLowcodeWritePermission',
+    declaration: 'export type JdcloudLowcodeWritePermission = \'addData\' | \'editData\' | \'deleteData\';',
+  },
+  {
+    name: 'JdcloudMultipartFile',
+    declaration: 'export type JdcloudMultipartFile = {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n    readonly stream?: never;\n    readonly bytes?: never;\n} | {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data?: never;\n    readonly stream: AsyncIterable<Uint8Array>;\n    readonly bytes: number;\n};',
+  },
+  {
+    name: 'JdcloudTokenLoginRequest',
+    declaration: 'export interface JdcloudTokenLoginRequest {\n    readonly baseUrl: string;\n    readonly token: string;\n}',
+  },
+  {
+    name: 'JdcloudWritableMenu',
+    declaration: 'export interface JdcloudWritableMenu {\n    readonly menuId: string;\n    readonly fullName: string;\n    readonly path: string;\n    readonly type: JdcloudLowcodeMenuType;\n    readonly icon?: string;\n    readonly agentPermissions: readonly JdcloudLowcodePermission[];\n}',
+  },
+  {
+    name: 'JdcloudWritableMenuState',
+    declaration: 'export interface JdcloudWritableMenuState {\n    readonly baseUrl: string;\n    readonly corpId: string;\n    readonly menus: readonly JdcloudWritableMenu[];\n}',
+  },
+  {
     name: 'JobAppendOptions',
     declaration: 'export interface JobAppendOptions {\n    channel?: JobChannel;\n    gapBefore?: true;\n}',
   },
@@ -5588,6 +5798,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OneShotSubagentDescriptorData',
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
+  },
+  {
+    name: 'OntologyAccountType',
+    declaration: 'export type OntologyAccountType = \'admin\' | \'member\';',
+  },
+  {
+    name: 'OntologyAuthenticatedRequest',
+    declaration: 'export interface OntologyAuthenticatedRequest {\n    readonly method: \'GET\' | \'POST\';\n    readonly path: `/api/runtime/${string}`;\n    readonly body?: Readonly<Record<string, unknown>>;\n}',
+  },
+  {
+    name: 'OntologyAuthStatus',
+    declaration: 'export type OntologyAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly user: OntologyRuntimeIdentity;\n};',
+  },
+  {
+    name: 'OntologyLoginRequest',
+    declaration: 'export interface OntologyLoginRequest {\n    readonly username: string;\n    readonly password: string;\n}',
+  },
+  {
+    name: 'OntologyRuntimeIdentity',
+    declaration: 'export interface OntologyRuntimeIdentity {\n    readonly userId: string;\n    readonly username: string;\n    readonly displayName: string;\n    readonly accountType: OntologyAccountType;\n    readonly authorizationVersion: string;\n}',
   },
   {
     name: 'OptionalSessionSeq',
@@ -7199,7 +7429,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    projectContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    modelSchema?(context: AssembleContext): {\n        readonly description?: string;\n        readonly parameters?: Record<string, unknown>;\n    };\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    projectContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -7628,6 +7858,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceChangesSummary',
     declaration: 'export interface WorkspaceChangesSummary {\n    turn: number;\n    cwd: string;\n    files: WorkspaceChangedFile[];\n    total: number;\n    added: number;\n    deleted: number;\n    snapshot?: {\n        before: string;\n        after: string;\n    };\n}',
+  },
+  {
+    name: 'WorkspaceCreateOptions',
+    declaration: 'export interface WorkspaceCreateOptions {\n    readonly allowDuplicatePath?: boolean;\n}',
   },
   {
     name: 'WorkspaceCreateRequest',

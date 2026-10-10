@@ -1,0 +1,13 @@
+- main:
+  - region "Ontology":
+    - paragraph: LSY-Agent
+    - heading "使用 Ontology 账号登录，访问已授权的项目与业务能力。" [level=1]
+  - heading "登录本体智能助手" [level=2]
+  - paragraph: 使用 Ontology 账号登录，访问已授权的项目与业务能力。
+  - text: 账号
+  - textbox "账号":
+    - /placeholder: 请输入账号
+  - text: 密码
+  - textbox "密码":
+    - /placeholder: 请输入密码
+  - button "登录"

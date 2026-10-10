@@ -1,0 +1,7 @@
+# Live composition owner for the authored Ontology tool snapshot.
+- insert:
+    - id: ontology-runtime-fixture
+      name: './ontology-runtime-fixture.mjs'
+
+    - id: tool-ontology
+      name: '../../../packages/ontology/tool-ontology/src/index.ts'

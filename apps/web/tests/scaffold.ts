@@ -890,7 +890,10 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     if (publicPrefix !== undefined) loginUrl.hostname = '127.0.0.1'
     const login = await fetch(loginUrl, { redirect: 'manual' })
     const setCookie = login.headers.get('set-cookie')
-    if (login.status !== 303 || login.headers.get('location') !== './' || setCookie === null) {
+    // Launch-token authentication redirects relative to the mounted app, while
+    // BrowserSession-only profiles redirect to the root that issued the cookie.
+    const loginLocation = login.headers.get('location')
+    if (login.status !== 303 || (loginLocation !== './' && loginLocation !== '/') || setCookie === null) {
       throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
     }
     cookieHeader = setCookie.split(';', 1)[0] ?? ''

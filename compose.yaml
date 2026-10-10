@@ -4,6 +4,7 @@ services:
   jdcloud-harness:
     # The image is built from this private repository by the accompanying Dockerfile.
     image: jdcloud-harness:local
+    # Retain the existing private DNS overrides for the explicit JDCloud rollback mode.
     extra_hosts:
       - "mi.kindoucloud.com:172.20.46.20"
       - "kindoucloud.com:172.20.46.20"
@@ -15,7 +16,7 @@ services:
         # `.git` is excluded from the build context, so pass the source revision explicitly.
         DSH_CLIENT_COMMIT_HASH: ${DSH_CLIENT_COMMIT_HASH:?Set DSH_CLIENT_COMMIT_HASH to `git rev-parse HEAD` before building}
         # The browser title is embedded into the frontend during image build.
-        DSH_CLIENT_TITLE: ${JDCLOUD_PRODUCT_NAME:-LSY-Agent}
+        DSH_CLIENT_TITLE: ${ONTOLOGY_PRODUCT_NAME:-Ontology Agent}
     init: true
     restart: unless-stopped
     working_dir: /workspace
@@ -23,22 +24,24 @@ services:
       - node
       - /app/apps/cli/lib/bin.js
       - web
-      # JDCloud Login owns user identity for this deployment; the overlay keeps Host/Origin checks only.
-      - --patch
-      - /app/docker.no-browser-auth.patch.yml
       - --no-open
       # The API trust fence must accept the public domain or IP seen by browsers.
       - --trusted-host
-      - ${JDCLOUD_HARNESS_TRUSTED_HOST:?Set JDCLOUD_HARNESS_TRUSTED_HOST to the public domain or IP, including a non-default port}
+      - ${ONTOLOGY_HARNESS_TRUSTED_HOST:?Set ONTOLOGY_HARNESS_TRUSTED_HOST to the public domain or IP, including a non-default port}
     environment:
       # Every browser user connected to this service shares settings.yaml below this directory.
       DSH_HOME: /var/lib/jdcloud-harness
       # Runtime prompt and Web-surface branding.
-      DSH_PRODUCT_NAME: ${JDCLOUD_PRODUCT_NAME:-LSY-Agent}
+      DSH_PRODUCT_NAME: ${ONTOLOGY_PRODUCT_NAME:-Ontology Agent}
       # Keep the deployment's unified key while satisfying the shipped DeepSeek routes.
       GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
-      # Seed the JDCloud login form through the Host controller at process startup.
+      # Ontology Runtime is the only application identity and business-data authority.
+      HARNESS_IDENTITY_BUNDLE: ${HARNESS_IDENTITY_BUNDLE:-ontology}
+      ONTOLOGY_BASE_URL: ${ONTOLOGY_BASE_URL:?Set ONTOLOGY_BASE_URL to the HTTPS Ontology Runtime origin}
+      ONTOLOGY_REQUEST_TIMEOUT_MS: ${ONTOLOGY_REQUEST_TIMEOUT_MS:-15000}
+      ONTOLOGY_ALLOW_INSECURE_LOOPBACK: "false"
+      # Stage 9 keeps the prior deployment values only for HARNESS_IDENTITY_BUNDLE=jdcloud rollback.
       JDCLOUD_DEFAULT_BASE_URL: ${JDCLOUD_DEFAULT_BASE_URL:-}
       JDCLOUD_USER_WORKSPACE_DIR: /workspace/jdcloud-users
       NODE_ENV: production
@@ -50,7 +53,7 @@ services:
       - jdcloud_harness_workspace:/workspace
     ports:
       # Caddy listens on 8080 inside this service's shared network namespace.
-      - ${JDCLOUD_HARNESS_PORT:-3080}:8080
+      - ${ONTOLOGY_HARNESS_PORT:-3080}:8080
     healthcheck:
       test:
         - CMD

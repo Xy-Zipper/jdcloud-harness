@@ -54,6 +54,7 @@ import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
 import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as ToolJdcloudLowcode from '../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts'
+import * as ToolOntology from '../packages/ontology/tool-ontology/src/index.ts'
 import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
@@ -517,6 +518,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-ontology',
+    dir: 'tool-ontology',
+    source: 'packages/ontology/tool-ontology/src/index.ts',
+    requires: ['ctx.tools', 'ctx.ontologyAuthController', 'ctx.systemPrompt', 'an admitted browser request'],
+    writes: ['tool/call', 'tool/result', 'authorized Ontology Action mutations'],
+    async mount(ctx) {
+      ctx.provide('ontologyAuthController', {
+        requestAuthenticated: () => Promise.reject(new Error('tool-catalog never executes Ontology requests')),
+      })
+      await ctx.plugin(ToolOntology)
+    },
+    note:
+      'The eight tools discover authorized Project and Object ids before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-ralph',

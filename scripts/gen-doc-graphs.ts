@@ -280,6 +280,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns password login, durable token storage, and tenant validation before browser prompts enter a Session.',
   },
   {
+    key: 'ontologyAuthController',
+    pkg: 'api-ontology-auth-controller',
+    title: 'Host Ontology authentication Remote controller',
+    mode: 'core',
+    consumers: ['tool-ontology'],
+    note: 'Owns browser-scoped login, durable rotating tokens, authenticated Runtime requests, and prompt admission.',
+  },
+  {
     key: 'settingsController',
     pkg: 'api-settings-controller',
     title: 'Host settings-surface Remote controller',

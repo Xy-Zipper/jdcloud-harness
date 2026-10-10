@@ -234,6 +234,26 @@ export interface Config {
 
 Source: [`packages/api/job-controller/src/index.ts:35`](../packages/api/job-controller/src/index.ts)
 
+<a id="deepseek-aidsh-api-ontology-auth-controller"></a>
+
+## `@deepseek-ai/dsh-api-ontology-auth-controller`
+
+Requires: `credentials` · `browserSession`
+
+```ts config-catalog
+/** Ontology authentication controller configuration. */
+export interface Config {
+  /** Deployment-owned Ontology Runtime service address. */
+  readonly ontologyBaseUrl: string
+  /** Network deadline for login, refresh, validation, and logout requests. */
+  readonly requestTimeoutMs?: number
+  /** Permit explicit HTTP only for loopback development addresses. */
+  readonly allowInsecureLoopback?: boolean
+}
+```
+
+Source: [`packages/api/ontology-auth-controller/src/index.ts:45`](../packages/api/ontology-auth-controller/src/index.ts)
+
 <a id="deepseek-aidsh-api-session-controller"></a>
 
 ## `@deepseek-ai/dsh-api-session-controller`
@@ -3446,12 +3466,12 @@ export interface Config {
   readonly maxPageSize?: number
   /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
   readonly maxOutputBytes?: number
-  /** Host-memory lifetime for one tenant-user department tree in milliseconds. Defaults to 300000. */
+  /** Host-memory lifetime for tenant-user department and role selectors in milliseconds. Defaults to 300000. */
   readonly organizationCacheTtlMs?: number
 }
 ```
 
-Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:50`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
+Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:56`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
@@ -4176,6 +4196,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-ontology-login` ([`packages/client/ui-ontology-login/src/index.ts`](../packages/client/ui-ontology-login/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-open-in-app` ([`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-permission-presets` ([`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-plan` ([`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts))
@@ -4226,6 +4247,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
 - `@deepseek-ai/dsh-mcp-resources` — requires `tools` ([`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts))
+- `@deepseek-ai/dsh-ontology-login` ([`packages/bundle/ontology-login/src/index.ts`](../packages/bundle/ontology-login/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-ssh` — requires `ssh` ([`packages/ssh/sandbox-ssh/src/index.ts`](../packages/ssh/sandbox-ssh/src/index.ts))
 - `@deepseek-ai/dsh-schedule` — requires `agents` · `sessions` · `tools` · `sessionPersistence` ([`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts))
 - `@deepseek-ai/dsh-session` ([`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts))
@@ -4242,6 +4264,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
+- `@deepseek-ai/dsh-tool-ontology` — requires `ontologyAuthController` · `systemPrompt` · `tools` ([`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-webhook` — requires `agents` · `agentDefaultModel` · `agentPresets` · `permissionPresets` · `sessionTitle` · `workspaceRegistry` ([`packages/webhook/webhook/src/index.ts`](../packages/webhook/webhook/src/index.ts))

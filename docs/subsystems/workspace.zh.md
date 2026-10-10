@@ -482,15 +482,15 @@ Durable workspace registry. Startup waits for `sessionPersistence`, builds one c
  * Create or reuse a workspace for an existing directory. The fully qualified
  * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
  * non-directory path rejects. Repeated calls for the same canonical path
- * return the existing entity without changing its title unless duplicate
- * registration is requested.
+ * return the existing entity without changing its title, unless duplicate registration is requested.
  * A newly created workspace is prepended to the durable registry order.
  * Different canonical paths may share a display title.
  * @param path - Existing directory to own, in a fully qualified path spelling.
  * @param title - Display title used only when a new record is created.
+ * @param options - Allow another owner to register the same canonical directory.
  * @returns the existing or newly durable workspace.
  */
-async create(path: string, title?: string, options?: WorkspaceCreateOptions): Promise<Workspace>
+async create(path: string, title?: string, options: WorkspaceCreateOptions = {}): Promise<Workspace>
 
 /**
  * Initialize the default Workspace only while both the registry and Session
@@ -590,17 +590,17 @@ unpinSession(sessionId: SessionId): Promise<void>
 
 /**
  * Resolve by canonical directory path without creating or mutating a
- * workspace. A missing path rejects during `realpath`; `resolveByPath` returns
- * the first match when owner-scoped registrations share a directory.
+ * workspace. A missing path rejects during `realpath`; an existing unowned
+ * directory returns `undefined`.
  * @param path - Existing directory path in a fully qualified spelling.
  * @returns the workspace owning the canonical path, when one exists.
  */
 async resolveByPath(path: string): Promise<Workspace | undefined>
 
 /**
- * Resolve every workspace registered for a canonical directory path.
- * @param path - Existing directory path in a fully qualified spelling.
- * @returns matching workspaces in registry order.
+ * Resolve every registration for the canonical directory.
+ * @param path - Existing directory path.
+ * @returns matching Workspaces in registry order.
  */
 async resolveAllByPath(path: string): Promise<readonly Workspace[]>
 ```

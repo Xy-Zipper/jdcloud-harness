@@ -91,6 +91,14 @@ requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 admit(request: ConnectionTrustRequest): PeerAdmission
 
 /**
+ * Run an admitted operation with the optional JDCloud browser identity.
+ * @param request - request headers from the HTTP or upgrade request.
+ * @param operation - operation that may await request-scoped work.
+ * @returns the operation result.
+ */
+runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value
+
+/**
  * Authenticate one frontend index request, owning a token redirect or 401.
  * @param request - root or configured-index HTTP request.
  * @param response - response owned when the result is false.

@@ -1,0 +1,27 @@
+# Optional Web-profile layer for Ontology Runtime authentication.
+- id: connection
+  config:
+    # Ontology owns application login, so each browser gets its own opaque
+    # Host session instead of sharing Harness authentication state.
+    browserAuthentication: false
+    browserSession: true
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
+
+- insert:
+    - id: ontology-auth-controller
+      name: '@deepseek-ai/dsh-api-ontology-auth-controller'
+      config:
+        ontologyBaseUrl: !!js process.env.ONTOLOGY_BASE_URL
+        requestTimeoutMs: !!js Number(process.env.ONTOLOGY_REQUEST_TIMEOUT_MS ?? 15000)
+        allowInsecureLoopback: !!js process.env.ONTOLOGY_ALLOW_INSECURE_LOOPBACK === 'true'
+
+    - id: tool-ontology
+      name: '@deepseek-ai/dsh-tool-ontology'
+
+    - id: ui-ontology-login
+      name: '@deepseek-ai/dsh-client-ui-ontology-login'
+
+- id: ui-settings-models
+  config:
+    welcomeNotice: false
+    credentialOnboarding: false

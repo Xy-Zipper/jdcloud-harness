@@ -75,6 +75,11 @@ flowchart LR
   svc_jobController["ctx.jobController<br/>Host job Remote controller"]
   pkg_api_settings_controller["api-settings-controller"]
   svc_credentialsController["ctx.credentialsController<br/>Host credential-surface Remote controller"]
+  pkg_api_jdcloud_auth_controller["api-jdcloud-auth-controller"]
+  svc_jdcloudAuthController["ctx.jdcloudAuthController<br/>Host JDCloud authentication Remote controller"]
+  pkg_api_ontology_auth_controller["api-ontology-auth-controller"]
+  svc_ontologyAuthController["ctx.ontologyAuthController<br/>Host Ontology authentication Remote controller"]
+  pkg_tool_ontology["tool-ontology"]
   svc_settingsController["ctx.settingsController<br/>Host settings-surface Remote controller"]
   pkg_api_workspace_files["api-workspace-files"]
   svc_workspaceFiles["ctx.workspaceFiles<br/>Host workspace file Remote service"]
@@ -275,7 +280,9 @@ flowchart LR
   pkg_agent_loop --> svc_agentLoop
   pkg_agent_preset_registry --> svc_agentPresets
   pkg_api_gateway --> svc_typertGateway
+  pkg_api_jdcloud_auth_controller --> svc_jdcloudAuthController
   pkg_api_job_controller --> svc_jobController
+  pkg_api_ontology_auth_controller --> svc_ontologyAuthController
   pkg_api_session_controller --> svc_sessionController
   pkg_api_session_controller --> svc_sessionFileReferences
   pkg_api_session_controller --> svc_sessionSkillCatalog
@@ -471,6 +478,7 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_mcpResources --> pkg_mcp_resources
   svc_officeToPdf --> pkg_client_ui_sidebar_documentpreview
+  svc_ontologyAuthController --> pkg_tool_ontology
   svc_pluginManager --> pkg_plugin_manager
   svc_pluginManager --> pkg_ui_settings_plugin_inventory
   svc_pluginRegistryProbe --> pkg_client_ui_plugin_manager
@@ -589,6 +597,8 @@ flowchart LR
 | `ctx.sessionSkillCatalog` | `core` | [`api-session-controller`](../packages/api/session-controller) | - | - | - | Lists the Session composition's user-invocable skills without activating a cold Agent. |
 | `ctx.jobController` | `core` | [`api-job-controller`](../packages/api/job-controller) | - | - | - | Streams one background job's observation record over the generated Remote namespace; the roster stays on the session control stream. |
 | `ctx.credentialsController` | `core` | [`api-settings-controller`](../packages/api/settings-controller) | - | - | - | Projects the credential-reference seam onto the generated Remote namespace: batch fan-out, view projection, and refusal mapping live here, not on the seam Definition. |
+| `ctx.jdcloudAuthController` | `core` | [`api-jdcloud-auth-controller`](../packages/api/jdcloud-auth-controller) | - | - | - | Owns password login, durable token storage, and tenant validation before browser prompts enter a Session. |
+| `ctx.ontologyAuthController` | `core` | [`api-ontology-auth-controller`](../packages/api/ontology-auth-controller) | - | [`tool-ontology`](../packages/ontology/tool-ontology) | - | Owns browser-scoped login, durable rotating tokens, authenticated Runtime requests, and prompt admission. |
 | `ctx.settingsController` | `core` | [`api-settings-controller`](../packages/api/settings-controller) | - | - | - | Projects the user-settings seam onto the generated Remote namespace: the read is always redacted and every refusal is classified here, not on the seam Definition. |
 | `ctx.workspaceFiles` | `core` | [`api-workspace-files`](../packages/api/workspace-files) | - | - | - | Serves stat, paged text, byte windows, directory listings, and the change feed for files inside a Session's workspace root, confined by lstat, containment, and a stat re-check. |
 | `ctx.workspaceChanges` | `core` | [`workspace-changes`](../packages/deliverables/workspace-changes) | - | - | - | Serves the summary each workspace/changes event announced and each listed file's turn-start and turn-end comparison, by Session and event sequence, until that Session is disposed; the log carries only the turn. |

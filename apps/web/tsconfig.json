@@ -76,6 +76,7 @@
     "tests/default-model.e2e.ts",
     "tests/jdcloud-ordinary-user.e2e.ts",
     "tests/jdcloud-current-member.e2e.ts",
+    "tests/ontology-login.e2e.ts",
     "tests/default-workspace.e2e.ts",
     "tests/new-session-refused.e2e.ts",
     "tests/github-ready-review.e2e.ts",

@@ -329,6 +329,151 @@ abstract getPlatformSession(): Promise<PlatformSession | null>
 
 Source: [`packages/credentials/deepseek-account/src/index.ts`](../../packages/credentials/deepseek-account/src/index.ts)
 
+<a id="ctxjdcloudauthcontroller--jdcloudauthcontroller"></a>
+
+### `ctx.jdcloudAuthController` — `JdcloudAuthController`
+
+Store credentials, expose login commands, and validate each browser prompt.
+
+```ts cordis-catalog
+/**
+ * Read redacted stored authentication state.
+ * @returns Current redacted authentication state.
+ */
+@Remote async status(): Promise<JdcloudAuthStatus>
+
+/**
+ * Read the current tenant's forms and workflows carrying a supported data permission.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns Browser-safe menu identities, labels, paths, types, icons, and data permissions.
+ */
+@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>
+
+/**
+ * Authenticate, validate the resulting token, and commit it to Host credentials.
+ * @param request - Service address and password credentials.
+ * @param signal - Caller cancellation for login and validation requests.
+ * @returns Redacted authenticated state.
+ */
+@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
+ * Replace the stored login after synchronizing a transferred token to its reported current tenant.
+ * @param request - Absolute HTTP(S) service address and raw transfer token.
+ * @param signal - Caller cancellation for tenant synchronization and current-user validation.
+ * @returns Redacted authenticated state.
+ */
+@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
+ * Select another tenant for the stored JDCloud login.
+ * @param corpId - Tenant identity from the current authenticated status.
+ * @param signal - Caller cancellation for the switch and confirmation requests.
+ * @returns Redacted authenticated state with the confirmed current tenant.
+ */
+@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>
+
+/**
+ * Delete the stored JDCloud token.
+ * @returns Redacted unauthenticated state.
+ */
+@Remote async logout(): Promise<JdcloudAuthStatus>
+
+/**
+ * Send one Host-only JDCloud API request with the stored login.
+ * @param request - Fixed API path, method, and one optional JSON or multipart-file body.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns JDCloud response data without exposing the stored token.
+ */
+async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>
+
+/**
+ * Return the deterministic tenant-user owner key for the current browser login.
+ * @returns The owner key, or undefined when no user login is active.
+ */
+async currentScopeKey(): Promise<string | undefined>
+
+/**
+ * Create and return the current tenant-user's persistent directory.
+ * @returns Canonical directory selected by service address, tenant id, and user id.
+ */
+async workspaceRoot(): Promise<string | undefined>
+
+/**
+ * Reject an existing directory outside the current tenant-user's workspace tree.
+ * @param path - Absolute directory supplied by a browser or selected by the Host.
+ */
+async assertWorkspacePath(path: string): Promise<void>
+
+/**
+ * Return whether the current login has system-administrator terminal access.
+ * @returns Whether the current login is a system administrator.
+ */
+async isCurrentAdministrator(): Promise<boolean>
+
+/**
+ * Claim a newly-created Session or Workspace for the current tenant-user.
+ * @param kind - The durable resource kind.
+ * @param id - The durable resource identifier.
+ */
+async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
+
+/**
+ * Check whether a durable Session or Workspace belongs to the current tenant-user.
+ * @param kind - The durable resource kind.
+ * @param id - The durable resource identifier.
+ * @param expectedScopeKey - Optional owner key to check instead of the current login.
+ * @returns Whether the resource belongs to the selected tenant-user owner.
+ */
+async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+```
+
+Source: [`packages/api/jdcloud-auth-controller/src/index.ts`](../../packages/api/jdcloud-auth-controller/src/index.ts)
+
+<a id="ctxontologyauthcontroller--ontologyauthcontroller"></a>
+
+### `ctx.ontologyAuthController` — `OntologyAuthController`
+
+Authenticate each browser independently and validate every submitted prompt.
+
+```ts cordis-catalog
+/**
+ * Read and validate redacted authentication state for the current browser.
+ * @returns Current redacted authentication state.
+ */
+@Remote async status(): Promise<OntologyAuthStatus>
+
+/**
+ * Create, validate, and store one Runtime Session for the current browser.
+ * @param request - Ontology account credentials.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns Redacted authenticated state.
+ */
+@Remote async login(request: OntologyLoginRequest, signal: AbortSignal): Promise<OntologyAuthStatus>
+
+/**
+ * Revoke and delete only the current browser's Runtime Session.
+ * @returns Redacted unauthenticated state.
+ */
+@Remote async logout(): Promise<OntologyAuthStatus>
+
+/**
+ * Return the stable user owner key for the current browser login.
+ * @returns SHA-256 of service address and stable Ontology user id, or undefined while logged out.
+ */
+async currentScopeKey(): Promise<string | undefined>
+
+/**
+ * Send one Runtime request with the current browser's stored login.
+ * @param request - Fixed Runtime API path, method, and optional JSON body.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns Untrusted JSON for the owning consumer to validate at the wire boundary.
+ */
+async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown>
+```
+
+Source: [`packages/api/ontology-auth-controller/src/index.ts`](../../packages/api/ontology-auth-controller/src/index.ts)
+
 <a id="authorization-events"></a>
 
 ### `authorization/*` events

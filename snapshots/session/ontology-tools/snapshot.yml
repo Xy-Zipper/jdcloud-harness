@@ -1,0 +1,10 @@
+version: 1
+scenario: ontology-tools
+profile: headless
+composition: ontology-tools
+recording: authored
+header:
+  class: ontology-tools
+  pin: true
+replay:
+  override: true

@@ -35,6 +35,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-jdcloud-lowcode` | `jdcloud_lowcode_create`, `jdcloud_lowcode_create_table`, `jdcloud_lowcode_delete`, `jdcloud_lowcode_describe`, `jdcloud_lowcode_find_department`, `jdcloud_lowcode_find_role`, `jdcloud_lowcode_find_user`, `jdcloud_lowcode_get`, `jdcloud_lowcode_query`, `jdcloud_lowcode_update`, `jdcloud_lowcode_upload_file` | `ctx.tools`, `ctx.agents`, `ctx.attachments`, `ctx.jdcloudAuthController`, `ctx.sessionProjections`, `ctx.systemPrompt`, `an admitted browser prompt for current-Turn capability authority` | `user/message capability snapshot`, `tool/call`, `authenticated JDCloud file upload`, `tool/result`, `authorized JDCloud data mutations` | - | The eleven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`, `ctx.lsp`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema. |
+| `@deepseek-ai/dsh-tool-ontology` | `ontology_describe_object`, `ontology_execute_action`, `ontology_get_object`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations` | - | The eight tools discover authorized Project and Object ids before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`, `session_event_search`, `session_event_trace`, `session_search`, `session_trace` | `ctx.tools`, `ctx.systemPrompt`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | The five read-only tools hide provider cursors and authorize every result from the immutable calling agent session. The package is opt-in; compositions that need enforced deadlines or bounded inline output also mount the generic timeout or spill policies. |
@@ -1972,6 +1973,254 @@ Query a language server for precise code navigation. operation is one of goToDef
 Source: [`packages/lsp/tool-lsp/src/index.ts`](../packages/lsp/tool-lsp/src/index.ts)
 
 The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema.
+
+<a id="deepseek-aidsh-tool-ontology"></a>
+
+## `@deepseek-ai/dsh-tool-ontology`
+
+### `ontology_describe_object`
+
+Read one published Object Type with Properties, Links, and authorized related Actions.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    },
+    "object_type_id": {
+      "type": "string",
+      "description": "Exact Object Type id returned by ontology_list_objects."
+    }
+  },
+  "required": [
+    "project_id",
+    "object_type_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_execute_action`
+
+Execute one prepared Ontology Action by invocation id without accepting replacement parameters.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "invocation_id": {
+      "type": "string",
+      "description": "Exact invocation id returned by ontology_prepare_action."
+    }
+  },
+  "required": [
+    "invocation_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_get_object`
+
+Get one published Object record by the Object Type primary key.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    },
+    "object_type_id": {
+      "type": "string",
+      "description": "Exact Object Type id returned by ontology_list_objects."
+    },
+    "primary_key": {
+      "description": "Primary-key value for the selected Object Type."
+    }
+  },
+  "required": [
+    "project_id",
+    "object_type_id",
+    "primary_key"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_list_objects`
+
+List published Object Types in one authorized Ontology Project.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_list_projects`
+
+List published Ontology Projects authorized for the current signed-in user.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_prepare_action`
+
+Validate one authorized published Action and return an immutable preview plus invocation id.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    },
+    "action_type_id": {
+      "type": "string",
+      "description": "Exact authorized Action Type id returned by ontology_describe_object."
+    },
+    "parameters": {
+      "type": "object",
+      "description": "Action inputs using the names defined by the published Action.",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "project_id",
+    "action_type_id",
+    "parameters"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_query_objects`
+
+Query one published Object Type with bounded pagination and Property-id equality filters.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    },
+    "object_type_id": {
+      "type": "string",
+      "description": "Exact Object Type id returned by ontology_list_objects."
+    },
+    "page": {
+      "type": "number",
+      "description": "1-based page number. Default 1."
+    },
+    "page_size": {
+      "type": "number",
+      "description": "Records per page from 1 through 100. Default 20."
+    },
+    "filters": {
+      "type": "array",
+      "description": "Optional equality filters using Property ids from ontology_describe_object.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "property_id": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": [
+          "property_id",
+          "value"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "object_type_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_traverse_link`
+
+Traverse one published Link from a source record in the outgoing or incoming direction.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id returned by ontology_list_projects."
+    },
+    "link_type_id": {
+      "type": "string",
+      "description": "Exact Link Type id returned by ontology_describe_object."
+    },
+    "direction": {
+      "type": "string",
+      "description": "Direction relative to the Link source and target Object Types.",
+      "enum": [
+        "outgoing",
+        "incoming"
+      ]
+    },
+    "source_primary_key": {
+      "description": "Primary key of the root Object record for the selected direction."
+    },
+    "page": {
+      "type": "number",
+      "description": "1-based page number. Default 1."
+    },
+    "page_size": {
+      "type": "number",
+      "description": "Records per page from 1 through 100. Default 20."
+    }
+  },
+  "required": [
+    "project_id",
+    "link_type_id",
+    "direction",
+    "source_primary_key"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+The eight tools discover authorized Project and Object ids before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.
 
 <a id="deepseek-aidsh-tool-ralph"></a>
 

@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../api/ontology-auth-controller" },
+    { "path": "../../api/remotes/tsconfig.client.json" },
+    { "path": "../locale/tsconfig.client.json" },
+    { "path": "../ui-conversation/tsconfig.client.json" },
+    { "path": "../ui-primitives" },
+    { "path": "../ui-renderer" },
+    { "path": "../ui-sidebar" },
+    { "path": "../ui-workspace" },
+    { "path": "../ui-slots" }
+  ]
+}

@@ -6,7 +6,7 @@ FROM ${NODE_IMAGE} AS builder
 
 # Official client artifacts embed this source revision without copying .git into the image.
 ARG DSH_CLIENT_COMMIT_HASH
-ARG DSH_CLIENT_TITLE=LSY-Agent
+ARG DSH_CLIENT_TITLE=Ontology Agent
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN test -n "$DSH_CLIENT_COMMIT_HASH" \
 RUN DSH_CLIENT_COMMIT_HASH="$DSH_CLIENT_COMMIT_HASH" DSH_CLIENT_TITLE="$DSH_CLIENT_TITLE" pnpm run build:official
 
 
-# Keep the complete workspace closure because the private JDCloud patch loads local packages at runtime.
+# Keep the complete workspace closure because the private Ontology bundle loads local packages at runtime.
 FROM ${NODE_IMAGE} AS runtime
 
 ENV NODE_ENV=production \
@@ -44,7 +44,7 @@ WORKDIR /workspace
 
 EXPOSE 3080
 
-# Register the local JDCloud bundle before launching the selected command.
+# Select the local Ontology bundle before launching the selected command.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # Compose supplies the public trusted host argument.
