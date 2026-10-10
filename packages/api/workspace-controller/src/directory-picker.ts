@@ -137,9 +137,9 @@ export class DirectoryPickerController extends TypertRemoteService {
     }
   }
 
-  /** Return the JDCloud path owner only when its authentication layer is installed. */
+  /** Return the Ontology path owner only when its authentication layer is installed. */
   private owner(): WorkspaceOwner | undefined {
-    return this.ctx.get('jdcloudAuthController') as WorkspaceOwner | undefined
+    return this.ctx.get('ontologyAuthController') as WorkspaceOwner | undefined
   }
 
   /** Resolve the capability one wire verb needs, or refuse with the kind this backend serves. */

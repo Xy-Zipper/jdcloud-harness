@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行以及账号呈现。它会关闭共享 Harness 启动鉴权、启用签名 browser-session cookie，并安装 Ontology controller、模型工具与登录 UI。现有 JDCloud bundle 保持独立且不发生变化。
+`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行以及账号呈现。它会关闭共享 Harness 启动鉴权、启用签名 browser-session cookie，并安装 Ontology controller、模型工具与登录 UI。Ontology 会成为该 profile 的应用身份与授权层。
 
 ## 目录
 
@@ -39,13 +39,14 @@ pnpm dsh plugin --profile web remove @deepseek-ai/dsh-ontology-login
 ```dotenv
 ONTOLOGY_BASE_URL=https://ontology.example.com
 ONTOLOGY_REQUEST_TIMEOUT_MS=15000
+ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 ```
 
 本地开发可以显式设置 `ONTOLOGY_BASE_URL=http://127.0.0.1:8080`，并同时设置 `ONTOLOGY_ALLOW_INSECURE_LOOPBACK=true`。非 loopback HTTP 始终会被拒绝。
 
 ### 获得的能力
 
-该 layer 把 Connection row 替换为 `browserAuthentication: false` 与 `browserSession: true`，插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。该 layer 不会插入 JDCloud package。
+该 layer 把 Connection row 替换为 `browserAuthentication: false` 与 `browserSession: true`，插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。配置的用户 Workspace 目录会按稳定 Ontology 用户隔离文件。
 
 -----
 
@@ -55,7 +56,7 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 <details>
 <summary>实现内部细节——点击展开</summary>
 
-[`cordis.patch.yml`](cordis.patch.yml) 拥有完整的可选 layer。部署必须提供 `ONTOLOGY_BASE_URL`；patch 会把超时与 loopback 策略传给 Host controller，并允许更上层的 profile 或命令行 patch 替换每个 row。[`src/index.ts`](src/index.ts) 是 package 加载所需的空 bundle 载体。
+[`cordis.patch.yml`](cordis.patch.yml) 拥有完整的可选 layer。部署必须提供 `ONTOLOGY_BASE_URL`；patch 会把超时、loopback 策略与 `ONTOLOGY_USER_WORKSPACE_DIR` 传给 Host controller，并允许更上层的 profile 或命令行 patch 替换每个 row。[`src/index.ts`](src/index.ts) 是 package 加载所需的空 bundle 载体。
 
 </details>
 
@@ -86,7 +87,6 @@ bundle 本身不增加请求前缀；插入的工具包负责 Prompt 与工具 s
 <a id="known-limitations-and-deferred-work"></a>
 
 - 该 layer 面向 Web profile，因为独立浏览器身份与登录根页面依赖 Web Connection 和 Slot 服务。
-- 安装该 layer 不会删除 JDCloud credential record，也不会停用独立安装的 JDCloud bundle。
 - 需要确认的 Action 依赖 Web profile 的共享 approval 服务；approval 策略为 `never` 的会话会直接拒绝且不弹出提示。
 - 移除该 layer 不会删除其 owner 自定义 credential record，也不会撤销未显式注销的 Runtime Session。
 

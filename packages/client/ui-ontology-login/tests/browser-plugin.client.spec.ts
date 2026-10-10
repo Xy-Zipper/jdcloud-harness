@@ -95,7 +95,7 @@ describe('Ontology login browser plugin', () => {
     const b = await bench(true)
     const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installOntologyLoginUi })
     await fiber.await()
-    b.emitRecord('jdcloud-auth-controller/login')
+    b.emitRecord('unrelated-auth-controller/login')
     expect(b.status).not.toHaveBeenCalled()
     b.emitRecord('ontology-auth-controller/record')
     await vi.waitFor(() => { expect(b.status).toHaveBeenCalledOnce() })

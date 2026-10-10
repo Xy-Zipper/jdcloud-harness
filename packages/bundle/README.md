@@ -25,7 +25,6 @@ This group maps the installable patch layers used by `dsh --profile`. Each packa
 | [`base`](base/README.md) | Shared core for base-backed profiles | — (patch only) |
 | [`acp-app`](acp-app/README.md) | Automation-only ACP stdio application over base | mounts the ACP bridge |
 | [`web-app`](web-app/README.md) | Browser application layer over base | mounts Web rows |
-| [`jdcloud-login`](jdcloud-login/README.md) | Optional JDCloud authentication layer for a Web profile | mounts Host auth and login UI rows |
 | [`ontology-login`](ontology-login/README.md) | Optional Ontology Runtime agent layer for a Web profile | mounts browser-isolated Host auth, discovery and Action tools, and login UI rows |
 | [`headless`](headless/README.md) | One-shot command-line task application over base | `headless-runner` |
 | [`sdk-app`](sdk-app/README.md) | SDK JSON-RPC stdio application over base | mounts the SDK server |

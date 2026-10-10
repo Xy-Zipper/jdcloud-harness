@@ -1,8 +1,0 @@
-version: 1
-scenario: jdcloud-current-member
-profile: web
-composition: web-jdcloud
-recording: authored
-header:
-  class: web-jdcloud-lowcode
-  pin: true

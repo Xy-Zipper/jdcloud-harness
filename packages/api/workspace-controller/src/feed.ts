@@ -89,7 +89,7 @@ export class WorkspaceFeed {
    */
   async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
     signal.throwIfAborted()
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
     const follower = new WorkspaceFollower(owner, scopeKey)
     this.followers.add(follower)
@@ -112,9 +112,9 @@ export class WorkspaceFeed {
     for (const workspace of this.ctx.workspaceRegistry.list()) {
       if (await owner.owns('workspace', String(workspace.id), scopeKey)) items.push(workspaceView(workspace))
     }
-    const archivedSessionIds: string[] = []
+    const archivedSessionIds: WorkspaceBaseline['archivedSessionIds'][number][] = []
     for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
-      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(String(sessionId))
+      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(sessionId)
     }
     const pinnedSessionIds: WorkspaceBaseline['pinnedSessionIds'][number][] = []
     for (const sessionId of this.ctx.workspaceRegistry.pinnedSessionIds) {
@@ -122,7 +122,7 @@ export class WorkspaceFeed {
     }
     return {
       items,
-      archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'],
+      archivedSessionIds,
       pinnedSessionIds,
     }
   }

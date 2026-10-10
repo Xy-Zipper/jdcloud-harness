@@ -296,7 +296,7 @@ export class ApiSessionList {
   }
 
   private owned(id: SessionId): Promise<boolean> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     return owner === undefined ? Promise.resolve(true) : owner.owns('session', String(id))
   }
 }

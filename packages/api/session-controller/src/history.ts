@@ -250,7 +250,7 @@ export class SessionHistoryController {
     withProjections: boolean,
   ): Promise<SessionObservation> {
     const sessionId = addressId(address)
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     if (owner !== undefined && !(await owner.owns('session', String(sessionId)))) rejectNotFound(address)
     try {
       const observation = await this.ctx.sessionQuery.observeSession(sessionId, {

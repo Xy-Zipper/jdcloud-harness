@@ -57,7 +57,7 @@ async function harness(capability: DirectoryPickerCapability = NATIVE_STUB, owne
   const ctx = new Context()
   roots.push(ctx)
   await ctx.plugin(StubPicker).await()
-  if (owner !== undefined) ctx.provide('jdcloudAuthController', owner as never)
+  if (owner !== undefined) ctx.provide('ontologyAuthController', owner as never)
   return new DirectoryPickerController(ctx)
 }
 

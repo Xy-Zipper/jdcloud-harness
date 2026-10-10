@@ -8,7 +8,7 @@
 
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -53,7 +53,6 @@ import * as ToolStrReplaceEditor from '@deepseek-ai/dsh-tool-str-replace-editor'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
 import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
-import * as ToolJdcloudLowcode from '../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts'
 import * as ToolOntology from '../packages/ontology/tool-ontology/src/index.ts'
 import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
@@ -101,18 +100,6 @@ class CatalogAttachmentStore extends AttachmentStore {
 
   override readImage(_ref: ImageAttachmentRef): Promise<StoredImageAttachment> {
     return Promise.reject(new Error('gen-tool-catalog: attachment reads are unreachable during schema harvest'))
-  }
-}
-
-/** Inert service marker used only to satisfy the low-code plugin's schema-time injection. */
-class CatalogJdcloudAuthController extends Service {
-  constructor(ctx: Context) {
-    super(ctx, 'jdcloudAuthController')
-  }
-
-  /** Schema collection never executes a JDCloud low-code tool. */
-  async currentScopeKey(): Promise<undefined> {
-    return undefined
   }
 }
 
@@ -459,30 +446,6 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds.',
-  },
-  {
-    pkg: '@deepseek-ai/dsh-tool-jdcloud-lowcode',
-    dir: 'tool-jdcloud-lowcode',
-    source: 'packages/jdcloud/tool-jdcloud-lowcode/src/tools.ts',
-    requires: [
-      'ctx.tools',
-      'ctx.agents',
-      'ctx.attachments',
-      'ctx.jdcloudAuthController',
-      'ctx.sessionProjections',
-      'ctx.systemPrompt',
-      'an admitted browser prompt for current-Turn capability authority',
-    ],
-    writes: ['user/message capability snapshot', 'tool/call', 'authenticated JDCloud file upload', 'tool/result', 'authorized JDCloud data mutations'],
-    async mount(ctx) {
-      await ctx.plugin(AgentRegistry)
-      // The upload schema requires the attachment service, but catalog harvest never reads bytes.
-      await ctx.plugin(CatalogAttachmentStore)
-      await ctx.plugin(CatalogJdcloudAuthController)
-      await ctx.plugin(ToolJdcloudLowcode)
-    },
-    note:
-      'The eleven tools reuse Host-owned JDCloud authentication and enforce current-Turn menu, tenant-user scope, write-grant, attachment identity, and administrator authority before requests. The schema harvest mounts inert attachment and authentication services because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-schedule',

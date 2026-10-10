@@ -69,7 +69,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Optional JDCloud owner lookup used when the host composes tenant isolation. */
+/** Optional Ontology owner lookup used when the host composes user isolation. */
 interface ScopeOwner {
   currentScopeKey(): Promise<string | undefined>
   owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
@@ -205,7 +205,7 @@ export class SessionReferenceResolver extends TypertRemoteService {
     const needle = query.toLocaleLowerCase()
     const targetCwd = agent.session.header.cwd
     assertNotCancelled(signal)
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
     const records = await this.visibleRecords(
       await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal),
@@ -389,7 +389,7 @@ export class SessionReferenceResolver extends TypertRemoteService {
     return Math.max(DEFAULT_MAX_REFERENCE_BYTES, Math.floor(info.context.contextWindow * 4 * this.config.referenceContextFraction))
   }
 
-  /** Filter discovery rows by the opening tenant-user identity when the host provides one. */
+  /** Filter discovery rows by the opening Ontology user identity when the host provides one. */
   private async visibleRecords(
     records: readonly SessionRecord[],
     targetId: SessionId,
@@ -406,15 +406,15 @@ export class SessionReferenceResolver extends TypertRemoteService {
     return visible.map((record, index) => ({ record, index }))
   }
 
-  /** Refuse manually written references to sessions outside the caller's tenant-user scope. */
+  /** Refuse manually written references to sessions outside the caller's Ontology user scope. */
   private async assertVisibleReferences(inputs: readonly Required<SessionReferenceInput>[]): Promise<void> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     if (owner === undefined) return
     const scopeKey = await owner.currentScopeKey()
     for (const input of inputs) {
       if (scopeKey !== undefined && await owner.owns('session', String(input.sessionId), scopeKey)) continue
       throw new SessionReferenceError(
-        'referenced session is unavailable to the current tenant user',
+        'referenced session is unavailable to the current Ontology user',
         'SESSION_REFERENCE_READ_FAILED',
       )
     }

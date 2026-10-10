@@ -249,7 +249,7 @@ export class SessionController extends TypertRemoteService {
   }
 
   private async assertOwned(sessionId: SessionId): Promise<void> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     if (owner !== undefined && !(await owner.owns('session', String(sessionId)))) {
       throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
     }

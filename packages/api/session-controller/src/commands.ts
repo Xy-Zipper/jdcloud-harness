@@ -123,7 +123,7 @@ export class SessionCommandController {
         })
       }
     }
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     const userRoot = owner === undefined ? undefined : await owner.workspaceRoot()
     const cwd = workspace?.path ?? request.cwd ?? userRoot ?? this.defaultCwd
     if (owner !== undefined) {
@@ -167,11 +167,6 @@ export class SessionCommandController {
    */
   async selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
     const agent = await this.resolveAgent(request.sessionId)
-    await this.ctx.waterfall(
-      'api-session/model-selection-admission',
-      request,
-      () => Promise.resolve(),
-    )
     return this.agents.serializeImageAdmission(agent, async () => {
       try {
         const resolved = await this.ctx.llm.resolveCallConfig({
@@ -600,7 +595,7 @@ export class SessionCommandController {
   }
 
   private async assertOwned(kind: 'session' | 'workspace', id: string, _label: string): Promise<void> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     if (owner !== undefined && !(await owner.owns(kind, id))) {
       if (kind === 'session') {
         throw new RemoteError('session/not-found', `session "${id}" not found`, { sessionId: id as SessionId })
@@ -610,7 +605,7 @@ export class SessionCommandController {
   }
 
   private async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void> {
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     await owner?.claimOwned(kind, id)
   }
 

@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../interaction/commands" },
     { "path": "../../credentials/credentials" },
     { "path": "../session-controller/tsconfig.host.json" },
     { "path": "../../typert/protocol" }

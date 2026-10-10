@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
@@ -10,10 +13,12 @@ import OntologyAuthController, {
 } from '../src/index.ts'
 
 const contexts: Context[] = []
+const temporaryRoots: string[] = []
 
 afterEach(async () => {
   vi.unstubAllGlobals()
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(temporaryRoots.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
 interface RuntimeSession {
@@ -117,7 +122,7 @@ function runtimeServer() {
 }
 
 /** Mount persistent credentials, the real browser-session service, and the controller. */
-async function boot(fetcher: typeof fetch) {
+async function boot(fetcher: typeof fetch, userWorkspaceDirectory?: string) {
   vi.stubGlobal('fetch', fetcher)
   const ctx = new Context()
   contexts.push(ctx)
@@ -133,6 +138,7 @@ async function boot(fetcher: typeof fetch) {
   const authFiber = ctx.plugin(OntologyAuthController, {
     ontologyBaseUrl: 'https://ontology.example.com',
     requestTimeoutMs: 1_000,
+    ...(userWorkspaceDirectory === undefined ? {} : { userWorkspaceDirectory }),
   })
   await authFiber.await()
   if (browserSession === undefined) throw new Error('browser session service was not created')
@@ -217,7 +223,7 @@ describe('Ontology authentication controller', () => {
 
     expect(firstBrowserId).not.toBe(secondBrowserId)
     expect(firstScope).toBe(secondScope)
-    expect(firstScope).toBe(createHash('sha256').update('https://ontology.example.com').update('user-alice').digest('hex'))
+    expect(firstScope).toBe(createHash('sha256').update('https://ontology.example.com').update('\0').update('user-alice').digest('hex'))
     const firstKey = credentialKey('ontology-auth-controller', `login-${createHash('sha256')
       .update('https://ontology.example.com').update(firstBrowserId).digest('hex')}`)
     const secondKey = credentialKey('ontology-auth-controller', `login-${createHash('sha256')
@@ -225,6 +231,74 @@ describe('Ontology authentication controller', () => {
     expect(firstKey).not.toBe(secondKey)
     expect(await ctx.credentials.readRecord(firstKey)).toBeDefined()
     expect(await ctx.credentials.readRecord(secondKey)).toBeDefined()
+  })
+
+  it('keeps resource ownership stable across browsers for the same Ontology user', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const firstRequest = browserRequest(browserCookie(browserSession))
+    const secondRequest = browserRequest(browserCookie(browserSession))
+    const otherRequest = browserRequest(browserCookie(browserSession))
+
+    await browserSession.run(firstRequest, async () => {
+      await ctx.ontologyAuthController.login({ username: 'alice', password: 'password123' }, AbortSignal.timeout(1_000))
+      await ctx.ontologyAuthController.claimOwned('session', 'session-shared')
+    })
+    await browserSession.run(secondRequest, () => ctx.ontologyAuthController.login({
+      username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+    await browserSession.run(otherRequest, () => ctx.ontologyAuthController.login({
+      username: 'bob', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+
+    await expect(browserSession.run(secondRequest, () => ctx.ontologyAuthController.owns('session', 'session-shared')))
+      .resolves.toBe(true)
+    await expect(browserSession.run(otherRequest, () => ctx.ontologyAuthController.owns('session', 'session-shared')))
+      .resolves.toBe(false)
+  })
+
+  it('confines configured workspaces to a private Ontology user directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ontology-auth-'))
+    temporaryRoots.push(root)
+    const users = join(root, 'users')
+    const outside = join(root, 'outside')
+    await mkdir(outside)
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher, users)
+    const request = browserRequest(browserCookie(browserSession))
+    await browserSession.run(request, () => ctx.ontologyAuthController.login({
+      username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+
+    const workspace = await browserSession.run(request, () => ctx.ontologyAuthController.workspaceRoot())
+    if (workspace === undefined) throw new Error('configured Ontology workspace root was not created')
+    const child = join(workspace, 'project')
+    await mkdir(child)
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.assertWorkspacePath(child)))
+      .resolves.toBeUndefined()
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.assertWorkspacePath(outside)))
+      .rejects.toMatchObject({ code: 'gateway/bad-request' })
+  })
+
+  it('requires an Ontology administrator for danger-full-access commands', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const adminRequest = browserRequest(browserCookie(browserSession))
+    const memberRequest = browserRequest(browserCookie(browserSession))
+    await browserSession.run(adminRequest, () => ctx.ontologyAuthController.login({
+      username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+    await browserSession.run(memberRequest, () => ctx.ontologyAuthController.login({
+      username: 'bob', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+    const command = { sessionId: 'session-test' as never, name: 'permission', rawInput: 'danger-full-access' }
+    const next = vi.fn(() => Promise.resolve())
+
+    await browserSession.run(adminRequest, () => ctx.waterfall('commands/admission', command, next))
+    expect(next).toHaveBeenCalledOnce()
+    await expect(browserSession.run(memberRequest, () => ctx.waterfall(
+      'commands/admission', command, () => Promise.resolve(),
+    ))).rejects.toMatchObject({ code: 'ontology/administrator-required' })
   })
 
   it('rotates tokens after Access Token expiry and persists the replacement', async () => {

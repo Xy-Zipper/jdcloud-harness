@@ -196,26 +196,6 @@ export interface Config {
 
 Source: [`packages/api/gateway/src/index.ts:145`](../packages/api/gateway/src/index.ts)
 
-<a id="deepseek-aidsh-api-jdcloud-auth-controller"></a>
-
-## `@deepseek-ai/dsh-api-jdcloud-auth-controller`
-
-Requires: `credentials`
-
-```ts config-catalog
-/** JDCloud authentication controller configuration. */
-export interface Config {
-  /** Service address shown before the user has saved a login. */
-  readonly defaultBaseUrl?: string
-  /** Network deadline for login and prompt validation requests. */
-  readonly requestTimeoutMs?: number
-  /** Persistent parent directory for tenant-user workspaces. */
-  readonly userWorkspaceDirectory?: string
-}
-```
-
-Source: [`packages/api/jdcloud-auth-controller/src/index.ts:64`](../packages/api/jdcloud-auth-controller/src/index.ts)
-
 <a id="deepseek-aidsh-api-job-controller"></a>
 
 ## `@deepseek-ai/dsh-api-job-controller`
@@ -249,10 +229,12 @@ export interface Config {
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */
   readonly allowInsecureLoopback?: boolean
+  /** Persistent parent directory for Ontology user workspaces. */
+  readonly userWorkspaceDirectory?: string
 }
 ```
 
-Source: [`packages/api/ontology-auth-controller/src/index.ts:45`](../packages/api/ontology-auth-controller/src/index.ts)
+Source: [`packages/api/ontology-auth-controller/src/index.ts:48`](../packages/api/ontology-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -3207,7 +3189,7 @@ Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packa
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
 export interface Config {
-  /** Include the fixed JDCloud Harness identity before the deployment persona (default true). */
+  /** Include the fixed DeepSeek Harness identity before the deployment persona (default true). */
   includeHarnessIdentity?: boolean
   /** Include dynamic runtime-context snapshots in model history (default true). */
   includeRuntimeContext?: boolean
@@ -3452,26 +3434,6 @@ export interface Config {
 ```
 
 Source: [`packages/goal/tool-goal/src/index.ts:32`](../packages/goal/tool-goal/src/index.ts)
-
-<a id="deepseek-aidsh-tool-jdcloud-lowcode"></a>
-
-## `@deepseek-ai/dsh-tool-jdcloud-lowcode`
-
-Requires: `agents` · `attachments` · `jdcloudAuthController` · `sessionProjections` · `systemPrompt` · `tools`
-
-```ts config-catalog
-/** Deployment-owned JDCloud result limits. */
-export interface Config {
-  /** Maximum rows accepted by one list query. Defaults to 100. */
-  readonly maxPageSize?: number
-  /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
-  readonly maxOutputBytes?: number
-  /** Host-memory lifetime for tenant-user department and role selectors in milliseconds. Defaults to 300000. */
-  readonly organizationCacheTtlMs?: number
-}
-```
-
-Source: [`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:56`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
@@ -4190,8 +4152,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-directory-picker-native` ([`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-goal` ([`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
-- `@deepseek-ai/dsh-client-ui-jdcloud-login` — requires `webServer` ([`packages/client/ui-jdcloud-login/src/index.ts`](../packages/client/ui-jdcloud-login/src/index.ts))
-- `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions` ([`packages/client/ui-jdcloud-lowcode-actions/src/index.ts`](../packages/client/ui-jdcloud-lowcode-actions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
@@ -4243,7 +4203,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
-- `@deepseek-ai/dsh-jdcloud-login` ([`packages/bundle/jdcloud-login/src/index.ts`](../packages/bundle/jdcloud-login/src/index.ts))
 - `@deepseek-ai/dsh-llm` ([`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts))
 - `@deepseek-ai/dsh-lsp` ([`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts))
 - `@deepseek-ai/dsh-mcp-resources` — requires `tools` ([`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts))

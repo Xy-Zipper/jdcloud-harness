@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-07-jdcloud-low-code-conversation-tools.md
-2026-09-07-jdcloud-low-code-conversation-tools.md: 06cd3e38cdec354f3860e6a7584930c6d769b1cb
-2026-09-07-jdcloud-low-code-conversation-tools.zh.md: f1f4297b52031b85fb1230b4c4043b979ab00bc9

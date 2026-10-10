@@ -14,7 +14,6 @@ import {
   checkWorkspaceProtocol,
   checkExperimentalDependencyIsolation,
   checkExperimentalManifest,
-  checkPrivateWorkspaceManifest,
   expectedDshPackageFiles,
   readWorkspaceManifests,
   type WorkspaceManifest,
@@ -252,27 +251,6 @@ describe('dsh family version coherence', () => {
       '0.1.2-rc.1',
     )).toBeUndefined()
     expect(checkDshFamilyVersion({ version: '0.1.2-alpha.5' }, '0.1.2-rc.1')).toBeUndefined()
-  })
-})
-
-describe('private workspace constraints', () => {
-  it('keeps the JDCloud low-code tool out of npm releases', () => {
-    const workspace: WorkspaceManifest = {
-      dir: 'packages/jdcloud/tool-jdcloud-lowcode',
-      manifest: {
-        name: '@deepseek-ai/dsh-tool-jdcloud-lowcode',
-        private: true,
-      },
-    }
-
-    expect(checkPrivateWorkspaceManifest(workspace)).toEqual([])
-    expect(checkPrivateWorkspaceManifest({
-      ...workspace,
-      manifest: { ...workspace.manifest, private: false, publishConfig: { access: 'public' } },
-    })).toEqual([
-      '@deepseek-ai/dsh-tool-jdcloud-lowcode: private workspace package must set "private": true',
-      '@deepseek-ai/dsh-tool-jdcloud-lowcode: private workspace package must omit publishConfig',
-    ])
   })
 })
 

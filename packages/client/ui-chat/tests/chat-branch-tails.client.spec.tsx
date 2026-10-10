@@ -127,7 +127,7 @@ describe('MessageItem arms', () => {
   })
 
   it('renders a sent low-code function marker as the original at-tag', () => {
-    const marker = '@[报账审批表](dsh-reference:jdcloud-lowcode-function/6a5861c3120862bdfedd15ff)'
+    const marker = '@[销售订单](dsh-reference:ontology-object/6a5861c3120862bdfedd15ff)'
     const view = render(
       <MessageItem t={t} node={{
         kind: 'user',
@@ -138,7 +138,7 @@ describe('MessageItem arms', () => {
       }} />,
     )
     const chip = view.container.querySelector('[data-ref-chip="reference"]')
-    expect(chip?.textContent).toBe('@报账审批表')
+    expect(chip?.textContent).toBe('@销售订单')
     expect(chip?.getAttribute('title')).toBe(marker)
   })
 

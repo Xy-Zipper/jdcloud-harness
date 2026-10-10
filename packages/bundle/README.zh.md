@@ -25,7 +25,6 @@ kind: "package-group"
 | [`base`](base/README.zh.md) | 基于 base 的 profile 共享核心 | —（仅 patch） |
 | [`acp-app`](acp-app/README.zh.md) | 基于 base、仅用于自动化的 ACP stdio 应用 | 挂载 ACP bridge |
 | [`web-app`](web-app/README.zh.md) | 基于 base 的浏览器应用层 | 挂载多条 Web 配置行 |
-| [`jdcloud-login`](jdcloud-login/README.zh.md) | Web profile 的可选 JDCloud 身份验证层 | 挂载 Host 鉴权与登录 UI 配置行 |
 | [`ontology-login`](ontology-login/README.zh.md) | Web profile 的可选 Ontology Runtime agent 层 | 挂载按浏览器隔离的 Host 鉴权、发现与 Action 工具以及登录 UI 配置行 |
 | [`headless`](headless/README.zh.md) | 基于 base 的一次性命令行任务应用 | `headless-runner` |
 | [`sdk-app`](sdk-app/README.zh.md) | 基于 base 的 SDK JSON-RPC stdio 应用 | 挂载 SDK 服务器 |

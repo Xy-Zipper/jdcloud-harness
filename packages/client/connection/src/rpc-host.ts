@@ -128,7 +128,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     return this.browserAuth?.authenticatedUrl(baseUrl) ?? new URL('/', baseUrl).href
   }
 
-  /** Run one admitted operation with its optional JDCloud browser identity. */
+  /** Run one admitted operation with its optional application browser identity. */
   runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
     return this.browserSession === undefined || !this.browserSession.accepts(request)
       ? operation()

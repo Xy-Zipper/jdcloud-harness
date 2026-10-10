@@ -1,4 +1,4 @@
-# The deployment delegates user identity to JDCloud Login and keeps only the Host/Origin fence.
+# The deployment delegates user identity to Ontology and keeps only the Host/Origin fence.
 - id: connection
   config:
     browserAuthentication: false

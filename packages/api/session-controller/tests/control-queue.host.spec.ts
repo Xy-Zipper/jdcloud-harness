@@ -91,10 +91,10 @@ describe('Session control Inbox projection', () => {
     await iterator.next()
   })
 
-  it('keeps the opening tenant scope for its baseline', async () => {
+  it('keeps the opening Ontology user scope for its baseline', async () => {
     const { ctx, control } = await harness()
     const scopes: (string | undefined)[] = []
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       currentScopeKey: () => Promise.resolve('tenant-at-open'),
       owns: (_kind: 'session' | 'workspace', _id: string, scopeKey?: string) => {
         scopes.push(scopeKey)

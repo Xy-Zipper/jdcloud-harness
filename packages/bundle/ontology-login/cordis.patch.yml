@@ -14,6 +14,7 @@
         ontologyBaseUrl: !!js process.env.ONTOLOGY_BASE_URL
         requestTimeoutMs: !!js Number(process.env.ONTOLOGY_REQUEST_TIMEOUT_MS ?? 15000)
         allowInsecureLoopback: !!js process.env.ONTOLOGY_ALLOW_INSECURE_LOOPBACK === 'true'
+        userWorkspaceDirectory: !!js process.env.ONTOLOGY_USER_WORKSPACE_DIR
 
     - id: tool-ontology
       name: '@deepseek-ai/dsh-tool-ontology'

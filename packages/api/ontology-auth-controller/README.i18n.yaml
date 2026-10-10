@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/api/ontology-auth-controller/README.md
-README.md: 1b272816e29f04392ada6a4f1c23a47fd62220ad
-README.zh.md: 2e78224a213f2632defd4df8c575a4bc0e6db8af
+README.md: fdad504214360c530ce9b8a6f11eb32613722a2a
+README.zh.md: 851ee86be15c565e231bfa980cccfeaea0d5c8dd

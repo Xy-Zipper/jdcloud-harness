@@ -752,7 +752,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value',
-        description: 'Run an admitted operation with the optional JDCloud browser identity.',
+        description: 'Run an admitted operation with the optional application browser identity.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }, { name: 'operation', description: 'operation that may await request-scoped work.' }],
         returns: 'the operation result.',
       },
@@ -1260,89 +1260,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'jdcloudAuthController',
-    summary: 'Store credentials, expose login commands, and validate each browser prompt.',
-    description: 'Store credentials, expose login commands, and validate each browser prompt.',
-    methods: [
-      {
-        signature: '@Remote async status(): Promise<JdcloudAuthStatus>',
-        description: 'Read redacted stored authentication state.',
-        parameters: [],
-        returns: 'Current redacted authentication state.',
-      },
-      {
-        signature: '@Remote async writableMenus(signal: AbortSignal): Promise<JdcloudWritableMenuState>',
-        description: 'Read the current tenant\'s forms and workflows carrying a supported data permission.',
-        parameters: [{ name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
-        returns: 'Browser-safe menu identities, labels, paths, types, icons, and data permissions.',
-      },
-      {
-        signature: '@Remote async login(request: JdcloudLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
-        description: 'Authenticate, validate the resulting token, and commit it to Host credentials.',
-        parameters: [{ name: 'request', description: 'Service address and password credentials.' }, { name: 'signal', description: 'Caller cancellation for login and validation requests.' }],
-        returns: 'Redacted authenticated state.',
-      },
-      {
-        signature: '@Remote async loginWithToken(request: JdcloudTokenLoginRequest, signal: AbortSignal): Promise<JdcloudAuthStatus>',
-        description: 'Replace the stored login after synchronizing a transferred token to its reported current tenant.',
-        parameters: [{ name: 'request', description: 'Absolute HTTP(S) service address and raw transfer token.' }, { name: 'signal', description: 'Caller cancellation for tenant synchronization and current-user validation.' }],
-        returns: 'Redacted authenticated state.',
-      },
-      {
-        signature: '@Remote async switchCorp(corpId: string, signal: AbortSignal): Promise<JdcloudAuthStatus>',
-        description: 'Select another tenant for the stored JDCloud login.',
-        parameters: [{ name: 'corpId', description: 'Tenant identity from the current authenticated status.' }, { name: 'signal', description: 'Caller cancellation for the switch and confirmation requests.' }],
-        returns: 'Redacted authenticated state with the confirmed current tenant.',
-      },
-      {
-        signature: '@Remote async logout(): Promise<JdcloudAuthStatus>',
-        description: 'Delete the stored JDCloud token.',
-        parameters: [],
-        returns: 'Redacted unauthenticated state.',
-      },
-      {
-        signature: 'async requestAuthenticated<T>(request: JdcloudAuthenticatedRequest, signal: AbortSignal): Promise<T>',
-        description: 'Send one Host-only JDCloud API request with the stored login.',
-        parameters: [{ name: 'request', description: 'Fixed API path, method, and one optional JSON or multipart-file body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
-        returns: 'JDCloud response data without exposing the stored token.',
-      },
-      {
-        signature: 'async currentScopeKey(): Promise<string | undefined>',
-        description: 'Return the deterministic tenant-user owner key for the current browser login.',
-        parameters: [],
-        returns: 'The owner key, or undefined when no user login is active.',
-      },
-      {
-        signature: 'async workspaceRoot(): Promise<string | undefined>',
-        description: 'Create and return the current tenant-user\'s persistent directory.',
-        parameters: [],
-        returns: 'Canonical directory selected by service address, tenant id, and user id.',
-      },
-      {
-        signature: 'async assertWorkspacePath(path: string): Promise<void>',
-        description: 'Reject an existing directory outside the current tenant-user\'s workspace tree.',
-        parameters: [{ name: 'path', description: 'Absolute directory supplied by a browser or selected by the Host.' }],
-      },
-      {
-        signature: 'async isCurrentAdministrator(): Promise<boolean>',
-        description: 'Return whether the current login has system-administrator terminal access.',
-        parameters: [],
-        returns: 'Whether the current login is a system administrator.',
-      },
-      {
-        signature: 'async claimOwned(kind: \'session\' | \'workspace\', id: string): Promise<void>',
-        description: 'Claim a newly-created Session or Workspace for the current tenant-user.',
-        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }],
-      },
-      {
-        signature: 'async owns(kind: \'session\' | \'workspace\', id: string, expectedScopeKey?: string): Promise<boolean>',
-        description: 'Check whether a durable Session or Workspace belongs to the current tenant-user.',
-        parameters: [{ name: 'kind', description: 'The durable resource kind.' }, { name: 'id', description: 'The durable resource identifier.' }, { name: 'expectedScopeKey', description: 'Optional owner key to check instead of the current login.' }],
-        returns: 'Whether the resource belongs to the selected tenant-user owner.',
-      },
-    ],
-  },
-  {
     key: 'jobController',
     summary: 'Host service backing the generated `ctx.remote.job` namespace.',
     description: 'Host service backing the generated `ctx.remote.job` namespace.',
@@ -1646,6 +1563,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Return the stable user owner key for the current browser login.',
         parameters: [],
         returns: 'SHA-256 of service address and stable Ontology user id, or undefined while logged out.',
+      },
+      {
+        signature: 'async workspaceRoot(): Promise<string | undefined>',
+        description: 'Create and return the current Ontology user\'s persistent directory.',
+        parameters: [],
+        returns: 'Canonical user directory, or undefined when the deployment has no private workspace root.',
+      },
+      {
+        signature: 'async assertWorkspacePath(path: string): Promise<void>',
+        description: 'Reject an existing directory outside the current Ontology user\'s workspace tree.',
+        parameters: [{ name: 'path', description: 'Absolute directory supplied by a browser or selected by the Host.' }],
+      },
+      {
+        signature: 'async isCurrentAdministrator(): Promise<boolean>',
+        description: 'Return whether the current Runtime account can use administrator-only Harness operations.',
+        parameters: [],
+        returns: 'Whether the authenticated account is an Ontology administrator.',
+      },
+      {
+        signature: 'async claimOwned(kind: \'session\' | \'workspace\', id: string): Promise<void>',
+        description: 'Claim a newly created Session or Workspace for the current Ontology user.',
+        parameters: [{ name: 'kind', description: 'Durable resource kind.' }, { name: 'id', description: 'Durable resource identifier.' }],
+      },
+      {
+        signature: 'async owns(kind: \'session\' | \'workspace\', id: string, expectedScopeKey?: string): Promise<boolean>',
+        description: 'Check whether a durable Session or Workspace belongs to an Ontology user scope.',
+        parameters: [{ name: 'kind', description: 'Durable resource kind.' }, { name: 'id', description: 'Durable resource identifier.' }, { name: 'expectedScopeKey', description: 'Optional opening scope retained by a live feed.' }],
+        returns: 'Whether the resource belongs to the selected scope.',
       },
       {
         signature: 'async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown>',
@@ -3876,14 +3821,6 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'sessionId', description: 'Agent and Session identity.' }, { name: 'message', description: 'user-safe failure chain.' }],
   },
   {
-    name: 'api-session/model-selection-admission',
-    mode: 'waterfall',
-    signature: '\'api-session/model-selection-admission\'( request: SessionSelectModelRequest, next: () => Promise<void>, ): Promise<void>',
-    summary: 'Admit one browser model selection before validation or Session mutation.',
-    description: 'Admit one browser model selection before validation or Session mutation. Listeners call `next()` after their policy accepts the request; rejection preserves the Session and deployment default model selections.',
-    parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }],
-  },
-  {
     name: 'api-session/prompt-admission',
     mode: 'waterfall',
     signature: '\'api-session/prompt-admission\'( request: { readonly sessionId: SessionId; readonly signal: AbortSignal }, next: () => Promise<void>, ): Promise<void>',
@@ -5314,54 +5251,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly uplink?: AsyncIterable<unknown>;\n    readonly peer?: PeerScope;\n    readonly signal?: AbortSignal;\n}',
-  },
-  {
-    name: 'JdcloudAuthenticatedRequest',
-    declaration: 'export type JdcloudAuthenticatedRequest = JdcloudAuthenticatedRequestBase & {\n    readonly body?: unknown;\n    readonly multipartFile?: never;\n} | Omit<JdcloudAuthenticatedRequestBase, \'method\'> & {\n    readonly method: \'POST\';\n    readonly body?: never;\n    readonly multipartFile: JdcloudMultipartFile;\n};',
-  },
-  {
-    name: 'JdcloudAuthStatus',
-    declaration: 'export type JdcloudAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly corpId: string;\n    readonly corpName: string;\n    readonly corps: readonly JdcloudCorp[];\n    readonly systemAdministrator: boolean;\n};',
-  },
-  {
-    name: 'JdcloudCorp',
-    declaration: 'export interface JdcloudCorp {\n    readonly corpId: string;\n    readonly corpName: string;\n}',
-  },
-  {
-    name: 'JdcloudLoginRequest',
-    declaration: 'export interface JdcloudLoginRequest {\n    readonly baseUrl: string;\n    readonly username: string;\n    readonly password: string;\n}',
-  },
-  {
-    name: 'JdcloudLowcodeMenuType',
-    declaration: 'export type JdcloudLowcodeMenuType = 3 | 4;',
-  },
-  {
-    name: 'JdcloudLowcodePermission',
-    declaration: 'export type JdcloudLowcodePermission = JdcloudLowcodeReadPermission | JdcloudLowcodeWritePermission;',
-  },
-  {
-    name: 'JdcloudLowcodeReadPermission',
-    declaration: 'export type JdcloudLowcodeReadPermission = \'readData\';',
-  },
-  {
-    name: 'JdcloudLowcodeWritePermission',
-    declaration: 'export type JdcloudLowcodeWritePermission = \'addData\' | \'editData\' | \'deleteData\';',
-  },
-  {
-    name: 'JdcloudMultipartFile',
-    declaration: 'export type JdcloudMultipartFile = {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n    readonly stream?: never;\n    readonly bytes?: never;\n} | {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data?: never;\n    readonly stream: AsyncIterable<Uint8Array>;\n    readonly bytes: number;\n};',
-  },
-  {
-    name: 'JdcloudTokenLoginRequest',
-    declaration: 'export interface JdcloudTokenLoginRequest {\n    readonly baseUrl: string;\n    readonly token: string;\n}',
-  },
-  {
-    name: 'JdcloudWritableMenu',
-    declaration: 'export interface JdcloudWritableMenu {\n    readonly menuId: string;\n    readonly fullName: string;\n    readonly path: string;\n    readonly type: JdcloudLowcodeMenuType;\n    readonly icon?: string;\n    readonly agentPermissions: readonly JdcloudLowcodePermission[];\n}',
-  },
-  {
-    name: 'JdcloudWritableMenuState',
-    declaration: 'export interface JdcloudWritableMenuState {\n    readonly baseUrl: string;\n    readonly corpId: string;\n    readonly menus: readonly JdcloudWritableMenu[];\n}',
   },
   {
     name: 'JobAppendOptions',

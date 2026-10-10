@@ -52,6 +52,15 @@ function fixture(overrides: Partial<Config> = {}) {
 }
 
 describe('TerminalController', () => {
+  it('rejects terminal access for a non-administrator Ontology user', async () => {
+    const { ctx, controller, agent } = fixture()
+    ctx.provide('ontologyAuthController', {
+      isCurrentAdministrator: () => Promise.resolve(false),
+    } as never)
+
+    await expect(controller.environment(agent, signal())).rejects.toThrow('Ontology administrator permission is required')
+  })
+
   it('resolves execution services from an Agent plugin context without consumer injections', async () => {
     const { ctx, controller } = fixture()
     let agent: Agent | undefined

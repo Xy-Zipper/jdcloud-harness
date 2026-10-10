@@ -53,11 +53,11 @@ export function apply(ctx: Context): void {
   })
   new WorkspaceController(ctx, model)
   control.start()
-  const remoteEvents = ctx.remote as unknown as {
+  const remoteEvents = ctx.remote as {
     $on(event: 'credentials/record-updated', listener: (key: string) => void): () => void
   }
   const offAuth = remoteEvents.$on('credentials/record-updated', (key) => {
-    if (key.startsWith('jdcloud-auth-controller/login')) control.restart()
+    if (key.startsWith('ontology-auth-controller/login-')) control.restart()
   })
   ctx.effect(
     () => async () => {

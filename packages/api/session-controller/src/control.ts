@@ -46,7 +46,7 @@ export class SessionControlController {
    */
   async *control(signal: AbortSignal): AsyncIterable<SessionControlFrame> {
     signal.throwIfAborted()
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
     const queue = new ControlQueue(owner, scopeKey)
     this.streams.add(queue)

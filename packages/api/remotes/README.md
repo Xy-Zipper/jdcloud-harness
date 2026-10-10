@@ -40,7 +40,7 @@ This package owns no physical transport or Host service discovery. It projects t
 
 `src/remote-events.ts` holds `API_REMOTE_FORWARDED_EVENTS`, the allowlist of Host Cordis events this application forwards without renaming, and therefore the legal key set of `ctx.remote.$on`; each entry also selects ordinary emission or Agent-scoped waterfall delivery. The type-only `src/types.ts` derives its selection face. Forwarding one more event requires one entry in that array: the type projection, consumer key face, and Host forwarding loop all derive from it.
 
-Credential reference and record updates are separate forwarded events. `credentials/reference-updated` identifies environment-style secret references; `credentials/record-updated` identifies owner-defined records such as the JDCloud login token, allowing an optional Client feature to refresh redacted state without exposing the stored payload.
+Credential reference and record updates are separate forwarded events. `credentials/reference-updated` identifies environment-style secret references; `credentials/record-updated` identifies owner-defined records such as an application login, allowing an optional Client feature to refresh redacted state without exposing the stored payload.
 
 The listener signature is not restated here. Each allowlisted event's Cordis `Events` declaration lives in its owner package's client-safe `./types` export, and both faces of this package pull those declarations in. The Host face additionally asserts every entry against `TypertForwardableEventEntry`: an `emit` entry must be a declared one-way event, while a `waterfall` entry must be a declared Agent-scoped waterfall whose final parameter is its same-result `next()` callback.
 

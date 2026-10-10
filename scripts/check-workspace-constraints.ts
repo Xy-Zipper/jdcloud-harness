@@ -53,10 +53,6 @@ const publicationSourceAllowlist: Readonly<Record<string, readonly string[]>> = 
 const publishedRepositoryUrl = 'git+https://github.com/deepseek-ai/deepseek-harness.git'
 /** Packages that participate in the experimental policy. */
 const experimentalPackageDirectory = /^packages\/experimental\/[^/]+$/
-/** Product-specific packages that remain local to this private fork. */
-const privateWorkspacePackages = new Set([
-  '@deepseek-ai/dsh-tool-jdcloud-lowcode',
-])
 /** npm namespace reserved for experimental packages. */
 const experimentalPackageNamePrefix = '@deepseek-ai/dsh-experimental-'
 /** Ordinary directories whose packages this repository publishes: one release member each. */
@@ -358,19 +354,6 @@ function isReleaseMemberDirectory(dir: string): boolean {
 }
 
 /**
- * Validate a product-specific package that this fork never publishes.
- * @param workspace - package directory and parsed manifest.
- * @returns publication metadata violations for recognized private packages.
- */
-export function checkPrivateWorkspaceManifest({ manifest }: WorkspaceManifest): string[] {
-  if (manifest.name === undefined || !privateWorkspacePackages.has(manifest.name)) return []
-  const errors: string[] = []
-  if (manifest.private !== true) errors.push(`${manifest.name}: private workspace package must set "private": true`)
-  if (manifest.publishConfig !== undefined) errors.push(`${manifest.name}: private workspace package must omit publishConfig`)
-  return errors
-}
-
-/**
  * Require a dsh-family manifest to carry the workspace version.
  *
  * The dsh release sequence publishes packages/ and apps/ members and every
@@ -398,10 +381,7 @@ export function checkDshFamilyVersion(manifest: PackageManifest, expected: strin
  * @returns path-qualified policy violations.
  */
 export function checkWorkspaceManifest({ dir, manifest }: WorkspaceManifest): string[] {
-  const errors = [
-    ...checkExperimentalManifest({ dir, manifest }),
-    ...checkPrivateWorkspaceManifest({ dir, manifest }),
-  ]
+  const errors = checkExperimentalManifest({ dir, manifest })
   const label = manifest.name ?? dir
   const familyVersionError = checkDshFamilyVersion(manifest, repositoryVersion)
   if (familyVersionError !== undefined) errors.push(familyVersionError)
@@ -409,7 +389,6 @@ export function checkWorkspaceManifest({ dir, manifest }: WorkspaceManifest): st
   const isPublicNativePackage = isNativePackageDir
     && manifest.name !== undefined
     && publicNativePackages.has(manifest.name)
-  const isPrivateWorkspacePackage = manifest.name !== undefined && privateWorkspacePackages.has(manifest.name)
 
   if (isPublicNativePackage) {
     if (manifest.private === true) {
@@ -424,7 +403,7 @@ export function checkWorkspaceManifest({ dir, manifest }: WorkspaceManifest): st
       || manifest.repository.directory !== expectedDirectory) {
       errors.push(`${label}: published Landlock package repository must use ${publishedRepositoryUrl} with directory ${expectedDirectory}`)
     }
-  } else if (isReleaseMemberDirectory(dir) && !isPrivateWorkspacePackage) {
+  } else if (isReleaseMemberDirectory(dir)) {
     // Release members state that they are publishable: npm refuses a private
     // package, and the repository field is how a consumer finds the source of
     // the package it installed.
@@ -445,7 +424,7 @@ export function checkWorkspaceManifest({ dir, manifest }: WorkspaceManifest): st
       || manifest.repository.directory !== dir) {
       errors.push(`${label}: release member repository must use ${publishedRepositoryUrl} with directory ${dir}`)
     }
-  } else if (!experimentalPackageDirectory.test(dir) && !isPrivateWorkspacePackage && manifest.private !== true) {
+  } else if (!experimentalPackageDirectory.test(dir) && manifest.private !== true) {
     errors.push(`${label}: package.json must set "private": true`)
   }
 

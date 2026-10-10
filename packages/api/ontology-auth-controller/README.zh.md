@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-ontology-auth-controller` 让每个浏览器登录部署方指定的 Ontology Runtime，且不会把 Access Token 或 Refresh Token 暴露给浏览器代码。它会校验返回的身份、通过 credential store 轮换已过期的 Access Token、提供稳定用户归属键，并在该浏览器未登录时拒绝 Prompt。Ontology Web bundle 使用本包；JDCloud 部署继续使用现有 JDCloud controller。
+`@deepseek-ai/dsh-api-ontology-auth-controller` 让每个浏览器登录部署方指定的 Ontology Runtime，且不会把 Access Token 或 Refresh Token 暴露给浏览器代码。它会校验返回的身份、通过 credential store 轮换已过期的 Access Token、把 Session 与 Workspace 归属于稳定 Ontology 用户，并在该浏览器未登录时拒绝 Prompt。Ontology Web bundle 使用本包作为应用身份层。
 
 ## 目录
 
@@ -33,6 +33,7 @@ kind: "package-reference"
     ontologyBaseUrl: https://ontology.example.com
     requestTimeoutMs: 15000
     allowInsecureLoopback: false
+    userWorkspaceDirectory: /workspace/ontology-users
 ```
 
 | 字段 | 默认值 | 含义 |
@@ -40,6 +41,7 @@ kind: "package-reference"
 | `ontologyBaseUrl` | 必填 | 固定的 Ontology Runtime 服务地址；除显式允许的 loopback 开发地址外必须使用 HTTPS。 |
 | `requestTimeoutMs` | `15000` | 登录、当前用户校验、刷新与注销的网络截止时间。 |
 | `allowInsecureLoopback` | `false` | 只允许 `localhost`、`127.0.0.1` 或 `::1` 显式使用 HTTP。 |
+| `userWorkspaceDirectory` | 禁用 | 可选的持久化父目录，用于把每个 Ontology 用户的 Workspace 路径限制在其私有目录中。 |
 
 完整字段以生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-ontology-auth-controller)为准。
 
@@ -47,7 +49,7 @@ kind: "package-reference"
 
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
-Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则返回 `SHA256(ontologyBaseUrl + userId)`，因此同一 Ontology 用户的独立登录会得到相同的稳定归属。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录。
+Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。Session、Workspace、文件与引用消费方使用该归属；`userWorkspaceDirectory` 还会把所选路径限制在该用户的私有目录中。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
 
 -----
 
@@ -62,7 +64,7 @@ Controller 不保存进程全局用户。`BrowserSessionService` 提供请求本
 | 源码 | 职责 |
 |---|---|
 | [`src/client.ts`](src/client.ts) | HTTPS 策略、Runtime 身份请求与响应校验。 |
-| [`src/index.ts`](src/index.ts) | 按浏览器隔离的 record、刷新、注销、稳定归属键与 Prompt 准入。 |
+| [`src/index.ts`](src/index.ts) | 按浏览器隔离的 record、刷新、注销、稳定归属键、私有 Workspace 根目录与准入。 |
 | [`src/types.ts`](src/types.ts) | 浏览器安全的 Remote 请求、状态与错误类型。 |
 
 </details>
@@ -92,7 +94,6 @@ Controller 不保存进程全局用户。`BrowserSessionService` 提供请求本
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Session 与 Workspace 归属消费者尚未使用 `currentScopeKey()`；本阶段公开并测试稳定身份，但不包含后续 Ontology 部署切换。
 - 本包不管理自定义证书颁发机构配置；生产 HTTPS 使用 Host Node.js 的信任配置。
 - 已鉴权 Runtime 传输只接受不含查询字符串或 fragment 的固定 `/api/runtime/` 路径；消费包负责选择请求并校验响应。
 

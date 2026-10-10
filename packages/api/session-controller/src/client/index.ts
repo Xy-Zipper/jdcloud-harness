@@ -129,11 +129,11 @@ export function apply(ctx: Context): void {
     accept: (frame) => { sessions.handleControlFrame(frame) },
     failed: (error) => { console.error('[session-controller] control stream failed:', error) },
   })
-  const remoteEvents = ctx.remote as unknown as {
+  const remoteEvents = ctx.remote as {
     $on(event: 'credentials/record-updated', listener: (key: string) => void): () => void
   }
   const offAuth = remoteEvents.$on('credentials/record-updated', (key) => {
-    if (!key.startsWith('jdcloud-auth-controller/login')) return
+    if (!key.startsWith('ontology-auth-controller/login-')) return
     control.restart()
     void sessions.refresh()
   })

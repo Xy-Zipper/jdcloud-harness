@@ -35,7 +35,7 @@ Client list rows and resident Sessions use the current `sessionListMetadata` pro
 
 Explicit-id `session.create` adopts a live Session or resumes a persisted Session while retaining its writer lock. Writer contention returns `session/writer-held`; callers may try another blank without suppressing unrelated failures. `session.list` includes persisted blanks using cached metadata, without opening cold log bodies.
 
-With JDCloud ownership installed, `session.create` uses the current tenant-user directory when no location is supplied and refuses an explicit cwd or Workspace path outside it.
+With Ontology ownership installed, `session.create` uses the current user's directory when no location is supplied and refuses an explicit cwd or Workspace path outside it.
 
 Client list refreshes retain unchanged row objects and reuse the items array when order and values match. Each row's `retainedBy` contains positive local reference-source counts; Host metadata refreshes cannot overwrite them. Cache membership checks use a per-refresh ID set, so reconciliation grows linearly with the current list and retained cache sizes. Host summary updates replace running and Agent availability; local create/fork responses only fill missing metadata on existing rows. Removed ordinary Sessions retain projection stores only when their catalogs contain children.
 

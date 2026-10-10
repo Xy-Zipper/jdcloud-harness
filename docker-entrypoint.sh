@@ -21,21 +21,9 @@ remove_bundle() {
   fi
 }
 
-# The rollout defaults to Ontology but retains one explicit JDCloud rollback
-# selector until stage 10 removes the old implementation after production stability.
-case "${HARNESS_IDENTITY_BUNDLE:-ontology}" in
-  ontology)
-    remove_bundle @deepseek-ai/dsh-jdcloud-login
-    node /app/apps/cli/lib/bin.js plugin --profile web add link:/app/packages/bundle/ontology-login
-    ;;
-  jdcloud)
-    remove_bundle @deepseek-ai/dsh-ontology-login
-    node /app/apps/cli/lib/bin.js plugin --profile web add link:/app/packages/bundle/jdcloud-login
-    ;;
-  *)
-    echo "HARNESS_IDENTITY_BUNDLE must be ontology or jdcloud" >&2
-    exit 1
-    ;;
-esac
+# Remove the retired dependency from persisted profiles before selecting the
+# only supported application identity layer.
+remove_bundle @deepseek-ai/dsh-jdcloud-login
+node /app/apps/cli/lib/bin.js plugin --profile web add link:/app/packages/bundle/ontology-login
 
 exec "$@"

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-ontology-auth-controller` lets each browser sign in to one deployment-owned Ontology Runtime without exposing Access or Refresh Tokens to browser code. It validates the returned identity, rotates expired Access Tokens through the credential store, provides a stable user ownership key, and rejects prompts while that browser is logged out. Choose it for the Ontology Web bundle; keep the existing JDCloud controller for JDCloud deployments.
+`@deepseek-ai/dsh-api-ontology-auth-controller` lets each browser sign in to one deployment-owned Ontology Runtime without exposing Access or Refresh Tokens to browser code. It validates the returned identity, rotates expired Access Tokens through the credential store, assigns Session and Workspace ownership to the stable Ontology user, and rejects prompts while that browser is logged out. Choose it as the application identity layer for the Ontology Web bundle.
 
 ## Table of Contents
 
@@ -33,6 +33,7 @@ Mount the controller with writable credentials and the independent browser-sessi
     ontologyBaseUrl: https://ontology.example.com
     requestTimeoutMs: 15000
     allowInsecureLoopback: false
+    userWorkspaceDirectory: /workspace/ontology-users
 ```
 
 | Field | Default | Meaning |
@@ -40,6 +41,7 @@ Mount the controller with writable credentials and the independent browser-sessi
 | `ontologyBaseUrl` | required | Fixed Ontology Runtime service address; HTTPS is required outside an explicitly allowed loopback development address. |
 | `requestTimeoutMs` | `15000` | Network deadline for login, current-user validation, refresh, and logout. |
 | `allowInsecureLoopback` | `false` | Allows explicit HTTP only for `localhost`, `127.0.0.1`, or `::1`. |
+| `userWorkspaceDirectory` | disabled | Optional persistent parent directory that confines each Ontology user's Workspace paths. |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-ontology-auth-controller) is the exhaustive source for accepted fields.
 
@@ -47,7 +49,7 @@ The browser calls `login()` with only an account and password. The Host calls Ru
 
 Host-only consumers call `requestAuthenticated()` with a fixed `/api/runtime/` path, method, and optional JSON body. The controller selects the current browser record, validates or refreshes it, attaches the Access Token, and retries once when that request reports an expired Access Token. The consumer remains responsible for validating the returned untrusted JSON.
 
-Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentScopeKey()` instead returns `SHA256(ontologyBaseUrl + userId)`, so independent logins for the same Ontology user resolve to the same stable owner. Prompt admission validates or refreshes the current browser login before Session delivery.
+Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentScopeKey()` instead includes the service address and stable user id, so independent logins for the same Ontology user resolve to one owner. Session, Workspace, file, and reference consumers use this owner; `userWorkspaceDirectory` additionally confines selected paths to that user's private directory. Prompt admission validates or refreshes the current browser login before Session delivery, while terminal access and `danger-full-access` require an administrator account.
 
 -----
 
@@ -62,7 +64,7 @@ The controller keeps no process-global user. `BrowserSessionService` supplies on
 | Source | Responsibility |
 |---|---|
 | [`src/client.ts`](src/client.ts) | HTTPS policy, Runtime identity requests, and response validation. |
-| [`src/index.ts`](src/index.ts) | Browser-scoped records, refresh, logout, stable owner keys, and prompt admission. |
+| [`src/index.ts`](src/index.ts) | Browser-scoped records, refresh, logout, stable owner keys, private Workspace roots, and admission. |
 | [`src/types.ts`](src/types.ts) | Browser-safe Remote request, status, and error vocabulary. |
 
 </details>
@@ -92,7 +94,6 @@ Accepted prompts are unchanged; rejected prompts do not reach model request asse
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- Session and Workspace ownership consumers do not yet use `currentScopeKey()`; this stage exposes and tests the stable identity but does not complete the later Ontology deployment switch.
 - Custom certificate-authority configuration is not owned by this package; production HTTPS uses the Host Node.js trust configuration.
 - Authenticated Runtime transport accepts only fixed `/api/runtime/` paths without query strings or fragments; the consuming package owns request selection and response validation.
 

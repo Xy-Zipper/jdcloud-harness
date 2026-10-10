@@ -36275,7 +36275,7 @@
         "packages/core/tools/src/index.ts#ToolRestriction"
       ],
       "sources": [
-        "packages/core/tools/src/index.ts:699"
+        "packages/core/tools/src/index.ts:708"
       ]
     },
     {
@@ -44608,7 +44608,7 @@
         "packages/workflow/workflow/src/types.ts#WorkflowRunId"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:396",
+        "packages/api/session-controller/src/types.ts:413",
         "packages/attachment/attachment/src/brand.ts:6",
         "packages/compaction/compaction/src/brand.ts:4",
         "packages/core/session/src/types.ts:20",
@@ -50745,7 +50745,7 @@
       },
       "names": [],
       "sources": [
-        "packages/interaction/commands/src/types.ts:112"
+        "packages/interaction/commands/src/types.ts:123"
       ]
     },
     {
@@ -58191,7 +58191,7 @@
       },
       "names": [],
       "sources": [
-        "packages/api/session-controller/src/types.ts:401"
+        "packages/api/session-controller/src/types.ts:418"
       ]
     },
     {
@@ -69509,7 +69509,7 @@
       },
       "names": [],
       "sources": [
-        "packages/interaction/commands/src/types.ts:105"
+        "packages/interaction/commands/src/types.ts:116"
       ]
     },
     {
@@ -70646,8 +70646,8 @@
       ],
       "sources": [
         "packages/core/session/src/types.ts:190",
-        "packages/interaction/commands/src/types.ts:75",
-        "packages/interaction/commands/src/types.ts:79",
+        "packages/interaction/commands/src/types.ts:76",
+        "packages/interaction/commands/src/types.ts:80",
         "packages/llm/llm/src/message.ts:111",
         "packages/session/session-title/src/types.ts:35"
       ]
@@ -86750,7 +86750,7 @@
         "packages/api/session-controller/src/types.ts#ModelSelection"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:100"
+        "packages/api/session-controller/src/types.ts:117"
       ]
     },
     {
@@ -93789,7 +93789,7 @@
         "packages/sandbox/sandbox/src/index.ts#SandboxMode"
       ],
       "sources": [
-        "packages/sandbox/sandbox/src/index.ts:29"
+        "packages/sandbox/sandbox/src/index.ts:31"
       ]
     },
     {

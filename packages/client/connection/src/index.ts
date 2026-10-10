@@ -134,8 +134,8 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const recovery = resolveConnectionConfig(config?.recovery)
   const browserAuthentication = config?.browserAuthentication ?? true
   const browserSession = config?.browserSession ?? false
-  // JDCloud deployments disable Harness launch authentication, so they still
-  // need an opaque browser cookie to keep Host state out of process-global keys.
+  // Application-owned login can disable Harness launch authentication while
+  // retaining an opaque browser cookie for request-scoped Host state.
   const browserSessionEnabled = browserSession || !browserAuthentication
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []

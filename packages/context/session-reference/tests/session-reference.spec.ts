@@ -642,15 +642,15 @@ describe('model-relative reference budgets', () => {
 })
 
 describe('session reference discovery and preparation', () => {
-  it('limits discovery and direct references to the current tenant user', async () => {
+  it('limits discovery and direct references to the current Ontology user', async () => {
     const ctx = await harness()
     const target = ctx.sessions.create(SessionId('target'), { meta: { cwd: '/same' } })
     const visible = ctx.sessions.create(SessionId('visible'), { meta: { cwd: '/same' } })
     const hidden = ctx.sessions.create(SessionId('hidden'), { meta: { cwd: '/same' } })
-    ctx.provide('jdcloudAuthController', {
-      currentScopeKey: () => Promise.resolve('tenant-user'),
+    ctx.provide('ontologyAuthController', {
+      currentScopeKey: () => Promise.resolve('ontology-user'),
       owns: (_kind: 'session' | 'workspace', id: string, scopeKey?: string) =>
-        Promise.resolve(scopeKey === 'tenant-user' && id !== hidden.id),
+        Promise.resolve(scopeKey === 'ontology-user' && id !== hidden.id),
     } as never)
 
     await expect(ctx.sessionReferenceResolver.listCandidates(fakeAgent(target))).resolves.toEqual([

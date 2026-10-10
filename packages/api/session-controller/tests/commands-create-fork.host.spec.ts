@@ -48,7 +48,7 @@ describe('Session creation failures', () => {
       return Promise.resolve({ id: sessionId, session } as Agent)
     })
     ctx.provide('workspaceRegistry', { get: () => undefined, list: () => [] } as never)
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       workspaceRoot: () => Promise.resolve('/users/mine'),
       assertWorkspacePath: (path: string) => path === '/users/mine'
         ? Promise.resolve()

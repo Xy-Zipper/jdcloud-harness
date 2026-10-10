@@ -71,7 +71,7 @@ interface OwnedSession {
   readonly allocations: Map<WebTerminalId, TerminalAllocation>
 }
 
-interface JdcloudTerminalAdmission {
+interface OntologyTerminalAdmission {
   isCurrentAdministrator(): Promise<boolean>
 }
 
@@ -310,9 +310,9 @@ export class TerminalController extends TypertRemoteService {
   }
 
   private async requireAdministrator(): Promise<void> {
-    const admission = this.ctx.get('jdcloudAuthController') as JdcloudTerminalAdmission | undefined
+    const admission = this.ctx.get('ontologyAuthController') as OntologyTerminalAdmission | undefined
     if (admission !== undefined && !await admission.isCurrentAdministrator()) {
-      throw new RemoteError('gateway/internal', 'JDCloud system-administrator permission is required for terminals', {})
+      throw new RemoteError('gateway/internal', 'Ontology administrator permission is required for terminals', {})
     }
   }
 

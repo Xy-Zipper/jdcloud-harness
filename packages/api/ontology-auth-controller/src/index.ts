@@ -2,7 +2,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
+import { mkdir, realpath } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
 import z from '@deepseek-ai/schemastery'
@@ -49,6 +52,8 @@ export interface Config {
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */
   readonly allowInsecureLoopback?: boolean
+  /** Persistent parent directory for Ontology user workspaces. */
+  readonly userWorkspaceDirectory?: string
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -66,10 +71,12 @@ export class OntologyAuthController extends TypertRemoteService {
     ontologyBaseUrl: z.string().required(),
     requestTimeoutMs: z.number().step(1).min(1).default(15_000),
     allowInsecureLoopback: z.boolean().default(false),
+    userWorkspaceDirectory: z.string().default(''),
   })
 
   private readonly baseUrl: string
   private readonly requestTimeoutMs: number
+  private readonly userWorkspaceDirectory: string | undefined
   private readonly fetcher: typeof fetch
 
   /** @param ctx - Host context carrying browser sessions and durable credentials. @param config - Runtime connection policy. */
@@ -77,6 +84,10 @@ export class OntologyAuthController extends TypertRemoteService {
     super(ctx, 'ontologyAuthController', { namespace: 'ontologyAuth' })
     this.baseUrl = normalizeOntologyBaseUrl(config.ontologyBaseUrl, config.allowInsecureLoopback ?? false)
     this.requestTimeoutMs = config.requestTimeoutMs ?? 15_000
+    this.userWorkspaceDirectory = config.userWorkspaceDirectory === undefined
+      || config.userWorkspaceDirectory.trim() === ''
+      ? undefined
+      : resolve(config.userWorkspaceDirectory)
     this.fetcher = globalThis.fetch
     ctx.on('api-session/prompt-admission', async (request, next) => {
       const state = await this.authentication(request.signal)
@@ -85,6 +96,18 @@ export class OntologyAuthController extends TypertRemoteService {
           'ontology/auth-required',
           state.kind === 'expired' ? 'Ontology login has expired' : 'Ontology login is required',
           { reason: state.kind },
+        )
+      }
+      await next()
+    })
+    ctx.on('commands/admission', async (request, next) => {
+      if (request.name === 'permission'
+        && request.rawInput.trim() === 'danger-full-access'
+        && !(await this.isCurrentAdministrator())) {
+        throw new RemoteError(
+          'ontology/administrator-required',
+          'Ontology administrator permission is required for danger-full-access',
+          { capability: 'danger-full-access' },
         )
       }
       await next()
@@ -173,7 +196,83 @@ export class OntologyAuthController extends TypertRemoteService {
   async currentScopeKey(): Promise<string | undefined> {
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     if (state.kind !== 'authenticated') return undefined
-    return createHash('sha256').update(this.baseUrl).update(state.auth.user.userId).digest('hex')
+    return createHash('sha256').update(this.baseUrl).update('\0').update(state.auth.user.userId).digest('hex')
+  }
+
+  /**
+   * Create and return the current Ontology user's persistent directory.
+   * @returns Canonical user directory, or undefined when the deployment has no private workspace root.
+   */
+  async workspaceRoot(): Promise<string | undefined> {
+    if (this.userWorkspaceDirectory === undefined) return undefined
+    const scopeKey = await this.currentScopeKey()
+    if (scopeKey === undefined) throw authRequired('missing')
+    await mkdir(this.userWorkspaceDirectory, { recursive: true })
+    const parent = await realpath(this.userWorkspaceDirectory)
+    const directory = join(parent, scopeKey)
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    const canonical = await realpath(directory)
+    if (relative(parent, canonical) !== scopeKey) {
+      throw new RemoteError('gateway/bad-request', 'Ontology user workspace is not a private directory', {})
+    }
+    return canonical
+  }
+
+  /**
+   * Reject an existing directory outside the current Ontology user's workspace tree.
+   * @param path - Absolute directory supplied by a browser or selected by the Host.
+   */
+  async assertWorkspacePath(path: string): Promise<void> {
+    const root = await this.workspaceRoot()
+    if (root === undefined) return
+    if (!isAbsolute(path)) {
+      throw new RemoteError('gateway/bad-request', 'Ontology workspace path must be absolute', {})
+    }
+    const canonical = await realpath(path)
+    const suffix = relative(root, canonical)
+    if (suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+      throw new RemoteError('gateway/bad-request', 'Ontology workspace path is outside the current user directory', {})
+    }
+  }
+
+  /**
+   * Return whether the current Runtime account can use administrator-only Harness operations.
+   * @returns Whether the authenticated account is an Ontology administrator.
+   */
+  async isCurrentAdministrator(): Promise<boolean> {
+    const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
+    return state.kind === 'authenticated' && state.auth.user.accountType === 'admin'
+  }
+
+  /**
+   * Claim a newly created Session or Workspace for the current Ontology user.
+   * @param kind - Durable resource kind.
+   * @param id - Durable resource identifier.
+   */
+  async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void> {
+    const scopeKey = await this.currentScopeKey()
+    if (scopeKey === undefined) return
+    await this.ctx.credentials.modifyRecord(this.ownerKey(kind, id), () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, scopeKey },
+    }))
+  }
+
+  /**
+   * Check whether a durable Session or Workspace belongs to an Ontology user scope.
+   * @param kind - Durable resource kind.
+   * @param id - Durable resource identifier.
+   * @param expectedScopeKey - Optional opening scope retained by a live feed.
+   * @returns Whether the resource belongs to the selected scope.
+   */
+  async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean> {
+    const scopeKey = expectedScopeKey ?? await this.currentScopeKey()
+    if (scopeKey === undefined) return false
+    const record = await this.ctx.credentials.readRecord(this.ownerKey(kind, id))
+    return record?.kind === 'grant'
+      && typeof record.payload === 'object'
+      && record.payload !== null
+      && Reflect.get(record.payload, 'version') === 1
+      && Reflect.get(record.payload, 'scopeKey') === scopeKey
   }
 
   /**
@@ -276,6 +375,12 @@ export class OntologyAuthController extends TypertRemoteService {
     }
     const digest = createHash('sha256').update(this.baseUrl).update(browserId).digest('hex')
     return credentialKey('ontology-auth-controller', `login-${digest}`)
+  }
+
+  /** Select one stable credential key for a durable resource owner record. */
+  private ownerKey(kind: 'session' | 'workspace', id: string): ReturnType<typeof credentialKey> {
+    const suffix = createHash('sha256').update(id).digest('hex')
+    return credentialKey('ontology-auth-controller', `owner-${kind}-${suffix}`)
   }
 
   private remoteError(operation: 'login' | 'validate' | 'logout', error: unknown): RemoteError {

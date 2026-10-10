@@ -91,7 +91,7 @@ requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 admit(request: ConnectionTrustRequest): PeerAdmission
 
 /**
- * Run an admitted operation with the optional JDCloud browser identity.
+ * Run an admitted operation with the optional application browser identity.
  * @param request - request headers from the HTTP or upgrade request.
  * @param operation - operation that may await request-scoped work.
  * @returns the operation result.

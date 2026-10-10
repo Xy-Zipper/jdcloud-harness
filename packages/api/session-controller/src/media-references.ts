@@ -1,7 +1,7 @@
 /**
  * Authenticated GET/HEAD /api/file reads bounded file responses through
- * the composed filesystem provider. JDCloud-authenticated requests are
- * restricted to roots owned by the current tenant-user; generic deployments
+ * the composed filesystem provider. Ontology-authenticated requests are
+ * restricted to roots owned by the current user; generic deployments
  * retain the connection service's existing filesystem policy.
  * @module @deepseek-ai/dsh-api-session-controller/media-references
  */
@@ -99,9 +99,9 @@ interface SessionLike {
   readonly header: { readonly cwd?: string }
 }
 
-/** Resolve roots visible to the current tenant-user; absent auth keeps generic deployments unchanged. */
+/** Resolve roots visible to the current Ontology user; absent auth keeps generic deployments unchanged. */
 async function authorizedRoots(ctx: Context): Promise<readonly FsTarget[] | undefined> {
-  const owner = ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+  const owner = ctx.get('ontologyAuthController') as ScopeOwner | undefined
   if (owner === undefined) return undefined
   const roots: FsTarget[] = []
   const fs = ctx.fs

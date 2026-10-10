@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
+import Loader, { type ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -78,13 +78,19 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     ['@deepseek-ai/dsh-tool-ontology', ontologyTool],
     ['@deepseek-ai/dsh-client-ui-ontology-login', loginUiModule],
   ])
-  ctx.loader.internal = {
+  const internal: ModuleLoaderV2 = {
     version: 'v2',
+    loadCache: new Map(),
     async import(specifier: string) {
       if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`)
       return modules.get(specifier)
     },
-  } as unknown as NonNullable<typeof ctx.loader.internal>
+    register(): never { throw new Error('unexpected module hook registration') },
+    getOrCreateModuleJob(): never { throw new Error('unexpected module job creation') },
+    resolveSync(): never { throw new Error('unexpected synchronous module resolution') },
+    load(): never { throw new Error('unexpected module load') },
+  }
+  ctx.loader.internal = internal
 
   await ctx.loader.create({
     name: 'cordis:include',
@@ -111,7 +117,7 @@ function browserCookie(browserSession: BrowserSessionService): string {
 }
 
 describe('Ontology login through a real Loader composition', () => {
-  it('adds an independent browser session and Ontology packages without JDCloud rows', () => {
+  it('adds an independent browser session and the Ontology packages', () => {
     const web = yaml.load(
       readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8'),
       { schema: entryListSchema },
@@ -130,7 +136,6 @@ describe('Ontology login through a real Loader composition', () => {
       .toBe('@deepseek-ai/dsh-tool-ontology')
     expect(rows.find(row => row.id === 'ui-ontology-login')?.name)
       .toBe('@deepseek-ai/dsh-client-ui-ontology-login')
-    expect(rows.some(row => row.id === 'jdcloud-auth-controller')).toBe(false)
     expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({
       config: { welcomeNotice: false, credentialOnboarding: false },
     })

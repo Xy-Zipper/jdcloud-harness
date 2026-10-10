@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the signed browser-session cookie, and installs the Ontology controller, model tools, and login UI. The existing JDCloud bundle remains separate and unchanged.
+`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the signed browser-session cookie, and installs the Ontology controller, model tools, and login UI. Ontology becomes the profile's application identity and authorization layer.
 
 ## Table of Contents
 
@@ -39,13 +39,14 @@ Set the required Runtime address before launching the profile:
 ```dotenv
 ONTOLOGY_BASE_URL=https://ontology.example.com
 ONTOLOGY_REQUEST_TIMEOUT_MS=15000
+ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 ```
 
 Local development may explicitly set `ONTOLOGY_BASE_URL=http://127.0.0.1:8080` together with `ONTOLOGY_ALLOW_INSECURE_LOOPBACK=true`. Non-loopback HTTP is always rejected.
 
 ### What you get
 
-The layer replaces the Connection row with `browserAuthentication: false` and `browserSession: true`, inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes. The layer does not insert JDCloud packages.
+The layer replaces the Connection row with `browserAuthentication: false` and `browserSession: true`, inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes. The configured user Workspace directory keeps files private to the stable Ontology user.
 
 -----
 
@@ -55,7 +56,7 @@ The layer replaces the Connection row with `browserAuthentication: false` and `b
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-[`cordis.patch.yml`](cordis.patch.yml) owns the complete optional layer. `ONTOLOGY_BASE_URL` is deployment-required; the patch passes timeout and loopback policy into the Host controller and leaves every row replaceable by profile or command-line patches above it. [`src/index.ts`](src/index.ts) is the empty bundle carrier required by package loading.
+[`cordis.patch.yml`](cordis.patch.yml) owns the complete optional layer. `ONTOLOGY_BASE_URL` is deployment-required; the patch passes timeout, loopback policy, and `ONTOLOGY_USER_WORKSPACE_DIR` into the Host controller and leaves every row replaceable by profile or command-line patches above it. [`src/index.ts`](src/index.ts) is the empty bundle carrier required by package loading.
 
 </details>
 
@@ -86,7 +87,6 @@ The bundle itself adds no request prefix; the inserted tool package owns prompt 
 <a id="known-limitations-and-deferred-work"></a>
 
 - This layer targets the Web profile because independent browser identity and the login root require the Web Connection and Slot services.
-- Installing the layer does not delete JDCloud credential records or disable an independently installed JDCloud bundle.
 - Confirmation-required Actions depend on the Web profile's shared approval service; a session with approval policy `never` rejects them without prompting.
 - Removing the layer does not delete its owner-defined credential records or revoke Runtime Sessions that were not explicitly logged out.
 

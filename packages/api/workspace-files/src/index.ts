@@ -4,8 +4,8 @@
  * `workspaceFiles`.
  *
  * File reads use the selected Session header as the base for relative paths.
- * Deployments without JDCloud ownership checks retain the composed filesystem
- * read policy; an authenticated JDCloud browser is confined to its owned
+ * Deployments without Ontology ownership checks retain the composed filesystem
+ * read policy; an authenticated Ontology browser is confined to its owned
  * Session and Workspace roots. Directory listings and change observations
  * remain workspace-scoped. File-kind checks and configured read caps apply to
  * every preview; this service exposes no mutations.
@@ -383,7 +383,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     if (owner !== undefined && !(await owner.owns('session', String(workspaceFileScope.sessionId)))) {
       throw new RemoteError('workspace-file/not-found', `session "${workspaceFileScope.sessionId}" not found`, { path })
     }
@@ -420,7 +420,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
     const target = owner === undefined
       ? await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
       : await this.confine(root, workspaceRoot, path, signal)

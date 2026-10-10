@@ -90,7 +90,7 @@ describe('WorkspaceController commands', () => {
     const { controller, ctx, root } = await harness()
     const path = stageDir(root, 'shared-path')
     const owned = new Set<string>()
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(owned.has(id)),
       assertWorkspacePath: () => Promise.resolve(),
       claimOwned: (_kind: 'session' | 'workspace', id: string) => {
@@ -117,7 +117,7 @@ describe('WorkspaceController commands', () => {
     const { controller, ctx, root } = await harness()
     const own = stageDir(root, 'own')
     const other = stageDir(root, 'other')
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       assertWorkspacePath: (path: string) => path === own
         ? Promise.resolve()
         : Promise.reject(new Error('outside root')),
@@ -136,7 +136,7 @@ describe('WorkspaceController commands', () => {
     const { controller, ctx, root } = await harness()
     const foreignWorkspace = await ctx.workspaceRegistry.create(stageDir(root, 'foreign'))
     const foreignSession = ctx.sessions.create(SessionId('foreign'), { meta: { cwd: root } })
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       owns: () => Promise.resolve(false),
       claimOwned: () => Promise.resolve(),
       assertWorkspacePath: () => Promise.resolve(),
@@ -417,7 +417,7 @@ describe('WorkspaceController follow', () => {
     const foreign = ctx.sessions.create(SessionId('foreign-pin'), { meta: { cwd: root } })
     await ctx.workspaceRegistry.pinSession(owned.id)
     await ctx.workspaceRegistry.pinSession(foreign.id)
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       currentScopeKey: () => Promise.resolve('tenant-at-open'),
       owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(id === owned.id),
     } as never)
@@ -506,11 +506,11 @@ describe('WorkspaceController follow', () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
   })
 
-  it('keeps the opening tenant scope for its baseline', async () => {
+  it('keeps the opening Ontology user scope for its baseline', async () => {
     const { ctx, root } = await harness()
     await ctx.workspaceRegistry.create(stageDir(root, 'tenant-workspace'))
     const scopes: (string | undefined)[] = []
-    ctx.provide('jdcloudAuthController', {
+    ctx.provide('ontologyAuthController', {
       currentScopeKey: () => Promise.resolve('tenant-at-open'),
       owns: (_kind: 'session' | 'workspace', _id: string, scopeKey?: string) => {
         scopes.push(scopeKey)

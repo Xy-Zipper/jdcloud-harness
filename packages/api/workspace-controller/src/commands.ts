@@ -264,7 +264,7 @@ export class WorkspaceCommands {
     if (owner !== undefined && !(await owner.owns('workspace', String(workspaceId)))) throw workspaceNotFound(workspaceId)
   }
 
-  /** Refuse a Session id outside the current JDCloud owner when mutating global navigation. */
+  /** Refuse a Session id outside the current Ontology owner when mutating global navigation. */
   private async assertSessionOwned(sessionId: WorkspaceArchiveSessionRequest['sessionId']): Promise<void> {
     const owner = this.owner()
     if (owner !== undefined && !(await owner.owns('session', sessionId))) {
@@ -273,7 +273,7 @@ export class WorkspaceCommands {
   }
 
   private owner(): ScopeOwner | undefined {
-    return this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    return this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
