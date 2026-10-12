@@ -457,6 +457,8 @@ export interface ConnectionConfig {
   /** Require an independent opaque browser cookie in addition to launch authentication,
    * or by itself when launch authentication is disabled. */
   browserSession?: boolean
+  /** SameSite policy for the independent browser-session cookie; none also adds Secure. */
+  browserSessionCookieSameSite?: BrowserSessionCookieSameSite
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -488,6 +490,9 @@ export interface ConnectionRecoveryConfig {
   /** Deadline in ms for readiness, including physical connection setup. Default: 15000. */
   generationReadyTimeoutMs?: number
 }
+
+/** Browser cookie policy supported by the independent session service. */
+export type BrowserSessionCookieSameSite = 'strict' | 'none'
 ```
 
 来源： [`packages/client/connection/src/index.ts:94`](../packages/client/connection/src/index.ts)
@@ -507,6 +512,22 @@ export interface Config {
 ```
 
 来源： [`packages/client/hmr/src/index.ts:30`](../packages/client/hmr/src/index.ts)
+
+<a id="deepseek-aidsh-client-ui-jdcloud-login"></a>
+
+## `@deepseek-ai/dsh-client-ui-jdcloud-login`
+
+需要： `webServer`
+
+```ts config-catalog
+/** Deployment policy for the token-transfer bootstrap document. */
+export interface Config {
+  /** Exact HTTP(S) parent origin, or `*` to allow any parent; empty blocks framing. */
+  readonly transferFrameAncestorOrigin?: string
+}
+```
+
+来源： [`packages/client/ui-jdcloud-login/src/index.ts:14`](../packages/client/ui-jdcloud-login/src/index.ts)
 
 <a id="deepseek-aidsh-client-ui-plugin-manager"></a>
 
@@ -3448,12 +3469,12 @@ export interface Config {
   readonly maxPageSize?: number
   /** Maximum UTF-8 bytes retained in one model-visible result preview. Defaults to 65536. */
   readonly maxOutputBytes?: number
-  /** Host-memory lifetime for one tenant-user department tree in milliseconds. Defaults to 300000. */
+  /** Host-memory lifetime for tenant-user department and role selectors in milliseconds. Defaults to 300000. */
   readonly organizationCacheTtlMs?: number
 }
 ```
 
-来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:50`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
+来源：[`packages/jdcloud/tool-jdcloud-lowcode/src/index.ts:56`](../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts)
 
 <a id="deepseek-aidsh-tool-jobs"></a>
 
@@ -4172,7 +4193,6 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-directory-picker-native`（[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
-- `@deepseek-ai/dsh-client-ui-jdcloud-login` — 需要 `webServer`（[`packages/client/ui-jdcloud-login/src/index.ts`](../packages/client/ui-jdcloud-login/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions`（[`packages/client/ui-jdcloud-lowcode-actions/src/index.ts`](../packages/client/ui-jdcloud-lowcode-actions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-layout`（[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）

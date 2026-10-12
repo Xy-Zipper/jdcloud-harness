@@ -5,7 +5,7 @@ description: "在本地构建 JDCloud Harness 镜像，导出到 Linux 服务器
 
 $Env:DSH_CLIENT_COMMIT_HASH = (git rev-parse HEAD).Trim()
 $Env:DOCKER_BUILDKIT = "0"
-
+$Env:http_proxy="http://127.0.0.1:35347";$Env:https_proxy="http://127.0.0.1:35347"
 docker build `
   --build-arg "DSH_CLIENT_COMMIT_HASH=$Env:DSH_CLIENT_COMMIT_HASH" `
   --tag jdcloud-harness:local `
@@ -68,8 +68,12 @@ GPT_API_KEY=实际模型密钥
 JDCLOUD_HARNESS_TRUSTED_HOST=实际域名或服务器IP
 JDCLOUD_HARNESS_PORT=3080
 JDCLOUD_DEFAULT_BASE_URL=https://mi.kindoucloud.com
+JDCLOUD_IFRAME_PARENT_ORIGIN=https://实际外链页面域名
+JDCLOUD_BROWSER_SESSION_SAME_SITE=none
 TZ=Asia/Hong_Kong
 ```
+
+`JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。父页面与 Harness 属于跨站关系时，设置 `JDCLOUD_BROWSER_SESSION_SAME_SITE=none`；应用会输出带 `SameSite=None; Secure` 的 `dsh-user-session` cookie，因此外部访问 Harness 必须使用 HTTPS。同站 iframe 可以保留默认值 `strict`。
 
 加载镜像并启动。`--no-build --pull never` 确保服务器不会尝试在线构建或拉取业务镜像。
 

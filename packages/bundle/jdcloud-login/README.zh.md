@@ -31,9 +31,13 @@ dsh plugin --profile web add @deepseek-ai/dsh-jdcloud-login
 
 ```dotenv
 JDCLOUD_DEFAULT_BASE_URL=https://example.com
+JDCLOUD_IFRAME_PARENT_ORIGIN=https://portal.example
+JDCLOUD_BROWSER_SESSION_SAME_SITE=none
 ```
 
 `JDCLOUD_DEFAULT_BASE_URL` 是账号密码登录的初始地址。Token 中转链接可以传入任意语法合法的绝对 HTTP(S) 服务地址；Host 不使用白名单，并会把传入的 Token 发送到该目的地。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
+
+默认的窗口打开流程不需要设置这两个 iframe 变量。`JDCLOUD_IFRAME_PARENT_ORIGIN` 接受嵌入 `/login/transfer` 的父页面准确 HTTP(S) origin，不能包含路径。只有允许全部网站嵌入转发页时才将其设为 `*`；该配置允许任意网站实施点击劫持。同站 iframe 可以保留默认的 `JDCLOUD_BROWSER_SESSION_SAME_SITE=strict`。跨站 iframe 应将其设为 `none`；Connection 随后输出 `SameSite=None; Secure`，因此 Harness 的公开 URL 必须使用 HTTPS。这两个运行时变量只要求重启进程或容器，不要求重新构建浏览器资源。
 
 Docker Compose 部署可通过 `JDCLOUD_PRODUCT_NAME` 设置浏览器标题、侧栏产品名、PWA 名称及模型可见的 Web 品牌；默认值为 `LSY-Agent`。浏览器资源会在构建时嵌入标题，因此修改后需要重新构建镜像。
 

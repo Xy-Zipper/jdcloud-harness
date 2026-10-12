@@ -157,6 +157,16 @@ describe('JDCloud login through a real Loader composition', () => {
       name: '@deepseek-ai/dsh-client-ui-settings-models',
       config: { welcomeNotice: false, credentialOnboarding: false },
     })
+    expect(rows.find(row => row.id === 'connection')).toMatchObject({
+      config: {
+        browserSessionCookieSameSite: { __jsExpr: 'process.env.JDCLOUD_BROWSER_SESSION_SAME_SITE' },
+      },
+    })
+    expect(rows.find(row => row.id === 'ui-jdcloud-login')).toMatchObject({
+      config: {
+        transferFrameAncestorOrigin: { __jsExpr: 'process.env.JDCLOUD_IFRAME_PARENT_ORIGIN' },
+      },
+    })
   })
 
   it('activates the foundation services, Host controller, low-code tools, and login UI node half', async () => {

@@ -5,6 +5,7 @@
     # Host session instead of sharing Harness authentication state.
     browserAuthentication: false
     browserSession: true
+    browserSessionCookieSameSite: !!js process.env.JDCLOUD_BROWSER_SESSION_SAME_SITE
     trustedHosts: !!js ctx.webRuntime.trustedHosts
 
 - insert:
@@ -20,6 +21,8 @@
 
     - id: ui-jdcloud-login
       name: '@deepseek-ai/dsh-client-ui-jdcloud-login'
+      config:
+        transferFrameAncestorOrigin: !!js process.env.JDCLOUD_IFRAME_PARENT_ORIGIN
 
     - id: ui-jdcloud-lowcode-actions
       name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'

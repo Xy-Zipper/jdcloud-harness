@@ -40,4 +40,21 @@ describe('BrowserSessionService', () => {
       expect(firstService.currentIdRequired()).toBeTypeOf('string')
     })
   })
+
+  it('uses a Secure SameSite=None cookie only when configured for cross-site embedding', async () => {
+    const strictContext = new Context()
+    const crossSiteContext = new Context()
+    contexts.push(strictContext, crossSiteContext)
+    await strictContext.plugin(MemoryCredentials)
+    await crossSiteContext.plugin(MemoryCredentials)
+    const strict = await BrowserSessionService.create(strictContext, strictContext.credentials)
+    const strictResponse = response()
+    strict.authorizeIndex({ headers: { host: 'example.test' }, method: 'GET', url: '/' }, strictResponse)
+    expect(strictResponse.headers['set-cookie']).toMatch(/; HttpOnly; SameSite=Strict$/u)
+
+    const crossSite = await BrowserSessionService.create(crossSiteContext, crossSiteContext.credentials, 30, 'none')
+    const crossSiteResponse = response()
+    crossSite.authorizeIndex({ headers: { host: 'example.test' }, method: 'GET', url: '/' }, crossSiteResponse)
+    expect(crossSiteResponse.headers['set-cookie']).toMatch(/; HttpOnly; SameSite=None; Secure$/u)
+  })
 })

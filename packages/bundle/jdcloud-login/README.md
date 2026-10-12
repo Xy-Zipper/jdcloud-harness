@@ -31,9 +31,13 @@ Set the optional initial service address in the process environment or root `.en
 
 ```dotenv
 JDCLOUD_DEFAULT_BASE_URL=https://example.com
+JDCLOUD_IFRAME_PARENT_ORIGIN=https://portal.example
+JDCLOUD_BROWSER_SESSION_SAME_SITE=none
 ```
 
 `JDCLOUD_DEFAULT_BASE_URL` is the initial account/password login address. A token-transfer link may supply any syntactically valid absolute HTTP(S) service address; the Host sends the supplied Token to that destination without an allowlist. A successful login stores its normalized service address, Token, account, current tenant, and available tenants in the Host credentials provider. The Web Client shows the account and tenant in the sidebar; its account menu marks the current tenant, switches among all available tenants without returning to login, and provides Sign out.
+
+Leave both iframe variables unset for the default window-open flow. `JDCLOUD_IFRAME_PARENT_ORIGIN` accepts the exact HTTP(S) origin of the page that embeds `/login/transfer`, without a path. Set it to `*` only when every site may embed the transfer page; this permits clickjacking by any site. A same-site iframe can retain the default `JDCLOUD_BROWSER_SESSION_SAME_SITE=strict`. Set it to `none` for a cross-site iframe; Connection then emits `SameSite=None; Secure`, so the public Harness URL must use HTTPS. These runtime variables require a process or container restart, not a browser-asset rebuild.
 
 Docker Compose deployments may set `JDCLOUD_PRODUCT_NAME` to choose the browser title, sidebar product name, PWA name, and model-visible Web branding; it defaults to `LSY-Agent` and requires an image rebuild because browser assets embed the title at build time.
 

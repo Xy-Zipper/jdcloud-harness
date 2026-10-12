@@ -10,7 +10,7 @@ import { API_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
-import { BrowserSessionService } from './browser-session.ts'
+import { BrowserSessionService, type BrowserSessionCookieSameSite } from './browser-session.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
@@ -99,6 +99,8 @@ export interface ConnectionConfig {
   /** Require an independent opaque browser cookie in addition to launch authentication,
    * or by itself when launch authentication is disabled. */
   browserSession?: boolean
+  /** SameSite policy for the independent browser-session cookie; none also adds Secure. */
+  browserSessionCookieSameSite?: BrowserSessionCookieSameSite
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -118,6 +120,7 @@ export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
   browserAuthentication: z.boolean().default(true),
   browserSession: z.boolean().default(false),
+  browserSessionCookieSameSite: z.union(['strict', 'none']).default('strict'),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
@@ -134,6 +137,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const recovery = resolveConnectionConfig(config?.recovery)
   const browserAuthentication = config?.browserAuthentication ?? true
   const browserSession = config?.browserSession ?? false
+  const browserSessionCookieSameSite = config?.browserSessionCookieSameSite ?? 'strict'
   // JDCloud deployments disable Harness launch authentication, so they still
   // need an opaque browser cookie to keep Host state out of process-global keys.
   const browserSessionEnabled = browserSession || !browserAuthentication
@@ -152,7 +156,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
       : undefined,
     browserSessionEnabled
-      ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays)
+      ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays, browserSessionCookieSameSite)
       : undefined,
     browserSessionEnabled,
   )

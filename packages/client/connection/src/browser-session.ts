@@ -20,6 +20,9 @@ const COOKIE_VERSION = 1
 const SECRET_VERSION = 1
 const MAX_AGE_DAYS = 30
 
+/** Browser cookie policy supported by the independent session service. */
+export type BrowserSessionCookieSameSite = 'strict' | 'none'
+
 interface CookiePayload {
   readonly version: typeof COOKIE_VERSION
   readonly browserId: string
@@ -33,7 +36,12 @@ export class BrowserSessionService extends Service {
   static inject = ['credentials']
   private readonly requests = new AsyncLocalStorage<string>()
 
-  private constructor(ctx: Context, private readonly secret: Buffer, private readonly maxAgeMilliseconds: number) {
+  private constructor(
+    ctx: Context,
+    private readonly secret: Buffer,
+    private readonly maxAgeMilliseconds: number,
+    private readonly cookieSameSite: BrowserSessionCookieSameSite,
+  ) {
     super(ctx, 'browserSession')
   }
 
@@ -42,10 +50,21 @@ export class BrowserSessionService extends Service {
    * @param ctx - Context that owns the service.
    * @param credentials - Credential store for the signing secret.
    * @param maxAgeDays - Cookie lifetime in days.
+   * @param cookieSameSite - Strict first-party policy, or None with Secure for cross-site iframe use.
    * @returns The initialized browser-session service.
    */
-  static async create(ctx: Context, credentials: CredentialProvider, maxAgeDays = MAX_AGE_DAYS): Promise<BrowserSessionService> {
-    return new BrowserSessionService(ctx, await loadSecret(credentials), maxAgeDays * 24 * 60 * 60 * 1000)
+  static async create(
+    ctx: Context,
+    credentials: CredentialProvider,
+    maxAgeDays = MAX_AGE_DAYS,
+    cookieSameSite: BrowserSessionCookieSameSite = 'strict',
+  ): Promise<BrowserSessionService> {
+    return new BrowserSessionService(
+      ctx,
+      await loadSecret(credentials),
+      maxAgeDays * 24 * 60 * 60 * 1000,
+      cookieSameSite,
+    )
   }
 
   /**
@@ -65,7 +84,7 @@ export class BrowserSessionService extends Service {
     response.writeHead(303, {
       'cache-control': 'no-store',
       location: '/',
-      'set-cookie': `${COOKIE_NAME}=${value}; Max-Age=${String(Math.floor(this.maxAgeMilliseconds / 1000))}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; SameSite=Strict`,
+      'set-cookie': `${COOKIE_NAME}=${value}; Max-Age=${String(Math.floor(this.maxAgeMilliseconds / 1000))}; Path=/; Expires=${new Date(expiresAt).toUTCString()}; HttpOnly; ${this.cookieSameSite === 'none' ? 'SameSite=None; Secure' : 'SameSite=Strict'}`,
     })
     response.end()
     return false

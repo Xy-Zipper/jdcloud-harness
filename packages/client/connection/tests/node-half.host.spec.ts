@@ -372,6 +372,21 @@ describe('connection node half', () => {
     }
   })
 
+  it('propagates the configured browser-session cookie policy', async () => {
+    const { connection, dispose } = await mounted({
+      browserAuthentication: false,
+      browserSessionCookieSameSite: 'none',
+      trustedHosts: ['harness.example'],
+    })
+    try {
+      const exchange = fakeResponse()
+      connection.authorizeIndex(fakeRequest({ host: 'harness.example' }, '/'), exchange.response)
+      expect(exchange.state.headers?.['set-cookie']).toMatch(/; HttpOnly; SameSite=None; Secure$/u)
+    } finally {
+      await dispose()
+    }
+  })
+
   it('provides a disposable dedicated RPC channel', async () => {
     const ctx = new Context()
     const routes: WebRoute[] = []

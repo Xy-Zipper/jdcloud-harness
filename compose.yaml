@@ -40,6 +40,10 @@ services:
       DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       # Seed the JDCloud login form through the Host controller at process startup.
       JDCLOUD_DEFAULT_BASE_URL: ${JDCLOUD_DEFAULT_BASE_URL:-}
+      # Allow one parent origin, or `*`, to embed the token-transfer page.
+      JDCLOUD_IFRAME_PARENT_ORIGIN: ${JDCLOUD_IFRAME_PARENT_ORIGIN:-}
+      # Cross-site iframe deployment uses `none`; its cookie requires public HTTPS.
+      JDCLOUD_BROWSER_SESSION_SAME_SITE: ${JDCLOUD_BROWSER_SESSION_SAME_SITE:-strict}
       JDCLOUD_USER_WORKSPACE_DIR: /workspace/jdcloud-users
       NODE_ENV: production
       TZ: ${TZ:-Asia/Hong_Kong}
