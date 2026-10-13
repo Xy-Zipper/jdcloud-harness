@@ -75,6 +75,8 @@ TZ=Asia/Hong_Kong
 
 `JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。父页面与 Harness 属于跨站关系时，设置 `JDCLOUD_BROWSER_SESSION_SAME_SITE=none`；应用会输出带 `SameSite=None; Secure` 的 `dsh-user-session` cookie，因此外部访问 Harness 必须使用 HTTPS。同站 iframe 可以保留默认值 `strict`。
 
+Docker 启动 overlay 会把 `JDCLOUD_BROWSER_SESSION_SAME_SITE` 传给 Connection 配置。修改 `.env` 后必须重建容器；根页面响应中的 `Set-Cookie` 应与配置对应，跨站模式应包含 `SameSite=None; Secure`。
+
 加载镜像并启动。`--no-build --pull never` 确保服务器不会尝试在线构建或拉取业务镜像。
 
 ```bash

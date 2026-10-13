@@ -3,4 +3,5 @@
   config:
     browserAuthentication: false
     browserSession: true
+    browserSessionCookieSameSite: !!js process.env.JDCLOUD_BROWSER_SESSION_SAME_SITE
     trustedHosts: !!js ctx.webRuntime.trustedHosts

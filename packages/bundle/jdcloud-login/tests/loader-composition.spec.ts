@@ -143,7 +143,7 @@ function runningAgent(context: Context): Agent {
 }
 
 describe('JDCloud login through a real Loader composition', () => {
-  it('turns off first-run notices and credentials without removing the Models settings plugin', () => {
+  it('preserves JDCloud deployment settings through the Docker overlay', () => {
     const web = yaml.load(
       readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8'),
       { schema: entryListSchema },
@@ -152,7 +152,11 @@ describe('JDCloud login through a real Loader composition', () => {
       readFileSync(join(import.meta.dirname, '../cordis.patch.yml'), 'utf8'),
       { schema: entryListSchema },
     ) as PatchOptions[]
-    const rows = applyEntryPatches([], [...web, ...jdcloud], () => {})
+    const docker = yaml.load(
+      readFileSync(join(import.meta.dirname, '../../../../docker.no-browser-auth.patch.yml'), 'utf8'),
+      { schema: entryListSchema },
+    ) as PatchOptions[]
+    const rows = applyEntryPatches([], [...web, ...jdcloud, ...docker], () => {})
     expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-settings-models',
       config: { welcomeNotice: false, credentialOnboarding: false },
