@@ -98,6 +98,8 @@ export type RpcMessage = ClientRequest | ServerResponse
 export interface ConnectionTrustRequest {
   /** Request headers supplied by either the Fetch or node:http representation. */
   readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+  /** Request target, when authentication depends on an explicit transport ticket. */
+  readonly url?: string | undefined
 }
 
 /** HTTP status returned before dispatch, or undefined when the request may proceed. */
@@ -220,6 +222,13 @@ export interface HostConnectionHandle {
    * @returns the operator Peer, or the rejection status.
    */
   admit(request: ConnectionTrustRequest): PeerAdmission
+
+  /**
+   * Admit one WebSocket upgrade, consuming a transport ticket when the browser session uses Bearer headers.
+   * @param request - upgrade request headers and URL.
+   * @returns the operator Peer, or the rejection status.
+   */
+  admitWebSocket(request: ConnectionTrustRequest): PeerAdmission
 
   /**
    * Run an admitted operation with the optional JDCloud browser identity.

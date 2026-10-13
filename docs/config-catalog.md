@@ -457,6 +457,8 @@ export interface ConnectionConfig {
   browserSession?: boolean
   /** SameSite policy for the independent browser-session cookie; none also adds Secure. */
   browserSessionCookieSameSite?: BrowserSessionCookieSameSite
+  /** Browser identity carrier. Bearer requires browserAuthentication: false. Default: cookie. */
+  browserSessionTransport?: BrowserSessionTransport
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -466,7 +468,7 @@ export interface ConnectionConfig {
    * bind. An entry that is not a bare, canonical authority fails plugin load.
    */
   trustedHosts?: string[]
-  /** Absolute browser-session lifetime in days. Default: 30. */
+  /** Absolute independent browser-session lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
@@ -491,9 +493,12 @@ export interface ConnectionRecoveryConfig {
 
 /** Browser cookie policy supported by the independent session service. */
 export type BrowserSessionCookieSameSite = 'strict' | 'none'
+
+/** Browser identity carrier selected by the deployment. */
+export type BrowserSessionTransport = 'cookie' | 'bearer'
 ```
 
-Source: [`packages/client/connection/src/index.ts:94`](../packages/client/connection/src/index.ts)
+Source: [`packages/client/connection/src/index.ts:103`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 

@@ -9,6 +9,7 @@ import {
   type ConnectionState,
 } from './connection.ts'
 import { createWebConnectionRpc, type RpcFetch, type RpcStreamOpen } from './rpc.ts'
+import { createBrowserBearerSession } from './browser-session.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
 import { resolveConnectionConfig } from '../recovery-config.ts'
@@ -104,12 +105,17 @@ export interface ClientTransportHooks {
   ownsHost?: boolean
   /** HTTP origin of a shell-owned Host when its WebSocket uses a different page origin. */
   streamBaseUrl?: string
+  /** Add transport authentication to one WebSocket URL immediately before opening it. */
+  authorizeWebSocketUrl?(url: string): string | Promise<string>
+  /** Current Authorization header for a background carrier that cannot use this realm's Fetch. */
+  authorizationHeader?(): Promise<string | undefined>
 }
 
 /** Page global carrying {@link ClientTransportHooks}; absent in the served web app. */
 interface ClientTransportGlobal {
   __DSH_TRANSPORT__?: ClientTransportHooks
   __DSH_CONNECTION_RECOVERY__?: unknown
+  __DSH_BROWSER_SESSION_TRANSPORT__?: unknown
 }
 
 /** Browser location fields used to classify loopback authority. */
@@ -144,6 +150,12 @@ export interface ConnectionHandle {
   readonly state: ConnectionStateSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
+  /** Fetch one Host route through the selected browser authentication carrier. */
+  readonly fetch: RpcFetch
+  /** Current Authorization header for a background carrier, or undefined for Cookie transports. */
+  authorizationHeader(): Promise<string | undefined>
+  /** Add transport authentication to one WebSocket URL. */
+  authorizeWebSocketUrl(url: string): string | Promise<string>
   /** Reset retry progression and replace the current attempt immediately. */
   reconnect(): void
   /**
@@ -206,7 +218,8 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   const pageLocation = options.location
   const transport = options.transport
   const recovery = options.recovery ?? {}
-  const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
+  const hostFetch: RpcFetch = transport?.fetch ?? ((input, init) => globalThis.fetch(input, init))
+  const rpc = transport?.rpc ?? createWebConnectionRpc(hostFetch, transport?.openStream)
   let generationSource: ConnectionGenerationSource | undefined
   let owner: ConnectionOwner | undefined
   let generationId = 0
@@ -261,6 +274,9 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
       },
     },
     rpc,
+    fetch: hostFetch,
+    authorizationHeader: () => transport?.authorizationHeader?.() ?? Promise.resolve(undefined),
+    authorizeWebSocketUrl: url => transport?.authorizeWebSocketUrl?.(url) ?? url,
     reconnect() {
       owner?.controller.reconnect()
     },
@@ -317,7 +333,36 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
 export function apply(ctx: Context): void {
   const globals = globalThis as ClientTransportGlobal
   const pageLocation = typeof location === 'undefined' ? undefined : location
-  const transport = globals.__DSH_TRANSPORT__
+  const configuredTransport = globals.__DSH_TRANSPORT__
+  const browserSessionTransport = globals.__DSH_BROWSER_SESSION_TRANSPORT__
+  if (browserSessionTransport !== undefined && browserSessionTransport !== 'cookie'
+    && browserSessionTransport !== 'bearer') {
+    throw new TypeError('connection: invalid browser session transport bootstrap')
+  }
+  let transport = configuredTransport
+  if (browserSessionTransport === 'bearer') {
+    if (typeof document === 'undefined' || typeof sessionStorage === 'undefined') {
+      throw new Error('connection: Bearer browser sessions require document and sessionStorage')
+    }
+    const baseFetch = globalThis.fetch.bind(globalThis)
+    const browserSession = createBrowserBearerSession(baseFetch, sessionStorage, document.baseURI)
+    const authenticatedFetch = browserSession.fetch
+    ctx.effect(() => {
+      const previous = globalThis.fetch
+      globalThis.fetch = authenticatedFetch
+      return () => {
+        if (globalThis.fetch === authenticatedFetch) globalThis.fetch = previous
+      }
+    }, 'client-connection: browser Bearer Fetch')
+    transport = {
+      ...configuredTransport,
+      fetch: configuredTransport?.fetch ?? browserSession.fetch,
+      authorizeWebSocketUrl: configuredTransport?.authorizeWebSocketUrl
+        ?? browserSession.authorizeWebSocketUrl,
+      authorizationHeader: configuredTransport?.authorizationHeader
+        ?? browserSession.authorizationHeader,
+    }
+  }
   installConnection(ctx, {
     ...(transport === undefined ? {} : { transport }),
     recovery: resolveConnectionConfig(globals.__DSH_CONNECTION_RECOVERY__),

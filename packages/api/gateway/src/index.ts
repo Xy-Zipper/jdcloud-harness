@@ -250,7 +250,7 @@ export class TypertGatewayService extends Service implements TypertGateway {
           const route: WebUpgradeRoute = {
             path: REMOTE_STREAM_MUX_PATH,
             handler: (req, socket, head) => {
-              const admission = webCtx.connection.admit(req)
+              const admission = webCtx.connection.admitWebSocket(req)
               if ('rejection' in admission) {
                 rejectRemoteStreamUpgrade(socket, admission.rejection)
                 return

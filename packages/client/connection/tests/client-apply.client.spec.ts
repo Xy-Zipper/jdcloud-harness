@@ -17,11 +17,13 @@ import {
 type Win = {
   location?: { hostname: string; origin?: string }
   __DSH_TRANSPORT__?: ClientTransportHooks
+  __DSH_BROWSER_SESSION_TRANSPORT__?: string
 }
 
 afterEach(() => {
   delete (globalThis as Win).location
   delete (globalThis as Win).__DSH_TRANSPORT__
+  delete (globalThis as Win).__DSH_BROWSER_SESSION_TRANSPORT__
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
@@ -476,6 +478,55 @@ describe('connection client apply', () => {
       method: 'goals/create',
       payload: { args: { agentId: 'agent-1' } },
     })
+  })
+
+  it('stores a Bearer session in sessionStorage and authenticates same-origin fetches', async () => {
+    const values = new Map<string, string>()
+    const session = {
+      getItem: vi.fn((key: string) => values.get(key) ?? null),
+      setItem: vi.fn((key: string, value: string) => { values.set(key, value) }),
+      removeItem: vi.fn((key: string) => { values.delete(key) }),
+      clear: vi.fn(() => { values.clear() }),
+      key: vi.fn(() => null),
+      get length() { return values.size },
+    } satisfies Storage
+    const local = { setItem: vi.fn() }
+    ;(globalThis as Win).location = { hostname: 'harness.example', origin: 'http://harness.example' }
+    ;(globalThis as Win).__DSH_BROWSER_SESSION_TRANSPORT__ = 'bearer'
+    vi.stubGlobal('document', { baseURI: 'http://harness.example/' })
+    vi.stubGlobal('sessionStorage', session)
+    vi.stubGlobal('localStorage', local)
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) { return bytes.fill(0) },
+    })
+    const baseFetch = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url === 'api/browser-session') {
+        return Response.json({ token: 'browser-token', expiresAt: Date.now() + 60_000 })
+      }
+      if (url === 'https://outside.example/data') return new Response('outside')
+      if (typeof init?.body !== 'string') throw new TypeError('expected a JSON request body')
+      const request = JSON.parse(init.body) as { rpcId: string }
+      return Response.json({
+        type: 'server-response', rpcId: request.rpcId, result: { ok: true, value: null },
+      })
+    })
+    vi.stubGlobal('fetch', baseFetch)
+    const ctx = new Context()
+    const fiber = ctx.plugin({ apply, inject: [] })
+    await fiber.await()
+    try {
+      const handle = ctx.get('connection') as ConnectionHandle
+      await expect(handle.rpc.call('/api', 'goals/create', {})).resolves.toEqual({ ok: true, value: null })
+      await globalThis.fetch('https://outside.example/data')
+      expect(session.setItem).toHaveBeenCalledOnce()
+      expect(local.setItem).not.toHaveBeenCalled()
+      expect(baseFetch.mock.calls[0]?.[1]).not.toHaveProperty('headers.authorization')
+      expect(new Headers(baseFetch.mock.calls[1]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
+      expect(new Headers(baseFetch.mock.calls[2]?.[1]?.headers).get('authorization')).toBeNull()
+    } finally {
+      await fiber.dispose()
+    }
   })
 
   it('uses an already decoded rpc carrier from the transport hooks instead of the HTTP caller', async () => {

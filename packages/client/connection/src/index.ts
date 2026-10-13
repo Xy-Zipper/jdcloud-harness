@@ -8,9 +8,17 @@ import type {} from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
-import { assertTrustedAuthority } from './api-request-trust.ts'
+import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
-import { BrowserSessionService, type BrowserSessionCookieSameSite } from './browser-session.ts'
+import {
+  BrowserSessionService,
+  type BrowserSessionCookieSameSite,
+  type BrowserSessionTransport,
+} from './browser-session.ts'
+import {
+  BROWSER_SESSION_BOOTSTRAP_PATH,
+  BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
+} from './browser-session-protocol.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
@@ -50,6 +58,7 @@ export {
 } from './rpc-schema.ts'
 export { HostConnectionService } from './rpc-host.ts'
 export { BrowserSessionService } from './browser-session.ts'
+export type { BrowserSessionTransport } from './browser-session-protocol.ts'
 
 export { API_PATH } from './api-path.ts'
 
@@ -101,6 +110,8 @@ export interface ConnectionConfig {
   browserSession?: boolean
   /** SameSite policy for the independent browser-session cookie; none also adds Secure. */
   browserSessionCookieSameSite?: BrowserSessionCookieSameSite
+  /** Browser identity carrier. Bearer requires browserAuthentication: false. Default: cookie. */
+  browserSessionTransport?: BrowserSessionTransport
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -110,7 +121,7 @@ export interface ConnectionConfig {
    * bind. An entry that is not a bare, canonical authority fails plugin load.
    */
   trustedHosts?: string[]
-  /** Absolute browser-session lifetime in days. Default: 30. */
+  /** Absolute independent browser-session lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
@@ -121,6 +132,7 @@ export const Config: z<ConnectionConfig> = z.object({
   browserAuthentication: z.boolean().default(true),
   browserSession: z.boolean().default(false),
   browserSessionCookieSameSite: z.union(['strict', 'none']).default('strict'),
+  browserSessionTransport: z.union(['cookie', 'bearer']).default('cookie'),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
@@ -138,8 +150,12 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const browserAuthentication = config?.browserAuthentication ?? true
   const browserSession = config?.browserSession ?? false
   const browserSessionCookieSameSite = config?.browserSessionCookieSameSite ?? 'strict'
-  // JDCloud deployments disable Harness launch authentication, so they still
-  // need an opaque browser cookie to keep Host state out of process-global keys.
+  const browserSessionTransport = config?.browserSessionTransport ?? 'cookie'
+  if (browserAuthentication && browserSessionTransport === 'bearer') {
+    throw new Error('client-connection: browserSessionTransport "bearer" requires browserAuthentication: false')
+  }
+  // Deployment-owned login still needs a browser identity to keep Host state
+  // out of process-global keys.
   const browserSessionEnabled = browserSession || !browserAuthentication
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
@@ -149,21 +165,31 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+  const browserSessionService = browserSessionEnabled
+    ? await BrowserSessionService.create(
+      ctx,
+      ctx.credentials,
+      cookieMaxAgeDays,
+      browserSessionCookieSameSite,
+      browserSessionTransport,
+    )
+    : undefined
   const connection = new HostConnectionService(
     ctx,
     trustedHosts,
     browserAuthentication
       ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
       : undefined,
-    browserSessionEnabled
-      ? await BrowserSessionService.create(ctx, ctx.credentials, cookieMaxAgeDays, browserSessionCookieSameSite)
-      : undefined,
+    browserSessionService,
     browserSessionEnabled,
   )
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
     webCtx.on('webserver/index-inject', (table) => {
       table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
+      if (browserSessionTransport === 'bearer') {
+        table.push({ kind: 'global', name: '__DSH_BROWSER_SESSION_TRANSPORT__', value: 'bearer' })
+      }
     })
     const fetchHandler = connection.createSharedFetchHandler(API_PATH)
     const route: WebRoute = {
@@ -176,10 +202,68 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
           res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
           return
         }
-        await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, maxRequestBodyBytes))
+        await connection.runWithBrowserIdentity(req, () =>
+          webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, maxRequestBodyBytes)))
       },
     }
     webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
+    if (browserSessionTransport === 'bearer' && browserSessionService !== undefined) {
+      const bootstrap: WebRoute = {
+        kind: 'exact',
+        path: BROWSER_SESSION_BOOTSTRAP_PATH,
+        handler: (req, res) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405)
+            res.end()
+            return
+          }
+          if (!isTrustedApiRequest(req, trustedHosts)) {
+            res.writeHead(403)
+            res.end('forbidden')
+            return
+          }
+          const session = browserSessionService.issueBearer(req)
+          res.writeHead(200, {
+            'cache-control': 'no-store',
+            'content-type': 'application/json; charset=utf-8',
+            'x-content-type-options': 'nosniff',
+          })
+          res.end(JSON.stringify(session))
+        },
+      }
+      const webSocketTicket: WebRoute = {
+        kind: 'exact',
+        path: BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
+        handler: (req, res) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405)
+            res.end()
+            return
+          }
+          const rejection = connection.requestRejection(req)
+          if (rejection !== undefined) {
+            res.writeHead(rejection)
+            res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+            return
+          }
+          const ticket = browserSessionService.issueWebSocketTicket(req)
+          res.writeHead(200, {
+            'cache-control': 'no-store',
+            'content-type': 'application/json; charset=utf-8',
+            'x-content-type-options': 'nosniff',
+          })
+          res.end(JSON.stringify({ ticket }))
+        },
+      }
+      webCtx.effect(
+        () => webCtx.webServer.register(bootstrap),
+        `client-connection: ${BROWSER_SESSION_BOOTSTRAP_PATH} route`,
+      )
+      webCtx.effect(
+        () => webCtx.webServer.register(webSocketTicket),
+        `client-connection: ${BROWSER_SESSION_WEBSOCKET_TICKET_PATH} route`,
+      )
+    }
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

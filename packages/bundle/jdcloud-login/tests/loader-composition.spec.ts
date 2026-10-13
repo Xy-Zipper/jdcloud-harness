@@ -163,7 +163,7 @@ describe('JDCloud login through a real Loader composition', () => {
     })
     expect(rows.find(row => row.id === 'connection')).toMatchObject({
       config: {
-        browserSessionCookieSameSite: { __jsExpr: 'process.env.JDCLOUD_BROWSER_SESSION_SAME_SITE' },
+        browserSessionTransport: 'bearer',
       },
     })
     expect(rows.find(row => row.id === 'ui-jdcloud-login')).toMatchObject({

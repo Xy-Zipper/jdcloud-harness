@@ -32,17 +32,15 @@ dsh plugin --profile web add @deepseek-ai/dsh-jdcloud-login
 ```dotenv
 JDCLOUD_DEFAULT_BASE_URL=https://example.com
 JDCLOUD_IFRAME_PARENT_ORIGIN=https://portal.example
-JDCLOUD_BROWSER_SESSION_SAME_SITE=none
 ```
 
 `JDCLOUD_DEFAULT_BASE_URL` 是账号密码登录的初始地址。Token 中转链接可以传入任意语法合法的绝对 HTTP(S) 服务地址；Host 不使用白名单，并会把传入的 Token 发送到该目的地。登录成功后，规范化服务地址、Token、账号、当前租户和可用租户列表会保存在 Host credentials provider 中。Web Client 会在侧边栏显示账号和租户；账号菜单会标记当前租户，在不返回登录页的情况下切换全部可用租户，并提供“退出登录”。
 
-默认的窗口打开流程不需要设置这两个 iframe 变量。`JDCLOUD_IFRAME_PARENT_ORIGIN` 接受嵌入 `/login/transfer` 的父页面准确 HTTP(S) origin，不能包含路径。只有允许全部网站嵌入转发页时才将其设为 `*`；该配置允许任意网站实施点击劫持。同站 iframe 可以保留默认的 `JDCLOUD_BROWSER_SESSION_SAME_SITE=strict`。跨站 iframe 应将其设为 `none`；Connection 随后输出 `SameSite=None; Secure`，因此 Harness 的公开 URL 必须使用 HTTPS。这两个运行时变量只要求重启进程或容器，不要求重新构建浏览器资源。
+默认的窗口打开流程不需要设置 `JDCLOUD_IFRAME_PARENT_ORIGIN`。该变量接受嵌入 `/login/transfer` 的父页面准确 HTTP(S) origin，不能包含路径。只有允许全部网站嵌入转发页时才将其设为 `*`；该配置允许任意网站实施点击劫持。bundle 使用 Connection 的 Bearer 浏览器会话载体，因此跨站 iframe 不依赖第三方 cookie，也可以通过 HTTP 运行。明文 HTTP 无法防止网络观察者或中间节点窃取 bearer 凭证。修改这个运行时变量只要求重启进程或容器，不要求重新构建浏览器资源。
 
 Docker Compose 部署可通过 `JDCLOUD_PRODUCT_NAME` 设置浏览器标题、侧栏产品名、PWA 名称及模型可见的 Web 品牌；默认值为 `LSY-Agent`。浏览器资源会在构建时嵌入标题，因此修改后需要重新构建镜像。
 
-该 bundle 会关闭 Harness 浏览器启动 token，并启用 HttpOnly 浏览器会话 cookie。因此登录记录按浏览器隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。该 bundle 将每个租户用户的新文件放在 `/workspace/jdcloud-users/<归属哈希>` 下；`JDCLOUD_USER_WORKSPACE_DIR` 可覆盖持久化父目录。旧的 Host 主目录不迁移。目录浏览、工作区登记和会话创建限制在当前用户目录内，但终端命令和通过完整路径读取文件仍不受此限制。
-该 bundle 不显示内测声明及首次运行自动弹出的 API Key 对话框；模型设置页与手动填写 API Key 的入口保持可用。
+该 bundle 会关闭 Harness 浏览器启动 token，并启用绑定 authority 的 Bearer 浏览器会话。Client 将 token 保存到当前标签页的 `sessionStorage`，把它添加到同源 HTTP 请求，并在 WebSocket 升级时使用短期单次 ticket。因此登录记录按浏览器标签页隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。该 bundle 将每个租户用户的新文件放在 `/workspace/jdcloud-users/<归属哈希>` 下；`JDCLOUD_USER_WORKSPACE_DIR` 可覆盖持久化父目录。旧的 Host 主目录不迁移。目录浏览、工作区登记和会话创建限制在当前用户目录内，但终端命令和通过完整路径读取文件仍不受此限制。该 bundle 不显示内测声明及首次运行自动弹出的 API Key 对话框；模型设置页与手动填写 API Key 的入口保持可用。
 
 对于空白新对话，可写功能 row 会展示至少拥有一项数据写权限的 type `3` 表单与 type `4` 流程。点击一次会插入一个结构化功能标签并关闭面板；删除标签后面板恢复。对于每个已提交用户 Prompt，低代码工具 row 会注入能力快照，并提供由 Host 执行时强制校验当前权限的数据工具。
 

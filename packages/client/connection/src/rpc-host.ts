@@ -117,6 +117,17 @@ export class HostConnectionService extends Service implements HostConnectionHand
     return rejection === undefined ? { peer: this.operator } : { rejection }
   }
 
+  /** Apply the trust fence and consume the configured WebSocket authentication carrier. */
+  admitWebSocket(request: ConnectionTrustRequest): PeerAdmission {
+    if (!isTrustedApiRequest(request, this.trustedHosts)) return { rejection: 403 }
+    if (this.browserAuth !== undefined && !this.browserAuth.isAuthenticated(request)) return { rejection: 401 }
+    if (this.browserSessionRequired
+      && (this.browserSession === undefined || !this.browserSession.admitWebSocket(request))) {
+      return { rejection: 401 }
+    }
+    return { peer: this.operator }
+  }
+
   /** Authenticate an index request through the process-token exchange or cookie. */
   authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
     if (this.browserAuth !== undefined) return this.browserAuth.authorizeIndex(request, response)
@@ -130,7 +141,8 @@ export class HostConnectionService extends Service implements HostConnectionHand
 
   /** Run one admitted operation with its optional JDCloud browser identity. */
   runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
-    return this.browserSession === undefined || !this.browserSession.accepts(request)
+    return this.browserSession === undefined
+      || (!this.browserSessionRequired && !this.browserSession.accepts(request))
       ? operation()
       : this.browserSession.run(request, operation)
   }

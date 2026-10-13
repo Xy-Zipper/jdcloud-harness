@@ -3,7 +3,11 @@ import { once } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { type RawData } from 'ws'
 import { Context, symbols } from '@deepseek-ai/cordis'
-import { apply as applyConnection, inject as connectionInject } from '@deepseek-ai/dsh-client-connection'
+import {
+  apply as applyConnection,
+  inject as connectionInject,
+  type ConnectionConfig,
+} from '@deepseek-ai/dsh-client-connection'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { AppReady } from '@deepseek-ai/dsh-cmdline'
@@ -1385,12 +1389,48 @@ describe('Typert Remote streams', () => {
     rejected.resume()
     ;(request as { abort(): void }).abort()
   })
+
+  it('accepts one WebSocket upgrade for each Bearer session ticket', async () => {
+    const { ctx } = await setup(true, {}, undefined, {
+      browserAuthentication: false,
+      browserSessionTransport: 'bearer',
+    })
+    const origin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+    const bootstrap = await fetch(`${origin}/api/browser-session`, { method: 'POST' })
+    const session = await bootstrap.json() as { readonly token: string }
+    const issued = await fetch(`${origin}/api/browser-session/websocket-ticket`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${session.token}` },
+    })
+    const { ticket } = await issued.json() as { readonly ticket: string }
+    const url = `${origin.replace('http:', 'ws:')}/api/remote.mux?ticket=${ticket}`
+    const socket = new WebSocket(url)
+    await once(socket, 'open')
+    const frames: Record<string, unknown>[] = []
+    socket.on('message', (data) => { frames.push(JSON.parse(rawText(data)) as Record<string, unknown>) })
+    sendOpen(socket, 'sync', 'feed/sync', { label: 'bearer' })
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({ type: 'item', streamId: 'sync', value: 'bearer:one' })
+    })
+    socket.close()
+    await once(socket, 'close')
+
+    const replay = new WebSocket(url)
+    replay.on('error', () => {})
+    const responseEvent: unknown[] = await once(replay, 'unexpected-response')
+    const request = responseEvent[0]
+    const response = responseEvent[1] as { statusCode?: number; resume(): void }
+    expect(response.statusCode).toBe(401)
+    response.resume()
+    ;(request as { abort(): void }).abort()
+  })
 })
 
 async function setup(
   transport: boolean,
   gatewayConfig: GatewayConfig = {},
   ready?: AppReady,
+  connectionConfig: ConnectionConfig = {},
 ): Promise<{ readonly ctx: Context; readonly service: FeedService }> {
   const ctx = new Context()
   roots.push(ctx)
@@ -1402,7 +1442,7 @@ async function setup(
   await ctx.plugin(TypertRegistry)
   await ctx.plugin(TypertGatewayService, gatewayConfig)
   if (transport) {
-    await ctx.plugin({ inject: [...connectionInject], apply: applyConnection })
+    await ctx.plugin({ inject: [...connectionInject], apply: applyConnection }, connectionConfig)
   }
   await ctx.plugin(FeedService)
   ctx.typert.register({

@@ -2,14 +2,19 @@
 description: "在本地构建 JDCloud Harness 镜像，导出到 Linux 服务器并离线启动。"
 ---
 
-
 $Env:DSH_CLIENT_COMMIT_HASH = (git rev-parse HEAD).Trim()
-$Env:DOCKER_BUILDKIT = "0"
-$Env:http_proxy="http://127.0.0.1:35347";$Env:https_proxy="http://127.0.0.1:35347"
+
+Remove-Item Env:DOCKER_BUILDKIT -ErrorAction SilentlyContinue
+
+$Env:http_proxy = "http://127.0.0.1:35347"
+$Env:https_proxy = "http://127.0.0.1:35347"
+
 docker build `
   --build-arg "DSH_CLIENT_COMMIT_HASH=$Env:DSH_CLIENT_COMMIT_HASH" `
   --tag jdcloud-harness:local `
   .
+
+
 # caddy:2-alpine
 # docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
 
@@ -67,15 +72,14 @@ scp .\jdcloud-harness.tar .\compose.yaml user@<服务器地址>:/opt/jdcloud-har
 GPT_API_KEY=实际模型密钥
 JDCLOUD_HARNESS_TRUSTED_HOST=实际域名或服务器IP
 JDCLOUD_HARNESS_PORT=3080
-JDCLOUD_DEFAULT_BASE_URL=https://mi.kindoucloud.com
-JDCLOUD_IFRAME_PARENT_ORIGIN=https://实际外链页面域名
-JDCLOUD_BROWSER_SESSION_SAME_SITE=none
+JDCLOUD_DEFAULT_BASE_URL=http://内部服务地址
+JDCLOUD_IFRAME_PARENT_ORIGIN=http://实际外链页面地址
 TZ=Asia/Hong_Kong
 ```
 
-`JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。父页面与 Harness 属于跨站关系时，设置 `JDCLOUD_BROWSER_SESSION_SAME_SITE=none`；应用会输出带 `SameSite=None; Secure` 的 `dsh-user-session` cookie，因此外部访问 Harness 必须使用 HTTPS。同站 iframe 可以保留默认值 `strict`。
+`JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。Docker overlay 使用 Bearer 浏览器会话：token 只保存在当前标签页的 `sessionStorage`，同源 Fetch 与 RPC 通过 Authorization header 携带 token，WebSocket 使用短期单次 ticket。因此跨站 iframe 不再依赖第三方 cookie，也不要求 HTTPS。
 
-Docker 启动 overlay 会把 `JDCLOUD_BROWSER_SESSION_SAME_SITE` 传给 Connection 配置。修改 `.env` 后必须重建容器；根页面响应中的 `Set-Cookie` 应与配置对应，跨站模式应包含 `SameSite=None; Secure`。
+Bearer 只能解决浏览器拒绝跨站 cookie 的问题，不会加密 HTTP 流量。使用明文 HTTP 时，网络观察者或中间节点仍可窃取会话 token；能部署受信任 HTTPS 时仍应优先使用 HTTPS。修改 `.env` 或 `compose.yaml` 后必须重建容器；修改本仓库代码后还必须重新构建并加载镜像。
 
 加载镜像并启动。`--no-build --pull never` 确保服务器不会尝试在线构建或拉取业务镜像。
 
@@ -88,7 +92,7 @@ docker compose up -d --no-build --pull never
 docker compose ps
 ```
 
-根页面可能返回重定向，健康检查会将本地 `3080` 端口的 `2xx` 或 `3xx` 响应视为服务已就绪。修改 `compose.yaml` 后不需要重新构建镜像，但需要重建容器。
+JDCloud Bearer 部署的根页面直接返回 `2xx`；健康检查仍将本地 `3080` 端口的 `2xx` 或 `3xx` 响应视为服务已就绪。修改 `compose.yaml` 后不需要重新构建镜像，但需要重建容器。
 
 ## 修改模型配置
 

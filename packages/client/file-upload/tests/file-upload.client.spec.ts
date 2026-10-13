@@ -274,17 +274,19 @@ describe('file upload service', () => {
     vi.stubGlobal('Worker', FakeWorker)
     vi.stubGlobal('document', { baseURI: 'https://harness.test/mount/' })
     const ctx = new Context()
+    ctx.provide('connection', { authorizationHeader: () => Promise.resolve('Bearer browser-token') } as never)
     const fiber = ctx.plugin(FileUploadRuntime)
     await fiber
     const progress = vi.fn()
     const blob = new Blob(['bytes'])
     const pending = (ctx.fileUpload as FileUploadRuntime).post({ path: 'api/upload', body: blob, onProgress: progress })
+    await vi.waitFor(() => { expect(FakeWorker.last).toBeDefined() })
     const worker = FakeWorker.last
     if (worker === undefined) throw new Error('worker missing')
     expect(created).toHaveBeenCalledOnce()
     expect(revoked).toHaveBeenCalledWith('blob:worker')
     expect(worker.postMessage).toHaveBeenCalledWith({
-      url: 'https://harness.test/mount/api/upload', body: blob, headers: {},
+      url: 'https://harness.test/mount/api/upload', body: blob, headers: { authorization: 'Bearer browser-token' },
     })
     worker.onmessage?.({ data: { kind: 'progress', loaded: 4, total: 5 } } as MessageEvent)
     worker.onmessage?.({ data: { kind: 'progress', loaded: 6 } } as MessageEvent)

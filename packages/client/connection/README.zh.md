@@ -36,15 +36,15 @@ kind: "package-reference"
 <a id="browser-authentication-and-request-trust"></a>
 ## 浏览器认证与请求信任
 
-每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的应用 URL，保留调用方的 authority 与挂载；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `./`，移除令牌并保留请求目录。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。HTTP 载体不在根路径交换之外接受 query token，也不接受 Authorization header token。
+每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的应用 URL，保留调用方的 authority 与挂载；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `./`，移除令牌并保留请求目录。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。该启动认证流程不在根路径交换之外接受 query token，也不接受 Authorization header token。
 
-当部署自己的访问控制替代 Harness 启动令牌时，设置 `browserAuthentication: false`。根页面随后无需令牌即可打开，但 Connection 仍会签发并要求独立的 `dsh-user-session` cookie，避免 Host 状态回退到进程级共享登录。Host/Origin 校验仍然生效，对不可信或跨站请求返回 403；缺少浏览器身份时返回 401。需要按浏览器保存登录状态的部署也可以显式启用 `browserSession`。`browserSessionCookieSameSite` 默认为 `strict`；只有通过 HTTPS 提供跨站 iframe 时才将其设为 `none`。`none` 策略会添加 `Secure`，因此浏览器不会通过 HTTP 保存该 cookie。
+当部署自己的访问控制替代 Harness 启动令牌时，设置 `browserAuthentication: false`。Connection 仍要求独立的浏览器身份，避免 Host 状态回退到进程级共享登录；需要在启动认证之外获得同等隔离的部署可以显式启用 `browserSession`。`browserSessionTransport` 默认为 `cookie`，会签发 `dsh-user-session`；`browserSessionCookieSameSite` 默认为 `strict`，而 `none` 会添加 `Secure`，因此要求 HTTPS。`bearer` 载体只能与 `browserAuthentication: false` 一起使用：根页面直接打开，Client 从 `/api/browser-session` 获取绑定 authority 的 token，将其保存在当前标签页的 `sessionStorage`，并添加到同源 Fetch 与 RPC 请求。每次 WebSocket 升级前会立即用该 token 换取一个有效期 30 秒、只能使用一次的 ticket。Host/Origin 校验仍然生效：不可信或跨站请求返回 403，缺少浏览器身份时返回 401。
 
-cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；`BrowserAuth` 在 Connection 激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。启动认证 cookie 携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在确定性名称与签名 payload 中同时绑定规范化 hostname 和 port。它是 host-only、`Path=/`、`HttpOnly`、`SameSite=Strict`；随附服务器使用 loopback HTTP，因此刻意不设置 `Secure`。
+浏览器会话签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；Connection 在激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。独立 cookie 与 Bearer token 都携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在签名 payload 中绑定规范化 hostname 和 port。cookie 是 host-only、`Path=/` 和 `HttpOnly`；配置的 SameSite 策略决定是否同时设置 `Secure`。单独的启动认证 cookie 仍为 host-only、`Path=/`、`HttpOnly` 和 `SameSite=Strict`，并且因随附服务器使用 loopback HTTP 而刻意不设置 `Secure`。
 
 认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。`dsh web --host 0.0.0.0` 仍不受支持。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
 
-每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与认证检查，以拒绝状态或操作者作答；`/api` 路由与 Gateway 的 WebSocket 升级都经它接纳，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
+每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与 HTTP 认证检查；配置 Bearer 载体时，`admitWebSocket(request)` 还会消费对应的 ticket。两种方法都以拒绝状态或操作者作答。`/api` 路由与 Gateway WebSocket 升级分别使用对应的接纳方法，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
 
 通过认证的共享 HTTP 请求在传输请求体之前经过 `connection/request` waterfall。监听器可以拒绝新请求，或等待 `next()` 直到响应完成；释放所属 fiber 会移除准入行为。Desktop 使用此扩展点，在已批准的安装期间锁住新的 API 工作，而不取消已接纳的工作。客户端断开会中止处理函数的信号；桥接器停止写入 socket，并排空剩余响应块。WebSocket 流仍由 API Gateway 负责。
 
@@ -74,8 +74,9 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 <a id="known-limitations-and-deferred-work"></a>
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
-- **启动认证 cookie 与默认的独立浏览器会话 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。跨站 `browserSessionCookieSameSite: none` 策略会添加 `Secure`，因此要求使用 HTTPS。
-- **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
+- **明文 HTTP 无法保护传输中的浏览器凭证**：Bearer 载体允许跨站 iframe 在没有第三方 cookie 或 HTTPS 的情况下工作，但网络观察者或中间节点可以窃取 Authorization token 或 WebSocket ticket。安全部署仍应使用 HTTPS。
+- **原生 URL 元素不会经过 Fetch 包装层**：`<img src>` 等浏览器请求无法添加 Bearer header。Client 功能若要让这类元素读取受认证路由，必须先获取字节并使用 blob URL，而不能把长期 token 暴露在 query string 中。
+- **没有浏览器会话 logout 操作**：清除 cookie 或当前标签页的 `sessionStorage` 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 
 <a id="dev-note"></a>

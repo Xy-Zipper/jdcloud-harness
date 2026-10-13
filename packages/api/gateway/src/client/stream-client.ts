@@ -58,6 +58,11 @@ export class RemoteStreamMuxClient {
   private running = false
   private disposed = false
 
+  /** @param authorizeWebSocketUrl - adds the physical carrier's authentication immediately before each attempt. */
+  constructor(
+    private readonly authorizeWebSocketUrl: (url: string) => string | Promise<string> = url => url,
+  ) {}
+
   /** Ensure a physical attempt exists, following the current attempt once if needed. */
   start(): void {
     if (this.disposed) return
@@ -218,20 +223,22 @@ export class RemoteStreamMuxClient {
   }
 
   private connect(): Promise<WebSocket> {
-    const socket = new WebSocket(remoteStreamUrl())
     const connecting = new Promise<WebSocket>((resolve, reject) => {
       let settled = false
+      let socket: WebSocket | undefined
       const rejectCandidate = (error: Error): void => {
+        if (settled) return
         settled = true
-        socket.removeEventListener('open', opened)
-        socket.removeEventListener('error', failed)
-        socket.removeEventListener('message', received)
-        socket.removeEventListener('close', closed)
+        socket?.removeEventListener('open', opened)
+        socket?.removeEventListener('error', failed)
+        socket?.removeEventListener('message', received)
+        socket?.removeEventListener('close', closed)
         this.cancelCandidate = undefined
-        socket.close()
+        socket?.close()
         reject(error)
       }
       const opened = (): void => {
+        if (socket === undefined) return
         settled = true
         this.cancelCandidate = undefined
         this.socket = socket
@@ -239,6 +246,7 @@ export class RemoteStreamMuxClient {
         resolve(socket)
       }
       const failed = (): void => {
+        if (socket === undefined) return
         if (!settled) {
           rejectCandidate(new RemoteStreamCarrierError(
             'api gateway: Remote stream WebSocket failed to open',
@@ -250,6 +258,7 @@ export class RemoteStreamMuxClient {
         socket.close()
       }
       const closed = (): void => {
+        if (socket === undefined) return
         if (!settled) {
           rejectCandidate(new RemoteStreamCarrierError(
             'api gateway: Remote stream WebSocket closed before opening',
@@ -258,12 +267,30 @@ export class RemoteStreamMuxClient {
         }
         this.lost(socket)
       }
-      const received = (event: MessageEvent): void => { this.receive(socket, event.data) }
+      const received = (event: MessageEvent): void => {
+        if (socket !== undefined) this.receive(socket, event.data)
+      }
+      const authorized = (url: string): void => {
+        if (settled) return
+        socket = new WebSocket(url)
+        socket.addEventListener('open', opened, { once: true })
+        socket.addEventListener('error', failed, { once: true })
+        socket.addEventListener('message', received)
+        socket.addEventListener('close', closed, { once: true })
+      }
+      const authorizationFailed = (error: unknown): void => {
+        rejectCandidate(error instanceof Error
+          ? error
+          : new RemoteStreamCarrierError('api gateway: Remote stream WebSocket authorization failed', { cause: error }))
+      }
       this.cancelCandidate = rejectCandidate
-      socket.addEventListener('open', opened, { once: true })
-      socket.addEventListener('error', failed, { once: true })
-      socket.addEventListener('message', received)
-      socket.addEventListener('close', closed, { once: true })
+      try {
+        const result = this.authorizeWebSocketUrl(remoteStreamUrl())
+        if (typeof result === 'string') authorized(result)
+        else void result.then(authorized, authorizationFailed)
+      } catch (error: unknown) {
+        authorizationFailed(error)
+      }
     })
     return connecting
   }
@@ -288,7 +315,6 @@ export class RemoteStreamMuxClient {
         reject: (error) => {
           cleanup()
           // AbortSignal.reason belongs to the caller and may intentionally be a non-Error sentinel.
-          // oxlint-disable-next-line typescript/prefer-promise-reject-errors
           reject(error)
         },
       }

@@ -6,7 +6,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
-import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
+import {
+  BrowserSessionService,
+  type BrowserSessionTransport,
+} from '../../../client/connection/src/browser-session.ts'
 import JdcloudAuthController, {
   JdcloudApiError,
   JdcloudClient,
@@ -114,7 +117,7 @@ describe('JDCloud user directories', () => {
   })
 })
 
-async function bootWithBrowserSession(fetcher: typeof fetch) {
+async function bootWithBrowserSession(fetcher: typeof fetch, transport: BrowserSessionTransport = 'cookie') {
   vi.stubGlobal('fetch', fetcher)
   const ctx = new Context()
   contexts.push(ctx)
@@ -123,7 +126,13 @@ async function bootWithBrowserSession(fetcher: typeof fetch) {
   const sessionFiber = ctx.plugin({
     inject: ['credentials'],
     apply: async (sessionCtx: Context) => {
-      browserSession = await BrowserSessionService.create(sessionCtx, sessionCtx.credentials)
+      browserSession = await BrowserSessionService.create(
+        sessionCtx,
+        sessionCtx.credentials,
+        30,
+        'strict',
+        transport,
+      )
     },
   })
   await sessionFiber.await()
@@ -146,6 +155,18 @@ function browserCookie(browserSession: BrowserSessionService, authority: string)
   const cookie = response.headers['set-cookie']?.split(';', 1)[0]
   if (cookie === undefined) throw new Error('browser session cookie was not created')
   return cookie
+}
+
+function browserRequest(
+  browserSession: BrowserSessionService,
+  authority: string,
+  transport: BrowserSessionTransport,
+) {
+  if (transport === 'cookie') {
+    return { headers: { host: authority, cookie: browserCookie(browserSession, authority) } }
+  }
+  const session = browserSession.issueBearer({ headers: { host: authority } })
+  return { headers: { host: authority, authorization: `Bearer ${session.token}` } }
 }
 
 describe('minimal JDCloud HTTP client', () => {
@@ -424,47 +445,48 @@ describe('JDCloud authentication controller', () => {
       .rejects.toThrow('JDCloud authentication requires a browser session')
   })
 
-  it('keeps browser logins and logout records independent', async () => {
-    const fetcher = vi.fn(async (url: string | URL) => {
-      const pathname = new URL(url).pathname
-      if (pathname.endsWith('/oauth/login')) return json({ code: 200, msg: 'ok', data: { token: 'bearer token' } })
-      if (pathname.endsWith('/getCorpList')) return json({ code: 200, msg: 'ok', data: corpData() })
-      if (pathname.endsWith('/currentUser')) return json({ code: 200, msg: 'ok', data: currentUserData() })
-      throw new Error(`unexpected JDCloud path ${pathname}`)
-    })
-    const { ctx, browserSession } = await bootWithBrowserSession(fetcher as typeof fetch)
-    const firstCookie = browserCookie(browserSession, 'harness.example')
-    const secondCookie = browserCookie(browserSession, 'harness.example')
-    const firstRequest = { headers: { host: 'harness.example', cookie: firstCookie } }
-    const secondRequest = { headers: { host: 'harness.example', cookie: secondCookie } }
-    let firstId = ''
-    let secondId = ''
+  it.each<BrowserSessionTransport>(['cookie', 'bearer'])(
+    'keeps browser logins and logout records independent with %s sessions',
+    async (transport) => {
+      const fetcher = vi.fn(async (url: string | URL) => {
+        const pathname = new URL(url).pathname
+        if (pathname.endsWith('/oauth/login')) return json({ code: 200, msg: 'ok', data: { token: 'bearer token' } })
+        if (pathname.endsWith('/getCorpList')) return json({ code: 200, msg: 'ok', data: corpData() })
+        if (pathname.endsWith('/currentUser')) return json({ code: 200, msg: 'ok', data: currentUserData() })
+        throw new Error(`unexpected JDCloud path ${pathname}`)
+      })
+      const { ctx, browserSession } = await bootWithBrowserSession(fetcher as typeof fetch, transport)
+      const firstRequest = browserRequest(browserSession, 'harness.example', transport)
+      const secondRequest = browserRequest(browserSession, 'harness.example', transport)
+      let firstId = ''
+      let secondId = ''
 
-    await browserSession.run(firstRequest, async () => {
-      firstId = browserSession.currentIdRequired()
-      await ctx.jdcloudAuthController.login({
-        baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
-      }, AbortSignal.timeout(1000))
-    })
-    await browserSession.run(secondRequest, async () => {
-      secondId = browserSession.currentIdRequired()
-      await ctx.jdcloudAuthController.login({
-        baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
-      }, AbortSignal.timeout(1000))
-    })
+      await browserSession.run(firstRequest, async () => {
+        firstId = browserSession.currentIdRequired()
+        await ctx.jdcloudAuthController.login({
+          baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+        }, AbortSignal.timeout(1000))
+      })
+      await browserSession.run(secondRequest, async () => {
+        secondId = browserSession.currentIdRequired()
+        await ctx.jdcloudAuthController.login({
+          baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret',
+        }, AbortSignal.timeout(1000))
+      })
 
-    expect(firstId).not.toBe(secondId)
-    const firstKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(firstId).digest('hex')}`)
-    const secondKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(secondId).digest('hex')}`)
-    expect(await ctx.credentials.readRecord(firstKey)).toBeDefined()
-    expect(await ctx.credentials.readRecord(secondKey)).toBeDefined()
+      expect(firstId).not.toBe(secondId)
+      const firstKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(firstId).digest('hex')}`)
+      const secondKey = credentialKey('jdcloud-auth-controller', `login-${createHash('sha256').update(secondId).digest('hex')}`)
+      expect(await ctx.credentials.readRecord(firstKey)).toBeDefined()
+      expect(await ctx.credentials.readRecord(secondKey)).toBeDefined()
 
-    await browserSession.run(firstRequest, () => ctx.jdcloudAuthController.logout())
-    await expect(browserSession.run(firstRequest, () => ctx.jdcloudAuthController.status()))
-      .resolves.toMatchObject({ authenticated: false })
-    await expect(browserSession.run(secondRequest, () => ctx.jdcloudAuthController.status()))
-      .resolves.toMatchObject({ authenticated: true, username: 'user' })
-  })
+      await browserSession.run(firstRequest, () => ctx.jdcloudAuthController.logout())
+      await expect(browserSession.run(firstRequest, () => ctx.jdcloudAuthController.status()))
+        .resolves.toMatchObject({ authenticated: false })
+      await expect(browserSession.run(secondRequest, () => ctx.jdcloudAuthController.status()))
+        .resolves.toMatchObject({ authenticated: true, username: 'user' })
+    },
+  )
 
   it('uses an empty initial address for omitted or blank configuration', async () => {
     const omitted = await boot(vi.fn() as typeof fetch, {})
