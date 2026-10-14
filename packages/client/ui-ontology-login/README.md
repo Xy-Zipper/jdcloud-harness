@@ -27,7 +27,7 @@ English | [中文](README.zh.md)
 
 Mount this Client plugin through the [`dsh-ontology-login`](../../bundle/ontology-login/README.md) bundle. The Host controller supplies the service address, so the page accepts only account and password fields. Login and logout clear the selected Workspace or Session view before switching the visible identity.
 
-The plugin registers localized Chinese and English copy, an Ontology graph mark, the guarded root page, and the sidebar account seat. Credential-record notifications refresh only records owned by `ontology-auth-controller`.
+The plugin registers localized Chinese and English copy, an Ontology graph mark, the guarded root page, and the sidebar account seat. Credential notifications refresh the identity only for the current browser's `ontology-auth-controller/login-*` record; Workspace and Session owner grants preserve the active view.
 
 -----
 

@@ -14,7 +14,7 @@ import { OntologyBrandMark, OntologyBrandName } from './Brand.tsx'
 import { LoginPage, type OntologyLoginInjected } from './LoginPage.tsx'
 import { en, NS, zh } from './locales.ts'
 
-const AUTH_RECORD_KEY = 'ontology-auth-controller/'
+const AUTH_LOGIN_RECORD_PREFIX = 'ontology-auth-controller/login-'
 const BRAND_PRIORITY = -10
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -138,7 +138,9 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   ctx.effect(() => installOntologyBrand(ctx), 'ui-ontology-login: Ontology brand')
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
-      if (!active || !String(key).startsWith(AUTH_RECORD_KEY)) return
+      // Resource ownership grants share the controller namespace but do not
+      // change the current browser login or invalidate its selected Session.
+      if (!active || !String(key).startsWith(AUTH_LOGIN_RECORD_PREFIX)) return
       resetIdentityView()
       void refresh()
     })

@@ -666,6 +666,30 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
     }
   }, SPAWN_TIMEOUT_MS + 30_000)
 
+  it('rejects a Web profile whose local dependency disappeared after a checkout change', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-broken-web-profile-link-'))
+    const profile = join(home, 'profiles', 'web')
+    mkdirSync(profile, { recursive: true })
+    writeFileSync(join(profile, 'package.json'), JSON.stringify({
+      name: 'dsh-profile-web',
+      private: true,
+      dependencies: {
+        '@example/branch-bundle': 'link:./missing-branch-bundle',
+      },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } },
+    }))
+    try {
+      const result = await runBuiltBin(['web', '--help'], { DSH_HOME: home })
+      expect(result.code).toBe(1)
+      expect(result.stdout).toBe('')
+      expect(result.stderr).toContain('local dependencies missing from the current checkout')
+      expect(result.stderr).toContain('@example/branch-bundle')
+      expect(result.stderr).toContain('dsh plugin --profile "web" remove "@example/branch-bundle"')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, SPAWN_TIMEOUT_MS + 30_000)
+
   it('creates a custom profile from the shipped web template before booting it', async () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-from-default-profile-'))
     try {

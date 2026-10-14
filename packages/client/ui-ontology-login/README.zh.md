@@ -27,7 +27,7 @@ kind: "package-reference"
 
 通过 [`dsh-ontology-login`](../../bundle/ontology-login/README.zh.md) bundle 挂载此 Client 插件。服务地址由 Host controller 提供，因此页面只接受账号和密码。登录与注销会在切换可见身份前清除已选 Workspace 或 Session 视图。
 
-插件注册本地化的中英文文案、Ontology 图结构标记、受保护的根页面和侧栏账号席位。Credential record 通知只刷新 `ontology-auth-controller` 拥有的 record。
+插件注册本地化的中英文文案、Ontology 图结构标记、受保护的根页面和侧栏账号席位。只有当前浏览器的 `ontology-auth-controller/login-*` record 通知会刷新身份；Workspace 与 Session owner grant 会保留当前视图。
 
 -----
 

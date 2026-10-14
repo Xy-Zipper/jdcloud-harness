@@ -91,14 +91,18 @@ describe('Ontology login browser plugin', () => {
     await fiber.dispose()
   })
 
-  it('ignores unrelated credential notifications and refreshes its own record', async () => {
+  it('refreshes only login credential notifications and ignores resource owner grants', async () => {
     const b = await bench(true)
     const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installOntologyLoginUi })
     await fiber.await()
     b.emitRecord('unrelated-auth-controller/login')
     expect(b.status).not.toHaveBeenCalled()
-    b.emitRecord('ontology-auth-controller/record')
+    b.emitRecord('ontology-auth-controller/owner-session-resource')
+    expect(b.status).not.toHaveBeenCalled()
+    expect(b.clearSelection).not.toHaveBeenCalled()
+    b.emitRecord('ontology-auth-controller/login-browser')
     await vi.waitFor(() => { expect(b.status).toHaveBeenCalledOnce() })
+    expect(b.clearSelection).toHaveBeenCalledOnce()
     await fiber.dispose()
   })
 })
