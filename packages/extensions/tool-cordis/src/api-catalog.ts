@@ -2387,6 +2387,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'user-invocable skill metadata without loading skill bodies.',
         throws: ['RemoteError when the Session cannot be inspected or no registry can serve it.'],
       },
+      {
+        signature: '@Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>',
+        description: 'Install one user-invocable SKILL.md in the Session project\'s `.dsh/skills` directory.',
+        parameters: [{ name: 'request', description: 'Session identity and complete UTF-8 Markdown document.' }, { name: 'signal', description: 'caller lifetime carried by the Remote transport.' }],
+        returns: 'installed metadata for optimistic catalog display.',
+        throws: ['RemoteError when validation, ownership, containment, or the guarded create fails.'],
+      },
     ],
   },
   {
@@ -6799,6 +6806,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SkillEntry',
     declaration: 'export interface SkillEntry {\n    readonly path?: string;\n    readonly name: string;\n    readonly description: string;\n    readonly whenToUse?: string;\n    readonly modelInvocable: boolean;\n}',
+  },
+  {
+    name: 'SkillInstallRequest',
+    declaration: 'export interface SkillInstallRequest {\n    readonly sessionId: SessionId;\n    readonly content: string;\n}',
+  },
+  {
+    name: 'SkillInstallValue',
+    declaration: 'export interface SkillInstallValue {\n    readonly skill: SkillEntry;\n}',
   },
   {
     name: 'SkillInvocationPolicy',

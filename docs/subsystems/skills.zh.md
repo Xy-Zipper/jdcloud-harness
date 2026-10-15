@@ -234,7 +234,7 @@ interface Config {
 
 ## 浏览器 Session 目录
 
-`SkillListRequest` 通过 `sessionId` 指定一个 Session；`SkillListValue` 返回允许用户调用的条目，其中包含名称、描述、可选使用提示与模型调用可用性。`SessionSkillCatalog` 在不激活 Agent 的前提下读取 Session cwd 与记录的 preset。live Agent 可以提供其作用域 registry，冷 Session 则使用 preset 的 standing scope。
+`SkillListRequest` 通过 `sessionId` 指定一个 Session；`SkillListValue` 返回允许用户调用的条目，其中包含名称、描述、可选使用提示与模型调用可用性。`SkillInstallRequest` 携带一份完整的 `SKILL.md`，`SkillInstallValue` 返回已安装的元数据。`SessionSkillCatalog` 在不激活 Agent 的前提下读取 Session cwd 与记录的 preset；其安装器只会在校验 Session 所有权、工作区包含关系、frontmatter、调用策略与内容大小限制后创建项目内文件。live Agent 可以提供其作用域 registry，冷 Session 则使用 preset 的 standing scope。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -259,6 +259,15 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
  * @throws RemoteError when the Session cannot be inspected or no registry can serve it.
  */
 @Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>
+
+/**
+ * Install one user-invocable SKILL.md in the Session project's `.dsh/skills` directory.
+ * @param request - Session identity and complete UTF-8 Markdown document.
+ * @param signal - caller lifetime carried by the Remote transport.
+ * @returns installed metadata for optimistic catalog display.
+ * @throws RemoteError when validation, ownership, containment, or the guarded create fails.
+ */
+@Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
 ```
 
 Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)

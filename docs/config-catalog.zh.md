@@ -236,7 +236,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/api/ontology-auth-controller/src/index.ts:48`](../packages/api/ontology-auth-controller/src/index.ts)
+来源：[`packages/api/ontology-auth-controller/src/index.ts:49`](../packages/api/ontology-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 

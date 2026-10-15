@@ -234,7 +234,7 @@ The model-facing `skill({ name })` tool validates the kebab-case name, finds the
 
 ## Browser Session catalog
 
-`SkillListRequest` addresses one Session by `sessionId`; `SkillListValue` returns the user-invocable entries with name, description, optional usage guidance, and model-invocation availability. `SessionSkillCatalog` reads the Session cwd and recorded preset without activating an Agent. A live Agent may supply its scoped registry, while a cold Session uses the preset's standing scope.
+`SkillListRequest` addresses one Session by `sessionId`; `SkillListValue` returns the user-invocable entries with name, description, optional usage guidance, and model-invocation availability. `SkillInstallRequest` carries one complete `SKILL.md`, and `SkillInstallValue` returns its installed metadata. `SessionSkillCatalog` reads the Session cwd and recorded preset without activating an Agent; its installer creates the project-local file only after validating Session ownership, workspace containment, frontmatter, invocation policy, and the content-size limit. A live Agent may supply its scoped registry, while a cold Session uses the preset's standing scope.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -259,6 +259,15 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
  * @throws RemoteError when the Session cannot be inspected or no registry can serve it.
  */
 @Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>
+
+/**
+ * Install one user-invocable SKILL.md in the Session project's `.dsh/skills` directory.
+ * @param request - Session identity and complete UTF-8 Markdown document.
+ * @param signal - caller lifetime carried by the Remote transport.
+ * @returns installed metadata for optimistic catalog display.
+ * @throws RemoteError when validation, ownership, containment, or the guarded create fails.
+ */
+@Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
 ```
 
 Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)

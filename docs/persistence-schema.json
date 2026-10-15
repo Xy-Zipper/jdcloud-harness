@@ -44608,7 +44608,7 @@
         "packages/workflow/workflow/src/types.ts#WorkflowRunId"
       ],
       "sources": [
-        "packages/api/session-controller/src/types.ts:413",
+        "packages/api/session-controller/src/types.ts:439",
         "packages/attachment/attachment/src/brand.ts:6",
         "packages/compaction/compaction/src/brand.ts:4",
         "packages/core/session/src/types.ts:20",
@@ -58191,7 +58191,7 @@
       },
       "names": [],
       "sources": [
-        "packages/api/session-controller/src/types.ts:418"
+        "packages/api/session-controller/src/types.ts:444"
       ]
     },
     {
