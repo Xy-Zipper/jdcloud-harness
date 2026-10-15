@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行以及账号呈现。它会关闭共享 Harness 启动鉴权、启用签名 browser-session cookie，并安装 Ontology controller、模型工具与登录 UI。Ontology 会成为该 profile 的应用身份与授权层。
+`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行以及账号呈现。它会关闭共享 Harness 启动鉴权、启用标签页级 browser Bearer session，并安装 Ontology controller、模型工具与登录 UI。Ontology 会成为该 profile 的应用身份与授权层。
 
 ## 目录
 
@@ -46,7 +46,7 @@ ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 
 ### 获得的能力
 
-该 layer 把 Connection row 替换为 `browserAuthentication: false` 与 `browserSession: true`，插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。配置的用户 Workspace 目录会按稳定 Ontology 用户隔离文件。
+该 layer 把 Connection row 替换为 `browserAuthentication: false`、`browserSession: true` 与 `browserSessionTransport: bearer`。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。配置的用户 Workspace 目录会按稳定 Ontology 用户隔离文件。
 
 -----
 
@@ -76,7 +76,7 @@ ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 <a id="model-experience"></a>
 ## 模型体验
 
-通过 `@deepseek-ai/dsh-tool-ontology` 间接影响，该包负责 Ontology 指引、八个工具 schema 与已校验 Runtime 结果。
+通过 `@deepseek-ai/dsh-tool-ontology` 间接影响，该包负责 Ontology 指引、九个工具 schema 与已校验 Runtime 结果。
 
 #### KV Cache 影响
 

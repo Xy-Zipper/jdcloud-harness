@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-从配置的发布目录向浏览器提供已构建的 Web 壳。根路径与配置的 index 路径渲染包含启动信息的 index；已有资产直接提供，而缺失或非文件路径返回 404、路径遍历返回 403、不支持的方法返回 405。访问 index 需要有效的进程 token 或浏览器 cookie，但静态资产仍可公开访问。同一时间只能有一个实例处理未匹配的路由；第二个实例启动失败，卸载活动实例后，未匹配的请求返回 404。
+从配置的发布目录向浏览器提供已构建的 Web 壳。根路径与配置的 index 路径渲染包含启动信息的 index；已有资产直接提供，而缺失或非文件路径返回 404、路径遍历返回 403、不支持的方法返回 405。index 访问遵循 Connection 认证：启动 token 部署要求完成进程 token 与 cookie 的交换，Bearer 浏览器会话部署则在 Client 初始化身份之前提供 index。静态资产仍可公开访问。同一时间只能有一个实例处理未匹配的路由；第二个实例启动失败，卸载活动实例后，未匹配的请求返回 404。
 
 ## 目录
 
@@ -43,7 +43,7 @@ kind: "package-reference"
 
 所服务的 HTML 携带唯一的文档 base `<base href="./">`，位于每一条注入资源行之前，因此它冻结页面加载时所处的入口目录：shell 自身的应用目录相对引用与宿主的插件资源行都在服务该页面的挂载下解析。同一份 index 因而既服务源站根目录，也服务剥离前缀的代理所拥有的任一挂载；本插件只为 dist 根目录与配置的 index 路径渲染它。
 
-根路径与配置的 index 响应会在读取 HTML 前调用 `ctx.connection.authorizeIndex`。有效进程 token 会得到 303 重定向与持久浏览器 cookie；已有有效 cookie 时直接提供 index；其他 index 请求得到 Connection 所有的 401 响应。非 index 文件仍是公开静态资源。Token、cookie、过期时间与签名记录语义都归 Connection 所有。
+根路径与配置的 index 响应会在读取 HTML 前调用 `ctx.connection.authorizeIndex`。使用启动认证时，有效进程 token 会得到 303 重定向与持久浏览器 cookie，已有有效 cookie 时直接提供 index，其他 index 请求得到 Connection 所有的 401 响应。使用 Bearer 浏览器会话载体时，可信的 GET 或 HEAD 会获得 index，供 Client 请求当前标签页的会话；后续 API 请求仍须携带该身份。非 index 文件仍是公开静态资源。Token、cookie 或 Bearer 会话、过期时间与签名记录语义都归 Connection 所有。
 
 ### 可观察的失败
 

@@ -32,7 +32,7 @@ kind: "package-reference"
   name: '@deepseek-ai/dsh-client-file-upload'
 ```
 
-本包没有 Cordis 配置字段。`Blob` 在专用 Worker 内通过 XMLHttpRequest 发送，因此服务可以报告浏览器上传进度，并在浏览器提供总量时一并报告。`ReadableStream` 会转移给该 Worker，再增量传入 Fetch；进度只报告已消费字节，不包含总量。`AbortSignal` 会终止专用 Worker，或传递给页面自己提供的载体。精确字节使用生成的 Remote。
+本包没有 Cordis 配置字段。`Blob` 在专用 Worker 内通过 XMLHttpRequest 发送，因此服务可以报告浏览器上传进度，并在浏览器提供总量时一并报告。`ReadableStream` 会转移给该 Worker，再增量传入 Fetch；进度只报告已消费字节，不包含总量。启动 Worker 前，服务会向 Connection 获取当前 Authorization header，并把它添加到 Worker 的 XMLHttpRequest 或 Fetch 请求；页面 realm 的 Fetch 包装层无法进入 Worker，这一步用于覆盖相应的 Bearer 认证。`AbortSignal` 会终止专用 Worker，或传递给页面自己提供的载体。精确字节使用生成的 Remote。
 
 -----
 

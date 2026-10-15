@@ -1,15 +1,13 @@
 /** Minimal server-side client for the Ontology Runtime identity endpoints. */
 
-import type { OntologyAuthenticatedRequest, OntologyRuntimeIdentity } from './types.ts'
+import type {
+  OntologyAuthenticatedRequest,
+  OntologyRuntimeIdentity,
+  OntologyRuntimeSessionTransfer,
+} from './types.ts'
 
 /** Rotating token pair returned by login and refresh. */
-export interface OntologyTokenPair {
-  readonly accessToken: string
-  readonly accessTokenExpiresAt: string
-  readonly refreshToken: string
-  readonly refreshTokenExpiresAt: string
-  readonly user: OntologyRuntimeIdentity
-}
+export type OntologyTokenPair = OntologyRuntimeSessionTransfer
 
 interface RuntimeErrorBody {
   readonly code: string

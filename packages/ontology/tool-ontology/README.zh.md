@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-当 agent 必须通过已发布 Ontology 定义查看和更改业务数据时，使用 `dsh-tool-ontology`。八个稳定工具负责发现受权 id、描述 Object、执行有界记录读取与 Link 遍历，并预备后再执行 Action。每次调用都使用当前浏览器登录，并让 Runtime 强制校验当前 Project 与 Action 授权；本包不保存 Token、能力缓存、数据源密钥或业务记录。
+当 agent 必须通过已发布 Ontology 定义查看和更改业务数据时，使用 `dsh-tool-ontology`。九个稳定工具负责发现受权 id、描述 Object 与 Action、执行有界记录读取与 Link 遍历，并预备后再执行 Action。每次调用都使用当前浏览器登录，并让 Runtime 强制校验当前 Project 与 Action 授权；本包不保存 Token、能力缓存、数据源密钥或业务记录。
 
 ## 目录
 
@@ -37,8 +37,9 @@ kind: "package-reference"
 
 1. 调用 `ontology_list_projects`，再把一个返回的 `project_id` 传给后续发现和读取工具。
 2. 在使用 Property、Link 或 Action id 前调用 `ontology_list_objects` 与 `ontology_describe_object`。
-3. 使用已发布 Action 参数调用 `ontology_prepare_action`；保留其不可变 `invocationId` 与预览。
-4. 只使用该 invocation id 调用 `ontology_execute_action`。工具会重新读取 Invocation，在需要确认时展示 Runtime 摘要，并仅在获得一次性批准后发送写请求。只有 Runtime 返回 `status: succeeded` 后才能认为写入成功。
+3. 调用 `ontology_describe_action` 读取准确的必填、选填参数与确认要求。面向用户时展示参数的业务 `label`、技术字段 `inputName` 与必填状态；调用 `ontology_prepare_action` 时使用 `inputName` 作为参数键。
+4. 使用已描述的 Action 参数调用 `ontology_prepare_action`；保留其不可变 `invocationId` 与预览。
+5. 只使用该 invocation id 调用 `ontology_execute_action`。工具会重新读取 Invocation，在需要确认时展示 Runtime 摘要，并仅在获得一次性批准后发送写请求。只有 Runtime 返回 `status: succeeded` 后才能认为写入成功。
 
 查询与遍历分页默认返回 20 条记录，并拒绝超过 100 的 `page_size`。等值过滤使用 Object 详情中的 Property id，而不是源列名。Host 生成预备幂等键；执行不接受替换参数。用户拒绝时不会发出执行请求；顺序重试会重新读取 Invocation，而不是复用早先的预览。
 
@@ -58,7 +59,7 @@ kind: "package-reference"
 
 | 源码 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Prompt 指引、八个工具 schema、固定 Runtime 请求、Action approval gate、分页与幂等键。 |
+| [`src/index.ts`](src/index.ts) | Prompt 指引、九个工具 schema、固定 Runtime 请求、Action approval gate、分页与幂等键。 |
 | [`src/runtime.ts`](src/runtime.ts) | Runtime 响应校验、Invocation 状态检查与有界结果投影。 |
 | [`src/types.ts`](src/types.ts) | 品牌化已发布 id 与模型结果类型。 |
 
@@ -88,7 +89,7 @@ kind: "package-reference"
 ##### Ontology 指引
 
 ```markdown
-Use Ontology tools only with ids returned by discovery. List Projects before selecting one, list and describe Objects before querying their Property ids or Link ids, and never guess ids. Prepare every Action before execution. Execute only the invocation_id returned by preparation; do not claim a write succeeded until ontology_execute_action returns status succeeded.
+Use Ontology tools only with ids returned by discovery. List Projects before selecting one, list and describe Objects before querying their Property ids or Link ids, and never guess ids. Describe a selected Action before preparation to discover its required and optional parameters and confirmation requirement. Present each Action parameter to users by its business label, technical inputName, and required status. Prepare every Action before execution. Execute only the invocation_id returned by preparation; do not claim a write succeeded until ontology_execute_action returns status succeeded.
 ```
 
 #### Token 影响
@@ -103,11 +104,11 @@ Use Ontology tools only with ids returned by discovery. List Projects before sel
 
 #### 模型看到的内容
 
-模型会看到生成的 [`ontology_list_projects`、`ontology_list_objects`、`ontology_describe_object`、`ontology_query_objects`、`ontology_get_object`、`ontology_traverse_link`、`ontology_prepare_action` 与 `ontology_execute_action` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-ontology)。稳定 id 与有界分页是显式参数；Runtime Token、数据源凭证、表名与原始写表达式不会出现。
+模型会看到生成的 [`ontology_list_projects`、`ontology_list_objects`、`ontology_describe_object`、`ontology_describe_action`、`ontology_query_objects`、`ontology_get_object`、`ontology_traverse_link`、`ontology_prepare_action` 与 `ontology_execute_action` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-ontology)。稳定 id 与有界分页是显式参数；Runtime Token、数据源凭证、表名与原始写表达式不会出现。
 
 #### Token 影响
 
-八个固定 schema 在可见时随每个请求发送。
+九个固定 schema 在可见时随每个请求发送。
 
 #### KV Cache 影响
 
@@ -117,7 +118,7 @@ Use Ontology tools only with ids returned by discovery. List Projects before sel
 
 #### 模型看到的内容
 
-每个成功调用返回有界 JSON。发现返回已发布 id 与标签；读取返回以 Property id 为键的已校验记录；预备返回 invocation id、过期时间、确认要求、摘要与受影响 Object。在确认执行前，用户会看到 Runtime 摘要、Action 与 Project id 以及有界的受影响 Object 列表；拒绝会返回工具错误且不执行。执行只返回成功的 invocation 及其 Runtime 结果。工具失败会返回错误，而不是未经校验的 Runtime 字段。
+每个成功调用返回有界 JSON。发现返回已发布 id 与标签；Action 详情将业务 `label`、技术字段 `inputName` 与 `required` 状态放在前面；读取返回以 Property id 为键的已校验记录；预备返回 invocation id、过期时间、确认要求、摘要与受影响 Object。在确认执行前，用户会看到 Runtime 摘要、Action 与 Project id 以及有界的受影响 Object 列表；拒绝会返回工具错误且不执行。执行只返回成功的 invocation 及其 Runtime 结果。工具失败会返回错误，而不是未经校验的 Runtime 字段。
 
 #### Token 影响
 

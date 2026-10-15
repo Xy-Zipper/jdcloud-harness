@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 预期行为
 
-会话标题栏和文档标题栏共用同一个高 24px、圆角 9px 的分体按钮。两个标题栏都只显示图标，悬停提示显示默认应用名称或文件定位动作。两者都显示默认动作的图标，在菜单的默认应用后标注“（默认）”，仅在自己的操作执行期间禁用，并通过短暂提示报告失败。目录适配器使用已有的跨平台应用列表，将最后一次成功选择保存在 `dsh.open-in-app.choice` 中；原选择不可用时回退到第一个可用应用。
+会话标题栏和文档标题栏共用同一个高 24px、圆角 9px 的分体按钮。两个标题栏都只显示图标，悬停提示显示默认应用名称或文件定位动作。两者都显示默认动作的图标，在菜单的默认应用后标注“（默认）”，仅在自己的操作执行期间禁用，并通过短暂提示报告失败。目录适配器通过认证 Connection 获取 catalog 图标并渲染页面持有的 Blob URL；图标读取失败时使用共享后备图形。它将最后一次成功选择保存在 `dsh.open-in-app.choice` 中；原选择不可用时回退到第一个可用应用。
 
 文件菜单列出已发现的关联应用，不单列“用默认应用打开”。“显示文件位置”固定在菜单底部，通过分隔线与滚动的应用列表分开。查询成功且只有一个可用操作时显示单按钮，不再显示下拉箭头。文件关联首次加载时使用灰色骨架图标。未识别到默认应用时，该项显示为“显示文件位置（默认）”，主按钮也执行文件定位。目录菜单不包含定位项。选择文件应用不修改系统默认应用。无法预览文件时，空态使用同一菜单，按钮增大到 40px 高并显示图标和动作文字；根据默认动作显示“打开”或“显示文件位置”。
 
@@ -43,7 +43,7 @@ kind: "package-reference"
 <details>
 <summary>实现内幕——点击展开</summary>
 
-插件通过标准 slot/inject 机制把分体按钮注册到 `conversation.session.header.utilities`，并以一个 effect 注册 `open-in-app` 词典。一个页面生命周期的 controller（[`src/client/controller.ts`](src/client/controller.ts)）拥有每页一次的可用性读取、持久化选择的 snapshot store 与启动 POST；组件经 inject 的 `hooks` 隔间接收两个 store，因此所有会话头部共享同一份事实。文档相对的路由形式与 wire 载荷类型来自主机包的浏览器安全子路径 `@deepseek-ai/dsh-host-open-in-app/shared`。飞行中的启动由 ref 守卫——启动期间的重复点击与菜单选择被整体忽略（否则会持久化一个该手势从未打开的选择）——busy/error 视觉由围绕 `launch` promise 的定时器驱动。
+插件通过标准 slot/inject 机制把分体按钮注册到 `conversation.session.header.utilities`，并以一个 effect 注册 `open-in-app` 词典。一个页面生命周期的 controller（[`src/client/controller.ts`](src/client/controller.ts)）拥有每页一次的可用性读取、认证图标 Fetch、页面持有的 Blob URL、持久化选择的 snapshot store 与启动 POST；释放时会中止待完成的图标读取并撤销全部 URL。组件经 inject 的 `hooks` 隔间接收 controller store，因此所有会话头部共享同一份事实。文档相对的路由形式与 wire 载荷类型来自主机包的浏览器安全子路径 `@deepseek-ai/dsh-host-open-in-app/shared`。飞行中的启动由 ref 守卫——启动期间的重复点击与菜单选择被整体忽略（否则会持久化一个该手势从未打开的选择）——busy/error 视觉由围绕 `launch` promise 的定时器驱动。
 
 目录和文件适配器把应用信息与操作交给 [`OpenTargetButton`](src/client/OpenTargetButton.tsx)，由它统一管理菜单顺序、默认标记、图标、尺寸和操作反馈。文件标题栏和空态共用 `FileOpenTarget`，`OpenPathInjected.applications` 通过 [`open-path.ts`](src/client/open-path.ts) 查询 `session.workspacePathApplications`。打开操作使用 `session.openWorkspacePath`，Host 在启动前重新验证指定的关联应用。`FileRouteAction` 通过 `deliverables.file.actions` 和 `deliverables.review.file.actions` 为交付卡片和变更对比页提供同一控件，其认证路由保留会话文件校验。目录适配器继续使用已有的应用列表路由，文件查询失败或不可用时无需增加平台专用的界面实现。
 

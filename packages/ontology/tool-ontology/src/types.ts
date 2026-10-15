@@ -57,6 +57,21 @@ export interface OntologyActionSummary {
   readonly requiresConfirmation: boolean
 }
 
+/** One caller-supplied parameter accepted by a published Action. */
+export interface OntologyActionParameterSummary {
+  readonly label: string
+  readonly inputName: string
+  readonly required: boolean
+  readonly description: string
+  readonly type: string
+  readonly targetProperty: OntologyPropertyId
+}
+
+/** Published Action detail with exact required and optional caller inputs. */
+export interface OntologyActionDetail extends OntologyActionSummary {
+  readonly parameters: readonly OntologyActionParameterSummary[]
+}
+
 /** One published Object record keyed by Ontology Property ids. */
 export interface OntologyObjectRecord {
   readonly objectTypeId: OntologyObjectTypeId

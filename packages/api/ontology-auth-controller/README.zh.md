@@ -1,5 +1,5 @@
 ---
-description: "按浏览器隔离的 Ontology Runtime 鉴权、仅 Host 可见的轮换 Token 存储、稳定用户归属与 Prompt 准入。"
+description: "按浏览器隔离的 Ontology Runtime 鉴权，支持密码登录或经过校验的内嵌会话导入，并提供 Host 持有的轮换 Token 存储、稳定用户归属与 Prompt 准入。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-ontology-auth-controller` 让每个浏览器登录部署方指定的 Ontology Runtime，且不会把 Access Token 或 Refresh Token 暴露给浏览器代码。它会校验返回的身份、通过 credential store 轮换已过期的 Access Token、把 Session 与 Workspace 归属于稳定 Ontology 用户，并在该浏览器未登录时拒绝 Prompt。Ontology Web bundle 使用本包作为应用身份层。
+`@deepseek-ai/dsh-api-ontology-auth-controller` 让每个浏览器通过密码或从已认证的内嵌父页面导入 Runtime Session，登录部署方指定的 Ontology Runtime。它会通过 Runtime 身份接口校验当前 Token、把轮换 Token 存入该浏览器的 credential record、把 Session 与 Workspace 归属于稳定 Ontology 用户，并在该浏览器未登录时拒绝 Prompt。Ontology Web bundle 使用本包作为应用身份层。
 
 ## 目录
 
@@ -47,6 +47,8 @@ kind: "package-reference"
 
 浏览器调用 `login()` 时只提交账号和密码。Host 调用 Runtime 登录与当前用户接口，把两种 Token 保存到 credential provider，并只返回服务地址与身份。存储的 Access Token 被 `runtime_unauthenticated` 拒绝后，会在 provider 的 record lock 内刷新；刷新失败只删除该浏览器的 record。当前用户校验只在身份字段变化时写入 record，因此其更新事件不会触发校验循环。`logout()` 先撤销选中的 Runtime Session，再删除该 record。
 
+已认证的内嵌父页面可以通过 Client Remote 桥调用 `importSession()`，传入新签发的 Runtime Token 对。Host 通过 `/api/runtime/auth/current` 校验 Access Token，拒绝身份不一致的请求，并只替换当前 Browser Session 的 credential record。该方法只返回脱敏状态，不会向调用方返回任一种 Token。
+
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
 Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。Session、Workspace、文件与引用消费方使用该归属；`userWorkspaceDirectory` 还会把所选路径限制在该用户的私有目录中。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
@@ -59,7 +61,7 @@ Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScop
 <details>
 <summary>实现内部细节——点击展开</summary>
 
-Controller 不保存进程全局用户。`BrowserSessionService` 提供请求本地的不透明浏览器 id，credential provider 串行化 Token 轮换，Runtime `current` 响应提供稳定用户与授权版本。Remote 方法只返回脱敏值。
+Controller 不保存进程全局用户。`BrowserSessionService` 提供请求本地的不透明浏览器 id，credential provider 串行化 Token 轮换，Runtime `current` 响应提供稳定用户与授权版本。Remote 响应均为脱敏值；导入的 Token 字段经过校验后直接写入 Host credential provider。
 
 | 源码 | 职责 |
 |---|---|

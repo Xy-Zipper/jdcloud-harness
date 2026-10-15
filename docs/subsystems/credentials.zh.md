@@ -351,6 +351,14 @@ Authenticate each browser independently and validate every submitted prompt.
 @Remote async login(request: OntologyLoginRequest, signal: AbortSignal): Promise<OntologyAuthStatus>
 
 /**
+ * Validate and store a Runtime Session supplied by the authenticated embedding page.
+ * @param request - Runtime tokens and their expected identity.
+ * @param signal - Caller cancellation combined with the configured request timeout.
+ * @returns Redacted authenticated state.
+ */
+@Remote async importSession( request: OntologyRuntimeSessionTransfer, signal: AbortSignal, ): Promise<OntologyAuthStatus>
+
+/**
  * Revoke and delete only the current browser's Runtime Session.
  * @returns Redacted unauthenticated state.
  */

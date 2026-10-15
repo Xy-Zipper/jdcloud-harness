@@ -1,5 +1,5 @@
 ---
-description: "Web login gate, Ontology branding, and a redacted sidebar identity for browser-scoped Runtime authentication."
+description: "Web login gate, exact-origin embedded Runtime Session handoff, Ontology branding, and a redacted sidebar identity for browser-scoped authentication."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-client-ui-ontology-login` presents an account-and-password gate until the current browser has an Ontology Runtime login. After login it shows the redacted identity, account type, fixed service address, and a sign-out action in the sidebar. It mounts the generated Ontology Remote namespace and never receives either Runtime Token.
+`@deepseek-ai/dsh-client-ui-ontology-login` presents an account-and-password gate until the current standalone browser has an Ontology Runtime login. When an authenticated Ontology page embeds Harness, the plugin shows a session-transfer page instead of the password form, accepts a Runtime Session only from that exact parent origin, and imports it into the Host. After login it shows the redacted identity, account type, fixed service address, and a sign-out action in the sidebar. Token fields remain transient and are not placed in URL or browser storage.
 
 ## Table of Contents
 
@@ -29,6 +29,8 @@ Mount this Client plugin through the [`dsh-ontology-login`](../../bundle/ontolog
 
 The plugin registers localized Chinese and English copy, an Ontology graph mark, the guarded root page, and the sidebar account seat. Credential notifications refresh the identity only for the current browser's `ontology-auth-controller/login-*` record; Workspace and Session owner grants preserve the active view.
 
+When Harness runs in an iframe, the root Slot shows a localized session-transfer page and never exposes the password form. The plugin derives the allowed parent origin from `document.referrer`, announces readiness to that origin, and accepts one versioned `ontology/runtime-session` message from `window.parent`. It validates the message fields, calls the Host `importSession()` Remote method, applies the returned redacted status, and reports only success or failure to the parent.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -41,7 +43,8 @@ The Host entry has no route behavior. The Client entry mounts the generated Remo
 
 | Source | Responsibility |
 |---|---|
-| [`src/client/mount.ts`](src/client/mount.ts) | Remote status lifecycle, root gate, account seat, and brand Slot registrations. |
+| [`src/client/mount.ts`](src/client/mount.ts) | Remote status lifecycle, exact-origin embedded-session bridge, root gate, account seat, and brand Slot registrations. |
+| [`src/client/EmbeddedSessionPage.tsx`](src/client/EmbeddedSessionPage.tsx) | Embedded session-transfer presentation without credential inputs. |
 | [`src/client/LoginPage.tsx`](src/client/LoginPage.tsx) | Account-and-password form and pending/error presentation. |
 | [`src/client/AccountSeat.tsx`](src/client/AccountSeat.tsx) | Redacted identity, service address, and logout menu. |
 
@@ -72,6 +75,7 @@ None; the plugin changes only browser-visible Slot occupants.
 <a id="known-limitations-and-deferred-work"></a>
 
 - The package targets the Web Client and requires the root, sidebar, locale, Remote, and Workspace UI services.
+- Embedded login requires the iframe navigation to preserve the parent origin in `document.referrer`; a `no-referrer` policy disables the handoff and leaves the session-transfer page waiting.
 - The page does not select a Project; Project discovery belongs to the later Ontology tool and context workflow.
 
 <a id="dev-note"></a>

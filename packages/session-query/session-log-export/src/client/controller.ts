@@ -21,7 +21,7 @@ export interface SessionLogDownloadState {
 
 /** HTTP carrier for the export route. */
 type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>
-type Save = (url: string, filename: string) => void
+type Save = (blob: Blob, filename: string) => void
 
 const INITIAL: SessionLogDownloadState = { bySession: {} }
 
@@ -35,16 +35,17 @@ export function sessionLogZipFilename(sessionId: SessionId): string {
 }
 
 /**
- * Hand a Host download route to the browser download manager, which resolves it
- * against the document's own base.
- * @param url - document-relative Host download route.
+ * Hand an authenticated response Blob to the browser download manager.
+ * @param blob - complete ZIP returned by the authenticated Fetch carrier.
  * @param filename - browser download filename.
  */
-export function downloadUrl(url: string, filename: string): void {
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
   anchor.download = filename
-  anchor.click()
+  try { anchor.click() }
+  finally { URL.revokeObjectURL(url) }
 }
 
 function messageOf(error: unknown): string {
@@ -65,7 +66,7 @@ export class SessionLogDownloadController {
    */
   constructor(
     private readonly fetcher: Fetch = (input, init) => fetch(input, init),
-    private readonly save: Save = downloadUrl,
+    private readonly save: Save = downloadBlob,
   ) {}
 
   /**
@@ -111,12 +112,12 @@ export class SessionLogDownloadController {
     try {
       const query = new URLSearchParams({ sessionId, includeDescendants: 'true' })
       const route = `${SESSION_LOG_EXPORT_ROUTE}?${query.toString()}`
-      const response = await this.fetcher(route, { method: 'HEAD', signal })
+      const response = await this.fetcher(route, { method: 'GET', signal })
       if (!response.ok) {
         const detail = await response.text().catch(() => '')
         throw new Error(`Export failed: HTTP ${response.status}${detail === '' ? '' : ` ${detail}`}`)
       }
-      this.save(route, sessionLogZipFilename(sessionId))
+      this.save(await response.blob(), sessionLogZipFilename(sessionId))
       const open = this.store.getSnapshot().bySession[String(sessionId)]?.open ?? true
       this.publish(sessionId, { open, status: 'success', error: null })
     } catch (error: unknown) {

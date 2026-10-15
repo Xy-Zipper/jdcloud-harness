@@ -21,6 +21,7 @@ import type {
   OntologyAuthenticatedRequest,
   OntologyLoginRequest,
   OntologyRuntimeIdentity,
+  OntologyRuntimeSessionTransfer,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -151,19 +152,34 @@ export class OntologyAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.remoteError('login', error)
     }
-    const auth: AuthPayload = { version: 1, baseUrl: this.baseUrl, ...tokens, user: identity }
-    let replaced: AuthPayload | undefined
-    await this.ctx.credentials.modifyRecord(this.authKey(), (current) => {
-      replaced = current === undefined ? undefined : parseAuthRecord(current, this.baseUrl)
-      return Promise.resolve(authRecord(auth))
-    })
-    if (replaced !== undefined && replaced.accessToken !== auth.accessToken) {
-      // A replacement login owns the previous Runtime Session cleanup, but cleanup failure must not discard the new login.
-      void client.logout(replaced.accessToken, AbortSignal.timeout(this.requestTimeoutMs)).catch((error: unknown) => {
-        this.ctx.logger.warn('ontology-auth-controller: replaced Runtime Session logout failed')
-        this.ctx.logger.warn(error)
-      })
+    const auth = await this.replaceAuthentication(tokens, identity, client)
+    return authenticatedStatus(auth)
+  }
+
+  /**
+   * Validate and store a Runtime Session supplied by the authenticated embedding page.
+   * @param request - Runtime tokens and their expected identity.
+   * @param signal - Caller cancellation combined with the configured request timeout.
+   * @returns Redacted authenticated state.
+   */
+  @Remote
+  async importSession(
+    request: OntologyRuntimeSessionTransfer,
+    signal: AbortSignal,
+  ): Promise<OntologyAuthStatus> {
+    validateSessionTransfer(request)
+    const client = this.client()
+    const operationSignal = this.operationSignal(signal)
+    let identity: OntologyRuntimeIdentity
+    try {
+      identity = await client.current(request.accessToken, operationSignal)
+      if (identity.userId !== request.user.userId) {
+        throw new Error('transferred Ontology Runtime Session belongs to a different user')
+      }
+    } catch (error) {
+      throw this.remoteError('import', error)
     }
+    const auth = await this.replaceAuthentication(request, identity, client)
     return authenticatedStatus(auth)
   }
 
@@ -303,6 +319,28 @@ export class OntologyAuthController extends TypertRemoteService {
     return AbortSignal.any([callerSignal, AbortSignal.timeout(this.requestTimeoutMs)])
   }
 
+  /** Replace only the current browser's login and asynchronously revoke its previous Runtime Session. */
+  private async replaceAuthentication(
+    tokens: OntologyTokenPair,
+    identity: OntologyRuntimeIdentity,
+    client: OntologyClient,
+  ): Promise<AuthPayload> {
+    const auth: AuthPayload = { version: 1, baseUrl: this.baseUrl, ...tokens, user: identity }
+    let replaced: AuthPayload | undefined
+    await this.ctx.credentials.modifyRecord(this.authKey(), (current) => {
+      replaced = current === undefined ? undefined : parseAuthRecord(current, this.baseUrl)
+      return Promise.resolve(authRecord(auth))
+    })
+    if (replaced !== undefined && replaced.accessToken !== auth.accessToken) {
+      // A replacement owns cleanup of the previous Runtime Session without making the new login depend on that cleanup.
+      void client.logout(replaced.accessToken, AbortSignal.timeout(this.requestTimeoutMs)).catch((error: unknown) => {
+        this.ctx.logger.warn('ontology-auth-controller: replaced Runtime Session logout failed')
+        this.ctx.logger.warn(error)
+      })
+    }
+    return auth
+  }
+
   /** Resolve a stored login, rotating tokens once after Access Token expiry. */
   private async authentication(callerSignal: AbortSignal): Promise<AuthenticationState> {
     const record = await this.ctx.credentials.readRecord(this.authKey())
@@ -383,11 +421,12 @@ export class OntologyAuthController extends TypertRemoteService {
     return credentialKey('ontology-auth-controller', `owner-${kind}-${suffix}`)
   }
 
-  private remoteError(operation: 'login' | 'validate' | 'logout', error: unknown): RemoteError {
+  private remoteError(operation: 'login' | 'import' | 'validate' | 'logout', error: unknown): RemoteError {
     const code = error instanceof OntologyApiError ? error.code : null
     const status = error instanceof OntologyApiError ? error.status : null
     const message = error instanceof Error ? error.message : String(error)
     if (operation === 'login') return new RemoteError('ontology/auth-failed', message, { code, status })
+    if (operation === 'import') return new RemoteError('ontology/session-import-failed', message, { code, status })
     if (operation === 'logout') return new RemoteError('ontology/logout-failed', message, { code, status })
     return new RemoteError('ontology/validation-failed', message, { code, status })
   }
@@ -403,6 +442,21 @@ function authRequired(reason: 'missing' | 'expired'): RemoteError {
     reason === 'expired' ? 'Ontology login has expired' : 'Ontology login is required',
     { reason },
   )
+}
+
+/** Reject empty or malformed Runtime Session fields before they enter the credential store. */
+function validateSessionTransfer(request: OntologyRuntimeSessionTransfer): void {
+  const user = request.user
+  if (request.accessToken.length === 0
+    || request.refreshToken.length === 0
+    || !isTimestamp(request.accessTokenExpiresAt)
+    || !isTimestamp(request.refreshTokenExpiresAt)
+    || user.userId.length === 0
+    || user.username.length === 0
+    || user.displayName.length === 0
+    || user.authorizationVersion.length === 0) {
+    throw new RemoteError('gateway/bad-request', 'transferred Ontology Runtime Session is invalid', {})
+  }
 }
 
 /** Validate the owner-defined durable grant before using either token. */

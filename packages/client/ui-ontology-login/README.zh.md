@@ -1,5 +1,5 @@
 ---
-description: "面向按浏览器隔离 Runtime 鉴权的 Web 登录门、Ontology 品牌与脱敏侧栏身份。"
+description: "面向按浏览器隔离鉴权的 Web 登录门、精确 Origin 的内嵌 Runtime Session 交接、Ontology 品牌与脱敏侧栏身份。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-client-ui-ontology-login` 在当前浏览器没有 Ontology Runtime 登录时显示账号密码登录门。登录后，它会在侧栏显示脱敏身份、账号类型、固定服务地址和退出操作。它自行挂载生成的 Ontology Remote namespace，且不会接收任一种 Runtime Token。
+`@deepseek-ai/dsh-client-ui-ontology-login` 在当前独立浏览器没有 Ontology Runtime 登录时显示账号密码登录门。当已认证的 Ontology 页面内嵌 Harness 时，本插件会显示会话中转页而不是密码表单，只接受来自该精确父页面 Origin 的 Runtime Session，并将其导入 Host。登录后，它会在侧栏显示脱敏身份、账号类型、固定服务地址和退出操作。Token 字段只短暂存在，不会进入 URL 或浏览器存储。
 
 ## 目录
 
@@ -29,6 +29,8 @@ kind: "package-reference"
 
 插件注册本地化的中英文文案、Ontology 图结构标记、受保护的根页面和侧栏账号席位。只有当前浏览器的 `ontology-auth-controller/login-*` record 通知会刷新身份；Workspace 与 Session owner grant 会保留当前视图。
 
+Harness 在 iframe 中运行时，根 Slot 会显示本地化会话中转页，并且不会暴露密码表单。本插件从 `document.referrer` 推导允许的父页面 Origin，向该 Origin 通知已就绪，并只接受 `window.parent` 发送的一个带版本 `ontology/runtime-session` 消息。它会校验消息字段，调用 Host 的 `importSession()` Remote 方法，应用返回的脱敏状态，并且只向父页面报告成功或失败。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -41,7 +43,8 @@ Host 入口没有路由行为。Client 入口挂载生成的 Remote contribution
 
 | 源码 | 职责 |
 |---|---|
-| [`src/client/mount.ts`](src/client/mount.ts) | Remote 状态生命周期、根登录门、账号席位与品牌 Slot 注册。 |
+| [`src/client/mount.ts`](src/client/mount.ts) | Remote 状态生命周期、精确 Origin 的内嵌会话桥、根登录门、账号席位与品牌 Slot 注册。 |
+| [`src/client/EmbeddedSessionPage.tsx`](src/client/EmbeddedSessionPage.tsx) | 不包含凭证输入的内嵌会话中转界面。 |
 | [`src/client/LoginPage.tsx`](src/client/LoginPage.tsx) | 账号密码表单与等待、错误呈现。 |
 | [`src/client/AccountSeat.tsx`](src/client/AccountSeat.tsx) | 脱敏身份、服务地址与注销菜单。 |
 
@@ -72,6 +75,7 @@ Host 入口没有路由行为。Client 入口挂载生成的 Remote contribution
 <a id="known-limitations-and-deferred-work"></a>
 
 - 本包面向 Web Client，并依赖根、侧栏、locale、Remote 与 Workspace UI 服务。
+- 内嵌登录要求 iframe 导航在 `document.referrer` 中保留父页面 Origin；`no-referrer` 策略会禁用交接，此时会话中转页会保持等待状态。
 - 页面不选择 Project；Project 发现属于后续 Ontology 工具与上下文工作流。
 
 <a id="dev-note"></a>

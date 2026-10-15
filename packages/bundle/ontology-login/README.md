@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the signed browser-session cookie, and installs the Ontology controller, model tools, and login UI. Ontology becomes the profile's application identity and authorization layer.
+`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the tab-scoped browser Bearer session, and installs the Ontology controller, model tools, and login UI. Ontology becomes the profile's application identity and authorization layer.
 
 ## Table of Contents
 
@@ -46,7 +46,7 @@ Local development may explicitly set `ONTOLOGY_BASE_URL=http://127.0.0.1:8080` t
 
 ### What you get
 
-The layer replaces the Connection row with `browserAuthentication: false` and `browserSession: true`, inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes. The configured user Workspace directory keeps files private to the stable Ontology user.
+The layer replaces the Connection row with `browserAuthentication: false`, `browserSession: true`, and `browserSessionTransport: bearer`. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes. The configured user Workspace directory keeps files private to the stable Ontology user.
 
 -----
 
@@ -76,7 +76,7 @@ The layer replaces the Connection row with `browserAuthentication: false` and `b
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, eight tool schemas, and validated Runtime results.
+Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, nine tool schemas, and validated Runtime results.
 
 #### KV Cache effect
 

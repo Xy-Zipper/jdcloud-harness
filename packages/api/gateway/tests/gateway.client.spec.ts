@@ -348,6 +348,7 @@ async function benchFiber(
   const start = vi.fn<ConnectionHandle['start']>(() => ({ stop: () => {} }))
   ctx.provide('connection', {
     rpc,
+    authorizeWebSocketUrl: (url: string) => url,
     registerGenerationSource: generation.register,
     start,
   } as unknown as ConnectionHandle)
@@ -451,6 +452,7 @@ async function loaderReadinessBench(
   const call = vi.fn<ConnectionHandle['rpc']['call']>()
   ctx.provide('connection', {
     rpc: carrier === 'web' ? { call } : { call, open: () => unexpectedInProcessStream() },
+    authorizeWebSocketUrl: (url: string) => url,
     registerGenerationSource: generation.register,
     start,
   } as unknown as ConnectionHandle)
@@ -2804,6 +2806,21 @@ describe('Client Typert API', () => {
 })
 
 describe('Remote stream client carrier lifecycle', () => {
+  it('authorizes each physical WebSocket URL before connecting', async () => {
+    await withFakeWebSocket('http://harness.example', async () => {
+      const authorize = vi.fn(async (url: string) => `${url}?ticket=one-shot`)
+      const client = new RemoteStreamMuxClient(authorize)
+      try {
+        client.start()
+        await vi.waitFor(() => { expect(FakeWebSocket.sockets).toHaveLength(1) })
+        expect(authorize).toHaveBeenCalledWith('ws://harness.example/api/remote.mux')
+        expect(FakeWebSocket.sockets[0]?.url).toBe('ws://harness.example/api/remote.mux?ticket=one-shot')
+      } finally {
+        await client.close()
+      }
+    })
+  })
+
   it('connects to the shell-owned Host while the document uses a local asset origin', async () => {
     await withFakeWebSocket('dsh-app://app', async () => {
       vi.stubGlobal('__DSH_TRANSPORT__', { streamBaseUrl: 'http://127.0.0.1:43210' })

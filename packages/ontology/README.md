@@ -26,7 +26,7 @@ The group currently contains one stable tool suite.
 
 | Package | Role |
 |---|---|
-| [`tool-ontology`](tool-ontology/README.md) | Discovers authorized published ids, reads Objects and Links, and prepares or executes Actions through Ontology Runtime. |
+| [`tool-ontology`](tool-ontology/README.md) | Discovers authorized published ids, describes Action parameters, reads Objects and Links, and prepares or executes Actions through Ontology Runtime. |
 
 <a id="related-documentation"></a>
 ## Related documentation

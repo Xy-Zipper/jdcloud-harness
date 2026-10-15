@@ -1,5 +1,5 @@
 ---
-description: "Browser-scoped Ontology Runtime authentication, Host-only rotating token storage, stable user ownership, and prompt admission."
+description: "Browser-scoped Ontology Runtime authentication with password login or validated embedded-session import, Host-owned rotating token storage, stable user ownership, and prompt admission."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-ontology-auth-controller` lets each browser sign in to one deployment-owned Ontology Runtime without exposing Access or Refresh Tokens to browser code. It validates the returned identity, rotates expired Access Tokens through the credential store, assigns Session and Workspace ownership to the stable Ontology user, and rejects prompts while that browser is logged out. Choose it as the application identity layer for the Ontology Web bundle.
+`@deepseek-ai/dsh-api-ontology-auth-controller` lets each browser sign in to one deployment-owned Ontology Runtime by password or by importing a Runtime Session from an authenticated embedding page. It validates the active token against the Runtime identity endpoint, stores rotating tokens under that browser's credential record, assigns Session and Workspace ownership to the stable Ontology user, and rejects prompts while that browser is logged out. Choose it as the application identity layer for the Ontology Web bundle.
 
 ## Table of Contents
 
@@ -47,6 +47,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 The browser calls `login()` with only an account and password. The Host calls Runtime login and current-user endpoints, stores both tokens in the credential provider, and returns only the service address and identity. A stored Access Token rejected with `runtime_unauthenticated` is refreshed under the provider's record lock; refresh failure removes only that browser's record. Current-user validation writes the record only when identity fields changed, so its update event cannot trigger a validation loop. `logout()` revokes the selected Runtime Session before deleting that record.
 
+An authenticated embedding page can call `importSession()` through the Client Remote bridge with a freshly issued Runtime token pair. The Host verifies the Access Token through `/api/runtime/auth/current`, rejects an identity mismatch, and replaces only the current Browser Session's credential record. The method returns redacted status and never returns either token to the caller.
+
 Host-only consumers call `requestAuthenticated()` with a fixed `/api/runtime/` path, method, and optional JSON body. The controller selects the current browser record, validates or refreshes it, attaches the Access Token, and retries once when that request reports an expired Access Token. The consumer remains responsible for validating the returned untrusted JSON.
 
 Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentScopeKey()` instead includes the service address and stable user id, so independent logins for the same Ontology user resolve to one owner. Session, Workspace, file, and reference consumers use this owner; `userWorkspaceDirectory` additionally confines selected paths to that user's private directory. Prompt admission validates or refreshes the current browser login before Session delivery, while terminal access and `danger-full-access` require an administrator account.
@@ -59,7 +61,7 @@ Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentSco
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The controller keeps no process-global user. `BrowserSessionService` supplies one request-local opaque browser id, the credential provider serializes token rotation, and the Runtime `current` response supplies the stable user and authorization version. Remote methods return redacted values only.
+The controller keeps no process-global user. `BrowserSessionService` supplies one request-local opaque browser id, the credential provider serializes token rotation, and the Runtime `current` response supplies the stable user and authorization version. Remote responses are redacted; imported token fields are validated and written directly to the Host credential provider.
 
 | Source | Responsibility |
 |---|---|

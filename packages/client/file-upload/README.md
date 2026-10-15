@@ -32,7 +32,7 @@ Mount the package before a consumer that injects `fileUpload`, then call `ctx.fi
   name: '@deepseek-ai/dsh-client-file-upload'
 ```
 
-The package has no Cordis configuration fields. A `Blob` uses XMLHttpRequest inside a dedicated Worker so the service can report browser upload progress, including the total when the browser provides it. A `ReadableStream` transfers to that Worker and feeds Fetch incrementally; progress reports consumed bytes without a total. An `AbortSignal` terminates the dedicated Worker or reaches a page-owned carrier. Exact bytes use the generated Remote.
+The package has no Cordis configuration fields. A `Blob` uses XMLHttpRequest inside a dedicated Worker so the service can report browser upload progress, including the total when the browser provides it. A `ReadableStream` transfers to that Worker and feeds Fetch incrementally; progress reports consumed bytes without a total. Before starting the Worker, the service asks Connection for the current Authorization header and includes it in the Worker's XMLHttpRequest or Fetch request; this covers Bearer authentication that the page-realm Fetch wrapper cannot apply inside a Worker. An `AbortSignal` terminates the dedicated Worker or reaches a page-owned carrier. Exact bytes use the generated Remote.
 
 -----
 

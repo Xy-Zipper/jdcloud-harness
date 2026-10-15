@@ -26,7 +26,7 @@ kind: "package-group"
 
 | 包 | 职责 |
 |---|---|
-| [`tool-ontology`](tool-ontology/README.zh.md) | 发现受权已发布 id、读取 Object 与 Link，并通过 Ontology Runtime 预备或执行 Action。 |
+| [`tool-ontology`](tool-ontology/README.zh.md) | 发现受权已发布 id、描述 Action 参数、读取 Object 与 Link，并通过 Ontology Runtime 预备或执行 Action。 |
 
 <a id="related-documentation"></a>
 ## 相关文档

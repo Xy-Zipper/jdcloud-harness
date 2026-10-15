@@ -20,6 +20,7 @@ interface FixtureOptions {
   readonly invocationResponse?: unknown
   readonly approvalOutcome?: ApprovalOutcome
   readonly executeError?: Error
+  readonly actionResponse?: unknown
 }
 
 /** Mount the real tool and approval services with a Host-only Runtime request recorder. */
@@ -48,6 +49,9 @@ async function fixture(options: FixtureOptions = {}) {
         properties: [{
           id: 'property-order-id', label: '订单 ID', description: '主键', type: 'string',
           sourceField: '_id', required: true,
+        }, {
+          id: 'property-creator-time', label: '创建时间', description: '订单创建时间', type: 'number',
+          sourceField: 'creatorTime', required: false,
         }],
         links: [{
           id: 'link-order-customer', label: '所属客户', description: '订单客户',
@@ -58,6 +62,18 @@ async function fixture(options: FixtureOptions = {}) {
           id: 'action-update-order', label: '更新订单', description: '更新订单状态', kind: 'object',
           operation: 'update', effect: 'write', targetType: 'object-order', requiresConfirmation: true,
         }],
+      }
+    }
+    if (request.path === '/api/runtime/projects/project-sales/actions/action-update-order') {
+      if ('actionResponse' in options) return options.actionResponse
+      return {
+        id: 'action-update-order', label: '更新订单', description: '更新订单状态', kind: 'object',
+        operation: 'update', effect: 'write', targetType: 'object-order', requiresConfirmation: true,
+        mappings: [
+          { targetProperty: 'property-order-id', source: 'parameter', inputName: 'orderId', required: true },
+          { targetProperty: 'property-creator-time', source: 'parameter', inputName: 'creatorTime', required: false },
+          { targetProperty: 'property-order-id', source: 'constant', inputName: '', required: false },
+        ],
       }
     }
     if (request.path.endsWith('/query')) {
@@ -133,12 +149,13 @@ function failure(result: ToolExecutionResult): ToolExecutionFailure {
 }
 
 describe('Ontology tools', () => {
-  it('registers the eight stable tools and removes them with the plugin fiber', async () => {
+  it('registers the nine stable tools and removes them with the plugin fiber', async () => {
     const { ctx, fiber } = await fixture()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'ontology_list_projects',
       'ontology_list_objects',
       'ontology_describe_object',
+      'ontology_describe_action',
       'ontology_query_objects',
       'ontology_get_object',
       'ontology_traverse_link',
@@ -147,6 +164,66 @@ describe('Ontology tools', () => {
     ])
     await fiber.dispose()
     expect(ctx.tools.schemas()).toEqual([])
+  })
+
+  it('describes required and optional Action parameters before preparation', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+
+    expect(value(await execute('ontology_describe_action', {
+      project_id: 'project-sales', action_type_id: 'action-update-order',
+    }))).toEqual({
+      id: 'action-update-order', label: '更新订单', description: '更新订单状态', kind: 'object',
+      operation: 'update', effect: 'write', targetType: 'object-order', requiresConfirmation: true,
+      parameters: [{
+        label: '订单 ID', inputName: 'orderId', required: true,
+        description: '主键', type: 'string', targetProperty: 'property-order-id',
+      }, {
+        label: '创建时间', inputName: 'creatorTime', required: false,
+        description: '订单创建时间', type: 'number', targetProperty: 'property-creator-time',
+      }],
+    })
+    expect(requestAuthenticated.mock.calls.map(call => call[0].path)).toEqual([
+      '/api/runtime/projects/project-sales/actions/action-update-order',
+      '/api/runtime/projects/project-sales/objects/object-order',
+    ])
+  })
+
+  it('rejects an Action parameter whose target Property is absent', async () => {
+    const { execute } = await fixture({
+      actionResponse: {
+        id: 'action-update-order', label: '更新订单', description: '更新订单状态', kind: 'object',
+        operation: 'update', effect: 'write', targetType: 'object-order', requiresConfirmation: true,
+        mappings: [{
+          targetProperty: 'property-missing', source: 'parameter', inputName: 'missing', required: false,
+        }],
+      },
+    })
+
+    const result = await execute('ontology_describe_action', {
+      project_id: 'project-sales', action_type_id: 'action-update-order',
+    })
+
+    expect(failure(result).error.info?.code).toBe('ONTOLOGY_RUNTIME_INVALID_RESPONSE')
+    expect(JSON.stringify(result.content)).toContain('property-missing')
+  })
+
+  it('rejects an unnamed published Action parameter', async () => {
+    const { execute } = await fixture({
+      actionResponse: {
+        id: 'action-update-order', label: '更新订单', description: '更新订单状态', kind: 'object',
+        operation: 'update', effect: 'write', targetType: 'object-order', requiresConfirmation: true,
+        mappings: [{
+          targetProperty: 'property-order-id', source: 'parameter', inputName: '', required: false,
+        }],
+      },
+    })
+
+    const result = await execute('ontology_describe_action', {
+      project_id: 'project-sales', action_type_id: 'action-update-order',
+    })
+
+    expect(failure(result).error.info?.code).toBe('ONTOLOGY_RUNTIME_INVALID_RESPONSE')
+    expect(JSON.stringify(result.content)).toContain('has no name')
   })
 
   it('discovers published ids before querying and traversing records', async () => {

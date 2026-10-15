@@ -5,6 +5,7 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
@@ -12,7 +13,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/client'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
-import { OPEN_IN_APP_ICON_PREFIX_ROUTE } from '@deepseek-ai/dsh-host-open-in-app/shared'
 import { OpenInAppController } from './controller.ts'
 import { OpenInAppAction, type OpenInAppActionInjected } from './OpenInAppAction.tsx'
 import { OpenInAppPathController } from './open-path.ts'
@@ -34,7 +34,7 @@ export type { OpenPathActionProps, OpenPathInjected } from './OpenPathAction.tsx
 export type { OpenPathEmptyActionProps } from './OpenPathEmptyAction.tsx'
 
 /** Required services: sessions, the slot registry, copy, and the Remote carrier with its `session` namespace. */
-export const inject = ['sessions', 'slots', 'locale', 'remote', 'remote.session']
+export const inject = ['sessions', 'slots', 'locale', 'remote', 'remote.session', 'connection']
 
 /**
  * Client plugin body: register the dictionaries, the header split button, and
@@ -42,8 +42,12 @@ export const inject = ['sessions', 'slots', 'locale', 'remote', 'remote.session'
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const controller = new OpenInAppController()
+  const connection = ctx.get('connection') as ConnectionHandle
+  const controller = new OpenInAppController(
+    (input, init) => connection.fetch(input, init ?? {}),
+  )
   void controller.load()
+  ctx.effect(() => async () => { await controller.dispose() }, 'open-in-app: authenticated icon lifecycle')
   const paths = new OpenInAppPathController(ctx.remote)
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'open-in-app: dictionaries')
   ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
@@ -54,11 +58,11 @@ export function apply(ctx: ClientContext): void {
     inject: (): OpenInAppActionInjected => ({
       hooks: {
         openInAppApps: controller.apps,
+        openInAppIcons: controller.icons,
         openInAppChoice: controller.choice,
       },
       launch: (appId, path) => controller.launch(appId, path),
       choose: (appId) => { controller.choose(appId) },
-      iconUrl: appId => `${OPEN_IN_APP_ICON_PREFIX_ROUTE}/${appId}`,
     }),
   }, OpenInAppAction))
   const applications: OpenPathInjected['applications'] = (path, signal) => paths.applications(path, signal)

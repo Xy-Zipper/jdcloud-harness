@@ -25,6 +25,7 @@ interface Bench {
 
 function bench(over: {
   apps?: readonly string[] | null
+  icons?: Readonly<Record<string, string | null>>
   choice?: string
   cwd?: string
   launch?: (appId: string, path: string) => Promise<void>
@@ -36,6 +37,9 @@ function bench(over: {
     projectionsBySession: {},
   }
   const apps = createSnapshotStore<readonly string[] | null>(over.apps ?? null)
+  const icons = createSnapshotStore<Readonly<Record<string, string | null>>>(over.icons ?? {
+    cursor: 'blob:cursor', finder: 'blob:finder', terminal: 'blob:terminal',
+  })
   const choice = createSnapshotStore<string>(over.choice ?? '')
   const launch = vi.fn(over.launch ?? (async () => {}))
   const choose = vi.fn()
@@ -49,10 +53,10 @@ function bench(over: {
     sessionId: SESSION,
     useSessions,
     useOpenInAppApps: useSelector(apps),
+    useOpenInAppIcons: useSelector(icons),
     useOpenInAppChoice: useSelector(choice),
     launch,
     choose,
-    iconUrl: (appId: string) => `open-in-app/icon/${appId}`,
     t,
   } as OpenInAppActionProps
   return { props, launch, choose }
@@ -76,11 +80,11 @@ describe('OpenInAppAction visibility', () => {
 
   it('shows the remembered choice, falling back to the first available app when it is gone', () => {
     render(<OpenInAppAction {...bench({ apps: ['finder', 'cursor'], choice: 'cursor', cwd: '/w' }).props} />)
-    expect(screen.getByRole('button', { name: t('open.title', { app: 'Cursor' }) }).querySelector('img')?.getAttribute('src')).toBe('open-in-app/icon/cursor')
+    expect(screen.getByRole('button', { name: t('open.title', { app: 'Cursor' }) }).querySelector('img')?.getAttribute('src')).toBe('blob:cursor')
     cleanup()
 
     render(<OpenInAppAction {...bench({ apps: ['finder', 'cursor'], choice: 'vscode', cwd: '/w' }).props} />)
-    expect(screen.getByRole('button', { name: t('open.title', { app: zh['app.finder'] }) }).querySelector('img')?.getAttribute('src')).toBe('open-in-app/icon/finder')
+    expect(screen.getByRole('button', { name: t('open.title', { app: zh['app.finder'] }) }).querySelector('img')?.getAttribute('src')).toBe('blob:finder')
   })
 })
 

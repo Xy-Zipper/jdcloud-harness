@@ -63,7 +63,7 @@ Attachment collection reads declared content fields of built-in Session events a
 
 ### Failures
 
-The dialog shows a preparation error when the preflight fails before ZIP streaming starts — for example an unreachable or misconfigured host endpoint. A descendant or attachment read failure after the browser accepts the GET is reported by the browser download manager, not by the dialog.
+The dialog shows an error when the authenticated GET fails, its ZIP stream terminates early, or the browser cannot materialize the response Blob. The browser download manager takes ownership only after the complete ZIP has arrived.
 
 -----
 
@@ -81,7 +81,7 @@ The package has two halves. The Host half ([`src/index.ts`](src/index.ts)) regis
 
 ### Download flow
 
-Both entry paths issue a `HEAD` preflight to the document-relative `api/session.export?...`, then hand the GET route to the browser download manager without buffering the ZIP in JavaScript. One controller owns one in-flight download per session, collapses concurrent gestures into that operation, and cancels the preflight on plugin disposal. Modal state lives in a snapshot store keyed by session, so the button and the command share one dialog per session.
+Both entry paths issue one authenticated `GET` to the document-relative `api/session.export?...` through Connection, materialize the complete response as a Blob, and hand its temporary object URL to the browser download manager. One controller owns one in-flight download per session, collapses concurrent gestures into that operation, and cancels the Fetch on plugin disposal. Modal state lives in a snapshot store keyed by session, so the button and the command share one dialog per session.
 
 The Host route is a feature-owned exact Fetch contribution. Connection applies its Host/Origin and browser-session checks and bridges the streaming `Response`; this package owns query validation, live-session flushes, handle-based log reads and attachment reads, ZIP generation, and HTTP status semantics.
 
@@ -126,7 +126,7 @@ None. The log-only command lifecycle and browser download do not change the deri
 These limits define when this package is a poor fit or needs special operational care. They are current package constraints, not a task backlog.
 
 - **Browser download, not a Host-path writer** — the browser chooses the local destination; no Host path or native folder action is returned.
-- **Preflight reports only pre-stream failures** — a descendant or attachment failure after the browser accepts the GET is reported by the browser download manager, not by the dialog.
+- **The browser holds the completed ZIP before saving** — Host archive generation remains streamed and bounded, but Bearer authentication requires the Client to finish the authenticated Fetch before it can create a download URL.
 
 <a id="dev-note"></a>
 ### Dev Note

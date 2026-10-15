@@ -91,6 +91,13 @@ requestRejection(request: ConnectionTrustRequest): ConnectionRequestRejection
 admit(request: ConnectionTrustRequest): PeerAdmission
 
 /**
+ * Admit one WebSocket upgrade, consuming a transport ticket when the browser session uses Bearer headers.
+ * @param request - upgrade request headers and URL.
+ * @returns the operator Peer, or the rejection status.
+ */
+admitWebSocket(request: ConnectionTrustRequest): PeerAdmission
+
+/**
  * Run an admitted operation with the optional application browser identity.
  * @param request - request headers from the HTTP or upgrade request.
  * @param operation - operation that may await request-scoped work.

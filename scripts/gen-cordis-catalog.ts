@@ -709,6 +709,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   OntologyAuthStatus: 'credentials.md',
   OntologyAuthenticatedRequest: 'credentials.md',
   OntologyLoginRequest: 'credentials.md',
+  OntologyRuntimeSessionTransfer: 'credentials.md',
   AskUserQuestionAnswer: 'user-questions.md',
   AskUserQuestionRequest: 'user-questions.md',
   UserQuestionProvider: 'user-questions.md',

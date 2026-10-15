@@ -751,6 +751,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the operator Peer, or the rejection status.',
       },
       {
+        signature: 'admitWebSocket(request: ConnectionTrustRequest): PeerAdmission',
+        description: 'Admit one WebSocket upgrade, consuming a transport ticket when the browser session uses Bearer headers.',
+        parameters: [{ name: 'request', description: 'upgrade request headers and URL.' }],
+        returns: 'the operator Peer, or the rejection status.',
+      },
+      {
         signature: 'runWithBrowserIdentity<Value>(request: ConnectionTrustRequest, operation: () => Value): Value',
         description: 'Run an admitted operation with the optional application browser identity.',
         parameters: [{ name: 'request', description: 'request headers from the HTTP or upgrade request.' }, { name: 'operation', description: 'operation that may await request-scoped work.' }],
@@ -1550,6 +1556,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: '@Remote async login(request: OntologyLoginRequest, signal: AbortSignal): Promise<OntologyAuthStatus>',
         description: 'Create, validate, and store one Runtime Session for the current browser.',
         parameters: [{ name: 'request', description: 'Ontology account credentials.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
+        returns: 'Redacted authenticated state.',
+      },
+      {
+        signature: '@Remote async importSession( request: OntologyRuntimeSessionTransfer, signal: AbortSignal, ): Promise<OntologyAuthStatus>',
+        description: 'Validate and store a Runtime Session supplied by the authenticated embedding page.',
+        parameters: [{ name: 'request', description: 'Runtime tokens and their expected identity.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
         returns: 'Redacted authenticated state.',
       },
       {
@@ -4730,7 +4742,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ConnectionTrustRequest',
-    declaration: 'export interface ConnectionTrustRequest {\n    readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>;\n}',
+    declaration: 'export interface ConnectionTrustRequest {\n    readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>;\n    readonly url?: string | undefined;\n}',
   },
   {
     name: 'ContentBlockMap',
@@ -5707,6 +5719,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OntologyRuntimeIdentity',
     declaration: 'export interface OntologyRuntimeIdentity {\n    readonly userId: string;\n    readonly username: string;\n    readonly displayName: string;\n    readonly accountType: OntologyAccountType;\n    readonly authorizationVersion: string;\n}',
+  },
+  {
+    name: 'OntologyRuntimeSessionTransfer',
+    declaration: 'export interface OntologyRuntimeSessionTransfer {\n    readonly accessToken: string;\n    readonly accessTokenExpiresAt: string;\n    readonly refreshToken: string;\n    readonly refreshTokenExpiresAt: string;\n    readonly user: OntologyRuntimeIdentity;\n}',
   },
   {
     name: 'OptionalSessionSeq',

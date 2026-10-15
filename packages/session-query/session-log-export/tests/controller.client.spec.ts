@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
-  downloadUrl, SessionLogDownloadController, sessionLogZipFilename,
+  downloadBlob, SessionLogDownloadController, sessionLogZipFilename,
 } from '../src/client/controller.ts'
 
 const SID = 'session-export-controller' as SessionId
@@ -23,12 +23,11 @@ describe('SessionLogDownloadController', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     const [route, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
     expect(route).toBe(`api/session.export?sessionId=${SID}&includeDescendants=true`)
-    expect(init.method).toBe('HEAD')
+    expect(init.method).toBe('GET')
     expect(init.signal).toBeInstanceOf(AbortSignal)
-    expect(save).toHaveBeenCalledWith(
-      route,
-      'dsh-session-session-export-controller.zip',
-    )
+    const saved = save.mock.calls[0] as unknown as [Blob, string]
+    expect(await saved[0].text()).toBe('zip')
+    expect(saved[1]).toBe('dsh-session-session-export-controller.zip')
     expect(controller.store.getSnapshot().bySession[SID]).toEqual({
       open: true, status: 'success', error: null,
     })
@@ -106,7 +105,7 @@ describe('SessionLogDownloadController', () => {
     await controller.download(SID)
 
     expect(fetcher.mock.calls[0]?.[0]).toBe(`api/session.export?sessionId=${SID}&includeDescendants=true`)
-    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'HEAD' })
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' })
     expect(click).toHaveBeenCalledOnce()
   })
 
@@ -130,14 +129,19 @@ describe('SessionLogDownloadController', () => {
 })
 
 describe('browser download helpers', () => {
-  it('sanitizes the archive filename and hands the relative route to a download anchor', () => {
+  it('sanitizes the archive filename and hands an authenticated Blob to a temporary download anchor', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:session-export')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const blob = new Blob(['zip'], { type: 'application/zip' })
 
     expect(sessionLogZipFilename('a/b' as SessionId)).toBe('dsh-session-a_b.zip')
-    downloadUrl('api/session.export?sessionId=a', 'archive.zip')
+    downloadBlob(blob, 'archive.zip')
     expect(click).toHaveBeenCalledOnce()
     const anchor = click.mock.instances[0] as HTMLAnchorElement
-    expect(anchor.getAttribute('href')).toBe('api/session.export?sessionId=a')
+    expect(create).toHaveBeenCalledWith(blob)
+    expect(anchor.getAttribute('href')).toBe('blob:session-export')
     expect(anchor.download).toBe('archive.zip')
+    expect(revoke).toHaveBeenCalledWith('blob:session-export')
   })
 })

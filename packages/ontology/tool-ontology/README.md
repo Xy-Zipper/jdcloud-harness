@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `dsh-tool-ontology` when an agent must inspect and change business data through published Ontology definitions. Eight stable tools discover authorized ids, describe Objects, perform bounded record reads and Link traversal, and prepare then execute Actions. Every call uses the current browser login and asks Runtime to enforce current Project and Action authorization; the package stores no token, capability cache, data-source secret, or business record.
+Use `dsh-tool-ontology` when an agent must inspect and change business data through published Ontology definitions. Nine stable tools discover authorized ids, describe Objects and Actions, perform bounded record reads and Link traversal, and prepare then execute Actions. Every call uses the current browser login and asks Runtime to enforce current Project and Action authorization; the package stores no token, capability cache, data-source secret, or business record.
 
 ## Table of Contents
 
@@ -37,8 +37,9 @@ The package has no configuration fields. Runtime address, HTTPS policy, deadline
 
 1. Call `ontology_list_projects`, then pass one returned `project_id` to later discovery and read tools.
 2. Call `ontology_list_objects` and `ontology_describe_object` before using Property, Link, or Action ids.
-3. Call `ontology_prepare_action` with published Action parameters; retain its immutable `invocationId` and preview.
-4. Call `ontology_execute_action` with only that invocation id. The tool rereads the Invocation, presents Runtime's summary when confirmation is required, and sends the write only after a one-shot approval. Treat the write as successful only when Runtime returns `status: succeeded`.
+3. Call `ontology_describe_action` to read the exact required and optional parameters and the confirmation requirement. Present each parameter's business `label`, technical `inputName`, and required status; pass `inputName` as the key to `ontology_prepare_action`.
+4. Call `ontology_prepare_action` with the described Action parameters; retain its immutable `invocationId` and preview.
+5. Call `ontology_execute_action` with only that invocation id. The tool rereads the Invocation, presents Runtime's summary when confirmation is required, and sends the write only after a one-shot approval. Treat the write as successful only when Runtime returns `status: succeeded`.
 
 Query and traversal pages default to 20 records and reject a `page_size` above 100. Equality filters use Property ids from Object detail, never source-column names. The Host generates the preparation idempotency key; execution accepts no replacement parameters. A rejected approval performs no execution request, and a sequential retry rereads the Invocation instead of reusing the earlier preview.
 
@@ -58,7 +59,7 @@ Each registration builds one fixed `/api/runtime/` request and delegates its Bea
 
 | Source | Responsibility |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Prompt guidance, eight tool schemas, fixed Runtime requests, Action approval gating, pagination, and idempotency keys. |
+| [`src/index.ts`](src/index.ts) | Prompt guidance, nine tool schemas, fixed Runtime requests, Action approval gating, pagination, and idempotency keys. |
 | [`src/runtime.ts`](src/runtime.ts) | Runtime response validation, Invocation status checks, and bounded result projection. |
 | [`src/types.ts`](src/types.ts) | Branded published ids and model-result types. |
 
@@ -88,7 +89,7 @@ The package adds one fixed discovery and Action-ordering paragraph.
 ##### Ontology guidance
 
 ```markdown
-Use Ontology tools only with ids returned by discovery. List Projects before selecting one, list and describe Objects before querying their Property ids or Link ids, and never guess ids. Prepare every Action before execution. Execute only the invocation_id returned by preparation; do not claim a write succeeded until ontology_execute_action returns status succeeded.
+Use Ontology tools only with ids returned by discovery. List Projects before selecting one, list and describe Objects before querying their Property ids or Link ids, and never guess ids. Describe a selected Action before preparation to discover its required and optional parameters and confirmation requirement. Present each Action parameter to users by its business label, technical inputName, and required status. Prepare every Action before execution. Execute only the invocation_id returned by preparation; do not claim a write succeeded until ontology_execute_action returns status succeeded.
 ```
 
 #### Token effect
@@ -103,11 +104,11 @@ Prefix-stable while the plugin, tool visibility, and guidance text are unchanged
 
 #### What the model sees
 
-The model sees the generated [`ontology_list_projects`, `ontology_list_objects`, `ontology_describe_object`, `ontology_query_objects`, `ontology_get_object`, `ontology_traverse_link`, `ontology_prepare_action`, and `ontology_execute_action` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ontology). Stable ids and bounded pagination are explicit; Runtime tokens, data-source credentials, table names, and raw write expressions are absent.
+The model sees the generated [`ontology_list_projects`, `ontology_list_objects`, `ontology_describe_object`, `ontology_describe_action`, `ontology_query_objects`, `ontology_get_object`, `ontology_traverse_link`, `ontology_prepare_action`, and `ontology_execute_action` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ontology). Stable ids and bounded pagination are explicit; Runtime tokens, data-source credentials, table names, and raw write expressions are absent.
 
 #### Token effect
 
-Eight fixed schemas are sent on each request while visible.
+Nine fixed schemas are sent on each request while visible.
 
 #### KV Cache effect
 
@@ -117,7 +118,7 @@ Prefix-stable while the tool definitions and visibility are unchanged.
 
 #### What the model sees
 
-Every successful call returns bounded JSON. Discovery returns published ids and labels; reads return validated records keyed by Property id; preparation returns an invocation id, expiry, confirmation requirement, summary, and affected Objects. Before a confirmed execution, the user sees Runtime's summary, Action and Project ids, and a bounded affected-Object list; rejection returns a tool error without executing. Execution returns only a succeeded invocation and its Runtime result. Tool failures return an error instead of unvalidated Runtime fields.
+Every successful call returns bounded JSON. Discovery returns published ids and labels; Action detail returns exact parameters with the business `label`, technical `inputName`, and `required` status first; reads return validated records keyed by Property id; preparation returns an invocation id, expiry, confirmation requirement, summary, and affected Objects. Before a confirmed execution, the user sees Runtime's summary, Action and Project ids, and a bounded affected-Object list; rejection returns a tool error without executing. Execution returns only a succeeded invocation and its Runtime result. Tool failures return an error instead of unvalidated Runtime fields.
 
 #### Token effect
 

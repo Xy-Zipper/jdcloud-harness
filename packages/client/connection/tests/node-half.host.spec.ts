@@ -372,6 +372,62 @@ describe('connection node half', () => {
     }
   })
 
+  it('propagates the configured browser-session cookie policy', async () => {
+    const { connection, dispose } = await mounted({
+      browserAuthentication: false,
+      browserSessionCookieSameSite: 'none',
+      trustedHosts: ['harness.example'],
+    })
+    try {
+      const exchange = fakeResponse()
+      connection.authorizeIndex(fakeRequest({ host: 'harness.example' }, '/'), exchange.response)
+      expect(exchange.state.headers?.['set-cookie']).toMatch(/; HttpOnly; SameSite=None; Secure$/u)
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('bootstraps Bearer browser sessions and requires them on the shared API route', async () => {
+    const { ctx, routes, connection, dispose } = await mounted({
+      browserAuthentication: false,
+      browserSessionTransport: 'bearer',
+      trustedHosts: ['harness.example'],
+    })
+    try {
+      const index = fakeResponse()
+      expect(connection.authorizeIndex(fakeRequest({ host: 'harness.example' }, '/'), index.response)).toBe(true)
+      expect(index.state).toEqual({})
+
+      const bootstrap = routes.find(route => route.path === '/api/browser-session')
+      expect(bootstrap).toMatchObject({ kind: 'exact' })
+      const issued = fakeResponse()
+      await bootstrap!.handler(fakePost({ host: 'harness.example' }, '/api/browser-session', {}), issued.response)
+      expect(issued.state.status).toBe(200)
+      const payload = JSON.parse(String(issued.state.body)) as { token: string; expiresAt: number }
+      expect(typeof payload.token).toBe('string')
+      expect(Number.isSafeInteger(payload.expiresAt)).toBe(true)
+
+      const shared = routes.find(route => route.path === API_PATH)
+      connection.fetch.register({
+        path: '/api/browser-id', methods: ['GET'], requestBody: 'buffered',
+        fetch: () => Promise.resolve(Response.json({ id: ctx.browserSession?.currentIdRequired() })),
+      })
+      const denied = fakeResponse()
+      await shared!.handler(fakeRequest({ host: 'harness.example' }), denied.response)
+      expect(denied.state.status).toBe(401)
+      const allowed = fakeResponse()
+      await shared!.handler(fakeRequest({
+        host: 'harness.example', authorization: `Bearer ${payload.token}`,
+      }, '/api/browser-id'), allowed.response)
+      expect(allowed.state.status).toBe(200)
+      const responseBody: unknown = JSON.parse(String(allowed.state.body))
+      expect(responseBody !== null && typeof responseBody === 'object'
+        && 'id' in responseBody && typeof responseBody.id === 'string').toBe(true)
+    } finally {
+      await dispose()
+    }
+  })
+
   it('provides a disposable dedicated RPC channel', async () => {
     const ctx = new Context()
     const routes: WebRoute[] = []

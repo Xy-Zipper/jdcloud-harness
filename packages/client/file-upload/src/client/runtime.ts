@@ -5,6 +5,7 @@ import { bytesToBase64 } from '@deepseek-ai/dsh-util-crypto'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import { FILE_UPLOAD_ROUTE } from '../protocol.ts'
 import type {
   ClientFileUploadHooks, EncodedFileUploadRequest, FileUploadFetch, FileUploadValue,
@@ -167,7 +168,10 @@ export class FileUploadRuntime extends Service implements FileUploadService {
   constructor(ctx: Context) {
     super(ctx, 'fileUpload')
     const hook = (globalThis as ClientFileUploadGlobal).__DSH_FILE_UPLOAD__
-    this.transport = hook === undefined ? workerTransport() : customTransport(hook.fetch)
+    const connection = ctx.get('connection') as Pick<ConnectionHandle, 'authorizationHeader'> | undefined
+    this.transport = hook === undefined
+      ? workerTransport(() => connection?.authorizationHeader())
+      : customTransport(hook.fetch)
   }
 
   /**
@@ -237,64 +241,79 @@ function customTransport(customFetch: FileUploadFetch): FileUploadTransport {
   }
 }
 
-function workerTransport(): FileUploadTransport {
+function workerTransport(
+  authorizationHeader: () => Promise<string | undefined> | undefined,
+): FileUploadTransport {
   return {
     post(request) {
       if (typeof Worker !== 'function') {
         return Promise.reject(new Error('background upload requires Web Worker support'))
       }
-      const workerUrl = URL.createObjectURL(new Blob([
-        `(${fileUploadWorker.toString()})()`,
-      ], { type: 'text/javascript' }))
-      const worker = new Worker(workerUrl, { name: 'dsh-file-upload' })
-      URL.revokeObjectURL(workerUrl)
-      return new Promise((resolve, reject) => {
-        let settled = false
-        const abort = (): void => {
-          settled = true
-          worker.terminate()
-          request.signal?.removeEventListener('abort', abort)
-          reject(new DOMException('The operation was aborted.', 'AbortError'))
-        }
-        const finish = (settle: () => void): void => {
-          if (settled) return
-          settled = true
-          request.signal?.removeEventListener('abort', abort)
-          worker.terminate()
-          settle()
-        }
-        worker.onmessage = (event: MessageEvent<UploadWorkerOutput>) => {
-          const output = event.data
-          if (output.kind === 'progress') {
-            request.onProgress?.({
-              loaded: output.loaded,
-              ...(output.total === undefined ? {} : { total: output.total }),
-            })
-          } else if (output.kind === 'complete') {
-            finish(() => { resolve({ status: output.status, body: output.body }) })
-          } else {
-            finish(() => { reject(new Error(output.message)) })
-          }
-        }
-        worker.onerror = (event) => {
-          finish(() => { reject(new Error(event.message || 'background upload worker failed')) })
-        }
-        if (request.signal?.aborted === true) {
-          abort()
-          return
-        }
-        request.signal?.addEventListener('abort', abort, { once: true })
-        const message: UploadWorkerStart = {
-          // The Worker's own base is `blob:`, so its request URL must be absolute.
-          url: new URL(request.path, document.baseURI).href,
-          body: request.body,
-          headers: request.headers ?? {},
-        }
-        if (request.body instanceof ReadableStream) worker.postMessage(message, [request.body])
-        else worker.postMessage(message)
-      })
+      const authorization = authorizationHeader()
+      return authorization === undefined
+        ? postThroughWorker(request, undefined)
+        : authorization.then(value => postThroughWorker(request, value))
     },
   }
+}
+
+function postThroughWorker(
+  request: FileUploadRequest,
+  authorization: string | undefined,
+): Promise<FileUploadResponse> {
+  const workerUrl = URL.createObjectURL(new Blob([
+    `(${fileUploadWorker.toString()})()`,
+  ], { type: 'text/javascript' }))
+  const worker = new Worker(workerUrl, { name: 'dsh-file-upload' })
+  URL.revokeObjectURL(workerUrl)
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const abort = (): void => {
+      settled = true
+      worker.terminate()
+      request.signal?.removeEventListener('abort', abort)
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    const finish = (settle: () => void): void => {
+      if (settled) return
+      settled = true
+      request.signal?.removeEventListener('abort', abort)
+      worker.terminate()
+      settle()
+    }
+    worker.onmessage = (event: MessageEvent<UploadWorkerOutput>) => {
+      const output = event.data
+      if (output.kind === 'progress') {
+        request.onProgress?.({
+          loaded: output.loaded,
+          ...(output.total === undefined ? {} : { total: output.total }),
+        })
+      } else if (output.kind === 'complete') {
+        finish(() => { resolve({ status: output.status, body: output.body }) })
+      } else {
+        finish(() => { reject(new Error(output.message)) })
+      }
+    }
+    worker.onerror = (event) => {
+      finish(() => { reject(new Error(event.message || 'background upload worker failed')) })
+    }
+    if (request.signal?.aborted === true) {
+      abort()
+      return
+    }
+    request.signal?.addEventListener('abort', abort, { once: true })
+    const message: UploadWorkerStart = {
+      // The Worker's own base is `blob:`, so its request URL must be absolute.
+      url: new URL(request.path, document.baseURI).href,
+      body: request.body,
+      headers: {
+        ...request.headers,
+        ...(authorization === undefined ? {} : { authorization }),
+      },
+    }
+    if (request.body instanceof ReadableStream) worker.postMessage(message, [request.body])
+    else worker.postMessage(message)
+  })
 }
 
 function parseFileUploadResult(body: string): RemoteResult<FileUploadValue> {

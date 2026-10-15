@@ -33,7 +33,7 @@ describe('gen-tool-catalog collectToolCatalog', () => {
       'job_kill', 'job_list', 'job_output',
       'list_agents', 'list_agents', 'list_mcp_resource_templates', 'list_mcp_resources',
       'list_subagent_models', 'load_workspace_dependencies', 'lsp',
-      'ontology_describe_object', 'ontology_execute_action', 'ontology_get_object', 'ontology_list_objects',
+      'ontology_describe_action', 'ontology_describe_object', 'ontology_execute_action', 'ontology_get_object', 'ontology_list_objects',
       'ontology_list_projects', 'ontology_prepare_action', 'ontology_query_objects', 'ontology_traverse_link',
       'plugin_manager', 'present', 'pwsh', 'pwsh', 'ralph',
       'read', 'read_image', 'read_mcp_resource', 'run_code', 'schedule_create', 'schedule_delete',

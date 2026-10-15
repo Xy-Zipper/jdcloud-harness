@@ -111,6 +111,9 @@ function runtimeServer() {
 
   return {
     fetcher,
+    transferFor(username: string) {
+      return tokenBody(issue(identity(username)))
+    },
     expireAccessToken(token: string) {
       const session = sessions.get(token)
       if (session !== undefined) session.accessValid = false
@@ -175,6 +178,39 @@ describe('Ontology Runtime HTTP client', () => {
 })
 
 describe('Ontology authentication controller', () => {
+  it('imports one transferred Runtime Session into only the current browser and keeps refresh working', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const importedRequest = browserRequest(browserCookie(browserSession))
+    const otherRequest = browserRequest(browserCookie(browserSession))
+    const transfer = server.transferFor('alice')
+
+    await expect(browserSession.run(importedRequest, () => ctx.ontologyAuthController.importSession(
+      transfer, AbortSignal.timeout(1_000),
+    ))).resolves.toMatchObject({ authenticated: true, user: { userId: 'user-alice' } })
+    await expect(browserSession.run(otherRequest, () => ctx.ontologyAuthController.status()))
+      .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
+
+    server.expireAccessToken(transfer.accessToken)
+    await expect(browserSession.run(importedRequest, () => ctx.ontologyAuthController.status()))
+      .resolves.toMatchObject({ authenticated: true, user: { userId: 'user-alice' } })
+    expect(server.sessionFor('alice')?.accessToken).not.toBe(transfer.accessToken)
+  })
+
+  it('rejects a transferred identity that does not own the supplied Runtime Session', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    const transfer = server.transferFor('alice')
+
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+      ...transfer,
+      user: { ...transfer.user, userId: 'user-bob' },
+    }, AbortSignal.timeout(1_000)))).rejects.toMatchObject({ code: 'ontology/session-import-failed' })
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.status()))
+      .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
+  })
+
   it('isolates different browsers and deletes only the browser that logs out', async () => {
     const server = runtimeServer()
     const { ctx, browserSession } = await boot(server.fetcher)

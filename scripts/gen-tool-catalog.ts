@@ -495,7 +495,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolOntology)
     },
     note:
-      'The eight tools discover authorized Project and Object ids before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.',
+      'The nine tools discover authorized Project, Object, and Action details before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-ralph',

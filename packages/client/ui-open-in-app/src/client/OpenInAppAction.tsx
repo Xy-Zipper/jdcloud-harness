@@ -8,11 +8,11 @@ import { OpenTargetButton } from './OpenTargetButton.tsx'
 export interface OpenInAppActionInjected {
   hooks: {
     openInAppApps: ObservableSnapshot<readonly string[] | null>
+    openInAppIcons: ObservableSnapshot<Readonly<Record<string, string | null>>>
     openInAppChoice: ObservableSnapshot<string>
   }
   launch: (appId: string, path: string) => Promise<void>
   choose: (appId: string) => void
-  iconUrl: (appId: string) => string
 }
 
 /** Full props for the Session-header open-in-app split button. */
@@ -69,13 +69,14 @@ const APP_LABEL_KEY: Record<string, OpenInAppKey | undefined> = {
  * @returns the shared control, or null without an eligible application and directory.
  */
 export function OpenInAppAction(props: OpenInAppActionProps): React.JSX.Element | null {
-  const { sessionId, useSessions, useOpenInAppApps, useOpenInAppChoice, t } = props
+  const { sessionId, useSessions, useOpenInAppApps, useOpenInAppIcons, useOpenInAppChoice, t } = props
   const cwd = useSessions(state => state.byId[sessionId]?.cwd)
   const available = useOpenInAppApps(apps => apps)
+  const icons = useOpenInAppIcons(value => value)
   const choice = useOpenInAppChoice(id => id)
   const apps = (available ?? []).flatMap((id) => {
     const key = APP_LABEL_KEY[id]
-    return key === undefined ? [] : [{ id, name: t(key), icon: props.iconUrl(id) }]
+    return key === undefined ? [] : [{ id, name: t(key), icon: icons[id] ?? null }]
   })
   const preferred = apps.find(app => app.id === choice) ?? apps[0]
   if (preferred === undefined || cwd === undefined || cwd === '') return null

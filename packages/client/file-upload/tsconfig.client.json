@@ -18,6 +18,7 @@
     { "path": "../../util/crypto" },
     { "path": "../../attachment/attachment" },
     { "path": "../../core/session" },
-    { "path": "../../typert/protocol" }
+    { "path": "../../typert/protocol" },
+    { "path": "../connection/tsconfig.client.json" }
   ]
 }

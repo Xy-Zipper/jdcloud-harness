@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Serve the built Web shell to browsers from its configured distribution directory. The root and configured index path render the bootstrapped index; existing assets are served directly, while missing or non-file paths return 404, traversal returns 403, and unsupported methods return 405. Index access requires a valid process token or browser cookie, but static assets remain public. Only one instance can handle unmatched routes at a time; a second activation fails, and unloading the active instance makes unmatched requests return 404.
+Serve the built Web shell to browsers from its configured distribution directory. The root and configured index path render the bootstrapped index; existing assets are served directly, while missing or non-file paths return 404, traversal returns 403, and unsupported methods return 405. Index access follows Connection authentication: launch-token deployments require the process-token cookie exchange, while a Bearer browser-session deployment serves the index before the Client bootstraps its identity. Static assets remain public. Only one instance can handle unmatched routes at a time; a second activation fails, and unloading the active instance makes unmatched requests return 404.
 
 ## Table of Contents
 
@@ -43,7 +43,7 @@ Requests are served from the dist root (the directory containing `distIndex`). T
 
 The served HTML carries one document base, `<base href="./">`, ahead of every injected resource row, so it freezes the entry directory the page was loaded from: the shell's own app-directory-relative references and the Host's plugin-resource rows both resolve under the mount that served the page. The same index therefore serves the origin root and whatever mount a prefix-stripping proxy owns; this plugin renders it only for the dist root and the configured index path.
 
-Root and configured-index responses call `ctx.connection.authorizeIndex` before reading HTML. A valid process token receives a 303 redirect plus the persistent browser cookie; an existing valid cookie serves the index; every other index request receives the Connection-owned 401 response. Non-index files remain public static assets. Connection owns the token, cookie, expiry, and signing-record semantics.
+Root and configured-index responses call `ctx.connection.authorizeIndex` before reading HTML. Under launch authentication, a valid process token receives a 303 redirect plus the persistent browser cookie, an existing valid cookie serves the index, and every other index request receives the Connection-owned 401 response. Under the Bearer browser-session transport, a trusted GET or HEAD serves the index so the Client can request its tab-scoped session; later API requests still require that identity. Non-index files remain public static assets. Connection owns the token, cookie or Bearer session, expiry, and signing-record semantics.
 
 ### Observable failures
 

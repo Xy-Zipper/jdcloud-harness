@@ -128,7 +128,11 @@ describe('Ontology login through a real Loader composition', () => {
     ) as PatchOptions[]
     const rows = applyEntryPatches([], [...web, ...ontology], () => {})
     expect(rows.find(row => row.id === 'connection')).toMatchObject({
-      config: { browserAuthentication: false, browserSession: true },
+      config: {
+        browserAuthentication: false,
+        browserSession: true,
+        browserSessionTransport: 'bearer',
+      },
     })
     expect(rows.find(row => row.id === 'ontology-auth-controller')?.name)
       .toBe('@deepseek-ai/dsh-api-ontology-auth-controller')
@@ -141,7 +145,7 @@ describe('Ontology login through a real Loader composition', () => {
     })
   })
 
-  it('activates the controller and UI node half and validates a real browser-scoped login', async () => {
+  it('activates the controller and UI node half for password and imported browser-scoped logins', async () => {
     const fetcher = vi.fn(async (input: string | URL | Request): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : String(input))
       if (url.pathname.endsWith('/api/runtime/auth/login')) {
@@ -173,6 +177,7 @@ describe('Ontology login through a real Loader composition', () => {
       'ontology_list_projects',
       'ontology_list_objects',
       'ontology_describe_object',
+      'ontology_describe_action',
       'ontology_query_objects',
       'ontology_get_object',
       'ontology_traverse_link',
@@ -184,6 +189,21 @@ describe('Ontology login through a real Loader composition', () => {
 
     await expect(browserSession.run(request, () => context.ontologyAuthController.login({
       username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))).resolves.toMatchObject({
+      authenticated: true,
+      user: { userId: 'user-alice', authorizationVersion: '1' },
+    })
+
+    const importedRequest = { headers: { host: 'harness.example', cookie: browserCookie(browserSession) } }
+    await expect(browserSession.run(importedRequest, () => context.ontologyAuthController.importSession({
+      accessToken: 'access-imported',
+      accessTokenExpiresAt: '2026-10-09T10:15:00Z',
+      refreshToken: 'refresh-imported',
+      refreshTokenExpiresAt: '2026-11-08T10:00:00Z',
+      user: {
+        userId: 'user-alice', username: 'alice', displayName: 'Alice',
+        accountType: 'admin', authorizationVersion: '1',
+      },
     }, AbortSignal.timeout(1_000)))).resolves.toMatchObject({
       authenticated: true,
       user: { userId: 'user-alice', authorizationVersion: '1' },

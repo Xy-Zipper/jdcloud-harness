@@ -204,6 +204,27 @@
       }
     },
     {
+      "name": "ontology_describe_action",
+      "description": "Read one authorized published Action with exact required and optional parameters and its confirmation requirement.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Exact Project id returned by ontology_list_projects."
+          },
+          "action_type_id": {
+            "type": "string",
+            "description": "Exact authorized Action Type id returned by ontology_describe_object."
+          }
+        },
+        "required": [
+          "project_id",
+          "action_type_id"
+        ]
+      }
+    },
+    {
       "name": "ontology_describe_object",
       "description": "Read one published Object Type with Properties, Links, and authorized related Actions.",
       "parameters": {
@@ -301,7 +322,7 @@
           },
           "action_type_id": {
             "type": "string",
-            "description": "Exact authorized Action Type id returned by ontology_describe_object."
+            "description": "Exact authorized Action Type id returned by ontology_describe_action."
           },
           "parameters": {
             "type": "object",

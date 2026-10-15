@@ -24,6 +24,9 @@
       "path": "../../host/open-in-app"
     },
     {
+      "path": "../connection/tsconfig.client.json"
+    },
+    {
       "path": "../locale/tsconfig.client.json"
     },
     {

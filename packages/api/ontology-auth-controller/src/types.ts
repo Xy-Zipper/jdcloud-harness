@@ -4,6 +4,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     'ontology/auth-required': { readonly reason: 'missing' | 'expired' }
     'ontology/auth-failed': { readonly code: string | null; readonly status: number | null }
+    'ontology/session-import-failed': { readonly code: string | null; readonly status: number | null }
     'ontology/validation-failed': { readonly code: string | null; readonly status: number | null }
     'ontology/logout-failed': { readonly code: string | null; readonly status: number | null }
     'ontology/administrator-required': { readonly capability: 'danger-full-access' }
@@ -26,6 +27,15 @@ export interface OntologyRuntimeIdentity {
 export interface OntologyLoginRequest {
   readonly username: string
   readonly password: string
+}
+
+/** Runtime tokens transferred from an authenticated Ontology management page. */
+export interface OntologyRuntimeSessionTransfer {
+  readonly accessToken: string
+  readonly accessTokenExpiresAt: string
+  readonly refreshToken: string
+  readonly refreshTokenExpiresAt: string
+  readonly user: OntologyRuntimeIdentity
 }
 
 /** Host-only request to one fixed Ontology Runtime endpoint. */

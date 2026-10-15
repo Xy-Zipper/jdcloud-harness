@@ -12,6 +12,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import {
+  readActionDetail,
   readActionResult,
   readObjectDetail,
   readObjectGet,
@@ -22,6 +23,7 @@ import {
   readRecordPage,
   readTraversal,
 } from './runtime.ts'
+import type { OntologyActionDetail, OntologyActionParameterSummary } from './types.ts'
 
 export type * from './types.ts'
 
@@ -60,6 +62,8 @@ export function apply(ctx: Context): void {
     order: ctx.systemPrompt.getSectionOrder('TOOL_SESSION_QUERY') + 20,
     text: 'Use Ontology tools only with ids returned by discovery. List Projects before selecting one, '
       + 'list and describe Objects before querying their Property ids or Link ids, and never guess ids. '
+      + 'Describe a selected Action before preparation to discover its required and optional parameters and confirmation requirement. '
+      + 'Present each Action parameter to users by its business label, technical inputName, and required status. '
       + 'Prepare every Action before execution. Execute only the invocation_id returned by preparation; '
       + 'do not claim a write succeeded until ontology_execute_action returns status succeeded.',
   })
@@ -122,6 +126,29 @@ export function apply(ctx: Context): void {
       return modelValue(readObjectDetail(await request(ctx, {
         method: 'GET', path: projectPath(args.project_id, 'objects', args.object_type_id),
       }, exec.signal)))
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'ontology_describe_action',
+    description: 'Read one authorized published Action with exact required and optional parameters and its confirmation requirement.',
+    parameters: {
+      project_id: PROJECT_ID,
+      action_type_id: {
+        type: 'string', required: true,
+        description: 'Exact authorized Action Type id returned by ontology_describe_object.',
+      },
+    },
+    output: JSON_OUTPUT,
+    async execute(args, exec) {
+      const action = readActionDetail(await request(ctx, {
+        method: 'GET', path: projectPath(args.project_id, 'actions', args.action_type_id),
+      }, exec.signal))
+      if (action.targetType === undefined) return modelValue(actionDetail(action, []))
+      const object = readObjectDetail(await request(ctx, {
+        method: 'GET', path: projectPath(args.project_id, 'objects', action.targetType),
+      }, exec.signal))
+      return modelValue(actionDetail(action, object.properties))
     },
   }))
 
@@ -224,7 +251,7 @@ export function apply(ctx: Context): void {
       project_id: PROJECT_ID,
       action_type_id: {
         type: 'string', required: true,
-        description: 'Exact authorized Action Type id returned by ontology_describe_object.',
+        description: 'Exact authorized Action Type id returned by ontology_describe_action.',
       },
       parameters: {
         type: 'object', additionalProperties: true, required: true,
@@ -257,6 +284,46 @@ export function apply(ctx: Context): void {
       }, exec.signal)))
     },
   }))
+}
+
+/** Join caller-supplied Action mappings with their published Property metadata. */
+function actionDetail(
+  action: ReturnType<typeof readActionDetail>,
+  properties: readonly {
+    readonly id: string
+    readonly label: string
+    readonly description: string
+    readonly type: string
+  }[],
+): OntologyActionDetail {
+  const propertyById = new Map(properties.map(property => [property.id, property]))
+  const parameters: OntologyActionParameterSummary[] = []
+  for (const mapping of action.mappings) {
+    if (mapping.source !== 'parameter') continue
+    const property = propertyById.get(mapping.targetProperty)
+    if (property === undefined) {
+      throw new HarnessError(
+        `Ontology Action parameter targets missing Property ${String(mapping.targetProperty)}`,
+        'ONTOLOGY_RUNTIME_INVALID_RESPONSE',
+      )
+    }
+    if (mapping.inputName.length === 0) {
+      throw new HarnessError(
+        `Ontology Action parameter for Property ${String(mapping.targetProperty)} has no name`,
+        'ONTOLOGY_RUNTIME_INVALID_RESPONSE',
+      )
+    }
+    parameters.push({
+      label: property.label,
+      inputName: mapping.inputName,
+      required: mapping.required,
+      description: property.description,
+      type: property.type,
+      targetProperty: mapping.targetProperty,
+    })
+  }
+  const { mappings: _mappings, ...summary } = action
+  return { ...summary, parameters }
 }
 
 async function request(ctx: Context, request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown> {

@@ -61,6 +61,19 @@ export interface OntologyObjectDetail {
   readonly actions: readonly OntologyActionSummary[]
 }
 
+/** One published Action mapping used to derive caller-supplied parameters. */
+export interface OntologyActionMapping {
+  readonly targetProperty: OntologyPropertyId
+  readonly source: 'parameter' | 'constant' | 'formula'
+  readonly inputName: string
+  readonly required: boolean
+}
+
+/** Authorized published Action detail returned by Runtime. */
+export interface OntologyActionDefinition extends OntologyActionSummary {
+  readonly mappings: readonly OntologyActionMapping[]
+}
+
 /** Successful Action execution result. */
 export interface OntologyActionResult {
   readonly invocationId: OntologyInvocationId
@@ -111,6 +124,19 @@ export function readObjectDetail(value: unknown): OntologyObjectDetail {
     properties: requireArray(record['properties'], 'Ontology Object properties').map(readPropertyDetail),
     links: requireArray(record['links'], 'Ontology Object links').map(readLink),
     actions: requireArray(record['actions'], 'Ontology Object actions').map(readAction),
+  }
+}
+
+/**
+ * Parse one authorized published Action definition.
+ * @param value Untrusted Ontology Runtime response.
+ * @returns Validated Action metadata and Property mappings.
+ */
+export function readActionDetail(value: unknown): OntologyActionDefinition {
+  const record = requireRecord(value, 'Ontology Action detail')
+  return {
+    ...readAction(record),
+    mappings: requireArray(record['mappings'], 'Ontology Action mappings').map(readActionMapping),
   }
 }
 
@@ -286,6 +312,21 @@ function readAction(value: unknown): OntologyActionSummary {
       ? {}
       : { targetType: objectTypeId(targetType, 'Ontology Action target Object id') },
     requiresConfirmation: requireBoolean(record['requiresConfirmation'], 'Ontology Action confirmation requirement'),
+  }
+}
+
+function readActionMapping(value: unknown): OntologyActionMapping {
+  const record = requireRecord(value, 'Ontology Action mapping')
+  const sourceValue = record['source']
+  const source = sourceValue === undefined || sourceValue === '' ? 'parameter' : sourceValue
+  if (source !== 'parameter' && source !== 'constant' && source !== 'formula') {
+    throw new Error('Ontology Action mapping source is invalid')
+  }
+  return {
+    targetProperty: propertyId(record['targetProperty'], 'Ontology Action target Property id'),
+    source,
+    inputName: requireString(record['inputName'], 'Ontology Action input name'),
+    required: requireBoolean(record['required'], 'Ontology Action parameter required flag'),
   }
 }
 

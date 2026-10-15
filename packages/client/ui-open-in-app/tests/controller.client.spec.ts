@@ -18,12 +18,21 @@ describe('OpenInAppController availability', () => {
   })
 
   it('shares one availability read across concurrent loads', async () => {
-    const fetcher = vi.fn(async () => jsonResponse({ apps: ['finder'] }))
-    const controller = new OpenInAppController(fetcher)
+    const fetcher = vi.fn(async (input: string | URL) => String(input) === 'open-in-app/apps'
+      ? jsonResponse({ apps: ['finder'] })
+      : new Response('icon', { headers: { 'content-type': 'image/png' } }))
+    const create = vi.fn(() => 'blob:finder')
+    const revoke = vi.fn()
+    const controller = new OpenInAppController(fetcher, create, revoke)
     await Promise.all([controller.load(), controller.load()])
     await controller.load()
-    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual(['open-in-app/apps', 'open-in-app/icon/finder'])
     expect(controller.apps.getSnapshot()).toEqual(['finder'])
+    expect(controller.icons.getSnapshot()).toEqual({ finder: 'blob:finder' })
+    expect(create).toHaveBeenCalledOnce()
+    await controller.dispose()
+    expect(revoke).toHaveBeenCalledWith('blob:finder')
   })
 
   it('publishes an empty list for a non-OK availability answer and for a non-array payload', async () => {
@@ -34,6 +43,36 @@ describe('OpenInAppController availability', () => {
     const malformed = new OpenInAppController(async () => jsonResponse({ apps: 'nope' }))
     await malformed.load()
     expect(malformed.apps.getSnapshot()).toEqual([])
+  })
+
+  it('uses fallback glyphs for unavailable icons and ignores loads after disposal', async () => {
+    const fetcher = vi.fn(async (input: string | URL) => {
+      if (String(input) === 'open-in-app/apps') return jsonResponse({ apps: ['finder', 'cursor'] })
+      if (String(input).endsWith('/finder')) return new Response('', { status: 404 })
+      throw new Error('icon transport failed')
+    })
+    const controller = new OpenInAppController(fetcher, vi.fn(), vi.fn())
+    await controller.load()
+    expect(controller.icons.getSnapshot()).toEqual({ finder: null, cursor: null })
+    await controller.dispose()
+    await controller.load()
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('releases an icon that settles while disposal is waiting', async () => {
+    const icon = Promise.withResolvers<Response>()
+    const fetcher = vi.fn(async (input: string | URL) => String(input) === 'open-in-app/apps'
+      ? jsonResponse({ apps: ['finder'] })
+      : icon.promise)
+    const revoke = vi.fn()
+    const controller = new OpenInAppController(fetcher, () => 'blob:late-icon', revoke)
+    const loading = controller.load()
+    await vi.waitFor(() => { expect(controller.apps.getSnapshot()).toEqual(['finder']) })
+    const disposing = controller.dispose()
+    icon.resolve(new Response('icon'))
+    await Promise.all([loading, disposing])
+    expect(controller.icons.getSnapshot()).toEqual({})
+    expect(revoke).toHaveBeenCalledWith('blob:late-icon')
   })
 
   it('requests the document-relative availability route', async () => {

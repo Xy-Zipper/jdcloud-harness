@@ -46,6 +46,7 @@ async function bench(): Promise<{ ctx: Context; fiber: ReturnType<Context['plugi
   } as never, () => null)
   ctx.provide('sessions', {})
   ctx.provide('locale', new LocaleRuntime(ctx))
+  ctx.provide('connection', { fetch: (input: string | URL, init: RequestInit) => fetch(input, init) } as never)
   ctx.provide('remote', remote as never)
   ctx.provide('remote.session', remote.session as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
@@ -59,7 +60,7 @@ function headerEntryIds(ctx: Context): (string | undefined)[] {
 
 describe('open-in-app browser half', () => {
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['sessions', 'slots', 'locale', 'remote', 'remote.session'])
+    expect(inject).toEqual(['sessions', 'slots', 'locale', 'remote', 'remote.session', 'connection'])
   })
 
   it('registers both document-preview path controls behind one desktop answer, and fiber teardown removes them', async () => {
@@ -101,12 +102,15 @@ describe('open-in-app browser half', () => {
   })
 
   it('injects the controller face: availability sources, launch carrier, choice, and icon URLs', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:open-in-app-icon')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     const fetcher = vi.fn(async (input: string | URL, init?: RequestInit) => {
       void init
       const url = String(input)
       if (url === 'open-in-app/apps') {
         return new Response(JSON.stringify({ apps: ['finder', 'cursor', 7] }), { status: 200 })
       }
+      if (url.startsWith('open-in-app/icon/')) return new Response('icon', { status: 200 })
       return new Response(JSON.stringify({ ok: true }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetcher)
@@ -116,8 +120,10 @@ describe('open-in-app browser half', () => {
 
     await vi.waitFor(() => {
       expect(injected.hooks.openInAppApps.getSnapshot()).toEqual(['finder', 'cursor'])
+      expect(injected.hooks.openInAppIcons.getSnapshot()).toEqual({
+        finder: 'blob:open-in-app-icon', cursor: 'blob:open-in-app-icon',
+      })
     })
-    expect(injected.iconUrl('cursor')).toBe('open-in-app/icon/cursor')
 
     injected.choose('cursor')
     expect(injected.hooks.openInAppChoice.getSnapshot()).toBe('cursor')

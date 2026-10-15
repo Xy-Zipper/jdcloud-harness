@@ -5,6 +5,7 @@
     # Host session instead of sharing Harness authentication state.
     browserAuthentication: false
     browserSession: true
+    browserSessionTransport: bearer
     trustedHosts: !!js ctx.webRuntime.trustedHosts
 
 - insert:
