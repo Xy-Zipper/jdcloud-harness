@@ -1,0 +1,7 @@
+- dialog "Skills":
+  - heading "Skills" [level=2]
+  - textbox "Search skills": workspace
+  - listbox "Skill list":
+    - option "workspace-summary Summarize the current workspace"
+  - status
+  - button "Manage skills"

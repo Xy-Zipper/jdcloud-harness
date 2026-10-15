@@ -1,5 +1,5 @@
 ---
-description: "Web skill references and the dedicated skill tool row for the dsh web client: the /-triggered skill source and the skill call card."
+description: "Web skill discovery, project-local skill management, references, and the dedicated skill tool row for the dsh web client."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-client-ui-skill` lets users invoke a skill by choosing it from the `/` suggestions or typing `/name` directly. The same literal command loads the skill consistently from the Web composer, TUI, and ACP, while a name shared with a host command continues to resolve as that command. Skill calls appear in the conversation as expandable `Instructions` cards whose settled contents remain stable when the installed skill catalog changes.
+`dsh-client-ui-skill` gives the Web composer a dedicated searchable skill picker and a project-local skill manager, while preserving `/` suggestions and direct `/name` entry. The same literal command loads the skill consistently from the Web composer, TUI, and ACP, while a name shared with a host command continues to resolve as that command. Skill calls appear in the conversation as expandable `Instructions` cards whose settled contents remain stable when the installed skill catalog changes.
 
 ## Table of Contents
 
@@ -25,11 +25,15 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-Type `/` in the composer and pick a skill from the suggestions, or type `/name` directly; the sent message carries the literal text, and the host loads the skill the same way for a menu pick or a hand-typed token. A name shared with a host command still resolves to the command — adjudication claims the line client-side before it ever becomes a prompt.
+Choose the skill button in the composer to browse a searchable panel, type `/` and pick a skill from the suggestions, or type `/name` directly. Every path inserts the literal `/name` text, and the host loads it the same way. A name shared with a host command still resolves to the command — adjudication claims the line client-side before it ever becomes a prompt.
 
 ### What the source offers
 
 Ordinary-session candidates come from the `skills/list` Remote; the host serves every user-invocable skill, and a `modelInvocable: false` entry (a `disable-model-invocation` skill, whose only entry point is this path) wears the user-only marker as a description prefix in the active language. Results rank through the `/` menu's shared name ranker, `rankByName` from ui-primitives: the query matches a case-insensitive ordered subsequence of the skill name, prefix hits rank first, and ties keep the host order ([ranking decision](../../../.agents/notes/archived/feature/2026-08-04-web-slash-command-fuzzy-discovery.md)). A failed `skills/list` call is logged and folded into a silent menu-group drop — the menu shows only pending/ready states.
+
+### Project-local skill management
+
+The picker’s management dialog can create a skill from name, description, and instruction fields or import one complete `SKILL.md`. The Host validates the document and creates `.dsh/skills/<name>/SKILL.md` under the Session project root, using the nearest ancestor containing `.git` or the Session cwd when no marker exists. Installation is limited to the authenticated user’s workspace, keeps user invocation enabled, accepts at most 256 KiB of UTF-8 content, and never overwrites an existing skill. A successful install updates the current Session’s cached catalog immediately.
 
 ### The skill tool row
 
@@ -55,7 +59,7 @@ Each catalog fetch requires an existing retained Client Session and waits for it
 
 ### Registration
 
-The `/client` exports are the plugin body (`apply`/`inject`) only; the source object is internal to the registration effect. The tool row registers the `skill` wire name in ui-tool's keyed `tool.call.toolview` slot.
+The `/client` exports are the plugin body (`apply`/`inject`) only; the source object is internal to the registration effect. The picker registers in `conversation.input.left` and receives Session-bound catalog and installation operations from the plugin. Addressed subagent Sessions omit the picker. The tool row registers the `skill` wire name in ui-tool's keyed `tool.call.toolview` slot.
 
 </details>
 
@@ -100,6 +104,7 @@ These limits define where the reference and the row fall back to generic behavio
 - **Result-only history pages use the generic row** — keyed dispatch needs the paired call in the runtime window; pagination that leaves the call outside has no tool identity. This client presentation feature does not extend the history wire contract to recover it.
 - **Text is the truth** — the reference is plain draft text; a hand-typed identical token is the same reference, and the host gesture boundary judges the sent text, not the menu interaction. Chip visuals derive from the lexicon scan; no occurrence identity, position tracking, or structured reference payload exists on the prompt wire.
 - **A menu opened before the prewarm settles** shows no skill candidates for that keystroke; the next keystroke re-polls the settled cache.
+- **Import accepts one file** — the manager imports a single `SKILL.md`; it does not import ZIP bundles or companion `references/`, `scripts/`, `assets/`, and template files.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -111,4 +116,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. The slash source, locale dictionaries, and keyed toolview are registry-owned registrations whose disposal is proven by the HMR-safety spec. They emit no Cordis events and own no cross-plugin mutable state.
+**Runtime invariant:** No companion is published. The slash source, picker, locale dictionaries, and keyed toolview are registry-owned registrations whose disposal is proven by the HMR-safety spec. They emit no Cordis events and own no cross-plugin mutable state.

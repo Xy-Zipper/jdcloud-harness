@@ -27,6 +27,9 @@
  * with an aborted signal just returns early.
  * Catalog RPCs retain an existing Client Session through completion and
  * wait for its initial history open to succeed before contacting the Host.
+ * The composer also exposes the same catalog through a dedicated searchable
+ * skill button. Its manager installs a validated SKILL.md in the current
+ * project and updates this cache without changing the `/name` invocation wire.
  *
  * This browser half also owns the `skill` keyed toolview: a replay-stable
  * accent row derived only from each logged call/result slice.
@@ -35,7 +38,9 @@
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SkillEntry } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SkillInstallInvalidReason } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
@@ -45,6 +50,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { SkillRow } from './SkillRow.tsx'
+import { SkillPicker, type SkillInstallOutcome, type SkillPickerInjected } from './SkillPicker.tsx'
 import { en, NS, zh, type SkillKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
@@ -69,7 +75,7 @@ interface CatalogFetch {
   settled?: readonly SkillEntry[]
 }
 
-/** Required services: reference source faces plus the tool-row and locale registries. */
+/** Required services: reference source faces plus the tool-row, composer, and locale registries. */
 export const inject = ['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight']
 
 /**
@@ -148,6 +154,18 @@ export function apply(ctx: ClientContext): void {
     notifyLexicon(key)
   }
 
+  const replaceCatalog = (key: SessionId, catalog: readonly SkillEntry[]): void => {
+    const previous = fetches.get(key)
+    previous?.abort.abort()
+    const entry: CatalogFetch = {
+      promise: Promise.resolve(catalog),
+      abort: new AbortController(),
+      settled: catalog,
+    }
+    fetches.set(key, entry)
+    notifyLexicon(key)
+  }
+
   const clearAll = (): void => {
     for (const key of [...fetches.keys()]) invalidate(key)
   }
@@ -155,6 +173,46 @@ export function apply(ctx: ClientContext): void {
   // The bound translate resolves against the registered dictionaries with the
   // locale service's own fallback ladder; candidate-time reads stay plain text.
   const t = ctx.locale.bind(NS)
+
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: '@deepseek-ai/dsh-client-ui-skill',
+    locale: NS,
+    inject: (sessionId: SessionId): SkillPickerInjected => ({
+      available: sessions.subagentAddress(sessionId) === undefined,
+      loadCatalog: () => fetchCatalog(sessionId).promise,
+      installSkill: async (content: string): Promise<SkillInstallOutcome> => {
+        let result: Awaited<ReturnType<typeof skills.create>>
+        try {
+          result = await skills.create({ sessionId, content })
+        } catch (error: unknown) {
+          // Transport failures do not carry a RemoteResult for the dialog to classify.
+          console.error('[ui-skill] skill installation transport failed:', error)
+          return { ok: false, error: { code: 'transport/failure' } }
+        }
+        if (!result.ok) {
+          // Keep the localized dialog concise while preserving the Remote diagnostic for operators.
+          console.error('[ui-skill] skill installation failed:', result.error)
+          const reason: SkillInstallInvalidReason | undefined = result.error.code === 'skill/invalid'
+            ? result.error.details.reason
+            : undefined
+          return {
+            ok: false,
+            error: {
+              code: result.error.code,
+              ...reason === undefined ? {} : { reason },
+            },
+          }
+        }
+        const current = fetches.get(sessionId)?.settled ?? []
+        replaceCatalog(sessionId, [
+          ...current.filter(skill => skill.name !== result.value.skill.name),
+          result.value.skill,
+        ].sort((left, right) => left.name.localeCompare(right.name)))
+        return { ok: true, skill: result.value.skill }
+      },
+    }),
+  }, SkillPicker))
 
   const source: InputTriggerSource = {
     trigger: '/',

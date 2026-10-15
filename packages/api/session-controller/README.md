@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, human background-job kill, workspace-path opening, user-invocable skill discovery, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.
+`@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, human background-job kill, workspace-path opening, user-invocable skill discovery and project-local installation, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.
 
 ## Table of Contents
 
@@ -53,6 +53,8 @@ The Session object also carries local submission echoes: `session.beginSubmissio
 During uninterrupted following, transcript and steering echoes stay in Chat through Inbox acceptance and claim until their durable messages arrive. After a local Chat message is admitted, its identity remains until the Inbox watermark reaches its next-turn or next-step claim seq: Chat already renders the durable Node, while Chat and QueueDock exclude matching stale Inbox rows. Other queued messages remain visible. A replacement follow baseline withdraws receipt-confirmed echoes as observed, using their accepted attachment references; unconfirmed submissions remain pending. Host data then supplies the pending or admitted rows. Reconnecting between claim and admission can briefly omit that bubble; withdrawal confirms acceptance, not execution or failure.
 
 The user-invocable `skills/list` metadata includes the winning provider’s optional instruction-file `path`. The composer can preview that file without loading every skill body or activating a cold Agent.
+
+`skills/create` accepts one complete `SKILL.md`, validates its required frontmatter and invocation flags, and creates `.dsh/skills/<name>/SKILL.md` under the Session’s nearest `.git` project root or its cwd. It verifies Ontology Session ownership and workspace containment when that controller is present, uses the filesystem’s `workspace-write` policy, limits UTF-8 content to 256 KiB, and refuses to replace an existing file.
 
 Fork copies the exact inclusive event prefix selected by `atSeq`, including a cut inside an open turn. The child records its inherited marker before synthetic fork results and closing events. Omitting `atSeq` selects the latest completed turn and its standalone tail, stopping before the next turn or queued input; a nonexistent event is rejected. The chat action selects a completed turn.
 
@@ -112,6 +114,7 @@ No direct effect; model requests remain owned by the Agent and LLM packages.
 - A failed follow resumption remains visible to the caller instead of retrying indefinitely.
 - The raw browser upload is one streaming HTTP request without resumable offsets; a retry sends the file again from byte zero.
 - File-reference completion uses the shared Agent lookup and can resume a cold Session; the `skills/list` catalog is the non-activating alternative for skill metadata.
+- Skill installation accepts one Markdown file; companion files and directory archives require an external project-file workflow.
 - Accepted/running display memory lives only in Client memory and is lost on page reload.
 - That memory is not shared between tabs: one tab can show a converted row while another still shows `New Session` for the same Session.
 

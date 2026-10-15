@@ -248,6 +248,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly childSessionId: SessionId
       readonly reason: 'corrupt' | 'unsupported' | 'unavailable'
     }
+    'skill/invalid': { readonly reason: SkillInstallInvalidReason }
+    'skill/already-exists': { readonly name: string }
   }
 }
 
@@ -273,6 +275,30 @@ export interface SkillEntry {
 /** Human-invocable skills visible through one Session's composition. */
 export interface SkillListValue {
   readonly skills: readonly SkillEntry[]
+}
+
+/** Maximum UTF-8 size accepted by the workspace skill installer. */
+export const SKILL_INSTALL_MAX_BYTES = 256 * 1024
+
+/** Stable validation categories returned by the workspace skill installer. */
+export type SkillInstallInvalidReason =
+  | 'content-too-large'
+  | 'description'
+  | 'frontmatter'
+  | 'name'
+  | 'path'
+  | 'project-cwd'
+  | 'user-invocable'
+
+/** Session-addressed request to install one SKILL.md into the current project. */
+export interface SkillInstallRequest {
+  readonly sessionId: SessionId
+  readonly content: string
+}
+
+/** Installed skill metadata returned to the browser catalog. */
+export interface SkillInstallValue {
+  readonly skill: SkillEntry
 }
 
 /** Session list request. */
