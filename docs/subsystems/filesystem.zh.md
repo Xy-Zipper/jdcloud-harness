@@ -119,8 +119,8 @@ interface FsDirEntry {
 /**
  * Guarded write intent. `createIfAbsent` rejects an existing target with
  * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with
- * `FS_STALE_VERSION`. Omitting the intent from `writeText` means unconditional
- * create-or-overwrite, not a third union arm.
+ * `FS_STALE_VERSION`. Omitting the intent from `writeText` or `writeBytes`
+ * means unconditional create-or-overwrite, not a third union arm.
  */
 type FsWriteIntent =
   | { kind: 'createIfAbsent' }

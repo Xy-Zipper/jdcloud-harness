@@ -41,7 +41,7 @@ Mount the controller with writable credentials and the independent browser-sessi
 | `ontologyBaseUrl` | required | Fixed Ontology Runtime service address; HTTPS is required outside an explicitly allowed loopback development address. |
 | `requestTimeoutMs` | `15000` | Network deadline for login, current-user validation, refresh, and logout. |
 | `allowInsecureLoopback` | `false` | Allows explicit HTTP only for `localhost`, `127.0.0.1`, or `::1`. |
-| `userWorkspaceDirectory` | disabled | Optional persistent parent directory that confines each Ontology user's Workspace paths. |
+| `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | Optional override for the persistent parent that confines each Ontology user's Workspace and personal Skill paths. |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-ontology-auth-controller) is the exhaustive source for accepted fields.
 
@@ -51,7 +51,7 @@ An authenticated embedding page can call `importSession()` through the Client Re
 
 Host-only consumers call `requestAuthenticated()` with a fixed `/api/runtime/` path, method, and optional JSON body. The controller selects the current browser record, validates or refreshes it, attaches the Access Token, and retries once when that request reports an expired Access Token. The consumer remains responsible for validating the returned untrusted JSON.
 
-Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentScopeKey()` instead includes the service address and stable user id, so independent logins for the same Ontology user resolve to one owner. Session, Workspace, file, and reference consumers use this owner; `userWorkspaceDirectory` additionally confines selected paths to that user's private directory. Prompt admission validates or refreshes the current browser login before Session delivery, while terminal access and `danger-full-access` require an administrator account.
+Credential ids contain `SHA256(ontologyBaseUrl + browserSessionId)`. `currentScopeKey()` instead includes the service address and stable user id, so independent logins for the same Ontology user resolve to one owner. Session, Workspace, file, reference, and personal Skill consumers use this owner. The controller defaults the parent to `$DSH_HOME/account-workspaces`; `userWorkspaceDirectory` overrides it when a deployment stores account data on another persistent volume. `currentSkillAccess()` also exposes the parent's `.dsh/skills` directory for built-in Skills, and only an administrator account can install there. Prompt admission validates or refreshes the current browser login before Session delivery, while terminal access and `danger-full-access` require an administrator account.
 
 -----
 

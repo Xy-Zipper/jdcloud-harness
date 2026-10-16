@@ -29,6 +29,8 @@ export const intentSchema = z.discriminatedUnion('kind', [z.object({ kind: z.lit
 export const editSchema = z.object({ oldString: z.string(), newString: z.string(), replaceAll: z.boolean() }).strict()
 /** Atomic write observation. */
 export const writeResultSchema = z.object({ operation: z.enum(['create', 'update']), version: z.string(), before: z.string().nullable(), after: z.string() }).strict()
+/** Atomic raw-byte write observation. */
+export const byteWriteResultSchema = z.object({ operation: z.enum(['create', 'update']), version: z.string() }).strict()
 /** Atomic edit observation. */
 export const editResultSchema = z.object({ version: z.string(), before: z.string(), after: z.string() }).strict()
 /** Explicit child environment; null encodes an environment tombstone. */

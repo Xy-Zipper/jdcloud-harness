@@ -10,7 +10,13 @@ import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-ses
 import type {} from '@deepseek-ai/dsh-skill'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SessionSkillCatalog } from '../src/skill-catalog.ts'
-import { SKILL_INSTALL_MAX_BYTES } from '../src/types.ts'
+import {
+  SKILL_INSTALL_MAX_BYTES,
+  SKILL_INSTALL_MAX_FILES,
+  SKILL_INSTALL_MAX_FILE_BYTES,
+  SKILL_INSTALL_MAX_TOTAL_BYTES,
+  type SkillInstallFile,
+} from '../src/types.ts'
 
 function observation(
   sessionId: SessionId,
@@ -56,9 +62,19 @@ function skillDocument(
   return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n${metadata}---\n\nFollow the project workflow.\n`
 }
 
+/** Encode one root SKILL.md plus optional folder files for the install Remote. */
+function skillFiles(content = skillDocument(), extras: readonly SkillInstallFile[] = []): readonly SkillInstallFile[] {
+  return [{ path: 'SKILL.md', contentBase64: Buffer.from(content).toString('base64') }, ...extras]
+}
+
 async function installFixture(options: {
   readonly git?: boolean
-  readonly owner?: { owns: boolean; workspace?: string }
+  readonly owner?: {
+    owns: boolean
+    service?: 'ontology' | 'jdcloud'
+    workspace?: string
+    role?: 'admin' | 'member' | 'unavailable'
+  }
 } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-session-skills-'))
   const project = join(root, 'project')
@@ -70,6 +86,17 @@ async function installFixture(options: {
   const sessionId = SessionId('install-skills')
   const observeSession = vi.fn(() => Promise.resolve(observation(sessionId, { cwd })))
   ctx.provide('sessionQuery', { observeSession } as never)
+  const workspaceRoot = join(root, 'users', 'a'.repeat(64))
+  const access = options.owner?.role === undefined || options.owner.role === 'unavailable'
+    ? undefined
+    : {
+      userId: 'user-a',
+      administrator: options.owner.role === 'admin',
+      workspaceRoot,
+      personalSkillDirectory: join(workspaceRoot, '.dsh', 'skills'),
+      managedSkillDirectory: join(root, 'users', '.dsh', 'skills'),
+    }
+  if (access !== undefined) await mkdir(workspaceRoot, { recursive: true })
   const assertWorkspacePath = vi.fn((path: string) => {
     if (options.owner?.workspace !== undefined && path !== options.owner.workspace) {
       return Promise.reject(new Error('outside user workspace'))
@@ -77,9 +104,12 @@ async function installFixture(options: {
     return Promise.resolve()
   })
   if (options.owner !== undefined) {
-    ctx.provide('ontologyAuthController', {
+    ctx.provide(options.owner.service === 'jdcloud' ? 'jdcloudAuthController' : 'ontologyAuthController', {
       owns: vi.fn(() => Promise.resolve(options.owner?.owns ?? false)),
       assertWorkspacePath,
+      ...options.owner.role === undefined
+        ? {}
+        : { currentSkillAccess: vi.fn(() => Promise.resolve(access)) },
     } as never)
   }
   onTestFinished(async () => {
@@ -94,6 +124,7 @@ async function installFixture(options: {
     sessionId,
     observeSession,
     assertWorkspacePath,
+    access,
     catalog: new SessionSkillCatalog(ctx),
   }
 }
@@ -132,6 +163,8 @@ describe('SessionSkillCatalog', () => {
         path: '/cold/project/.agents/skills/review/SKILL.md',
         modelInvocable: true,
       }],
+      installScopes: ['project'],
+      managedSkills: [],
     })
     expect(observeSession).toHaveBeenCalledWith(sessionId)
     expect(dispose).toHaveBeenCalledOnce()
@@ -167,6 +200,8 @@ describe('SessionSkillCatalog', () => {
         description: 'Composed for this Agent.',
         modelInvocable: false,
       }],
+      installScopes: ['project'],
+      managedSkills: [],
     })
     expect(scopedList).toHaveBeenCalledWith({ cwd: '/live/project', scope: agent })
     expect(acquireScope).not.toHaveBeenCalled()
@@ -188,7 +223,8 @@ describe('SessionSkillCatalog', () => {
     ctx.provide('skills', { list } as never)
     const catalog = new SessionSkillCatalog(ctx)
 
-    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [] })
+    await expect(catalog.list({ sessionId }, new AbortController().signal))
+      .resolves.toEqual({ skills: [], installScopes: ['project'], managedSkills: [] })
     expect(acquireScope).toHaveBeenCalledWith('minimal')
     expect(list).toHaveBeenCalledWith({ cwd: '/cold/project', scope })
     expect(ctx.agents.list()).toEqual([])
@@ -210,7 +246,8 @@ describe('SessionSkillCatalog', () => {
     ctx.provide('skills', { list } as never)
     const catalog = new SessionSkillCatalog(ctx)
 
-    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [] })
+    await expect(catalog.list({ sessionId }, new AbortController().signal))
+      .resolves.toEqual({ skills: [], installScopes: ['project'], managedSkills: [] })
     expect(list).toHaveBeenCalledWith({ cwd: '/cold/project', scope: undefined })
   })
 
@@ -232,6 +269,21 @@ describe('SessionSkillCatalog', () => {
       { sessionId: SessionId('missing-skills') },
       new AbortController().signal,
     )).rejects.toMatchObject({ code })
+  })
+
+  it('rejects a list request cancelled before Session inspection', async () => {
+    const ctx = await context()
+    const observeSession = vi.fn()
+    ctx.provide('sessionQuery', { observeSession } as never)
+    const catalog = new SessionSkillCatalog(ctx)
+    const abort = new AbortController()
+    abort.abort()
+
+    await expect(catalog.list(
+      { sessionId: SessionId('cancelled-list') },
+      abort.signal,
+    )).rejects.toMatchObject({ code: 'gateway/cancelled' })
+    expect(observeSession).not.toHaveBeenCalled()
   })
 
   it('reports an absent skill registry instead of an empty catalog', async () => {
@@ -282,11 +334,166 @@ describe('SessionSkillCatalog', () => {
       })
   })
 
+  it('exposes personal installs to members and shared installs only to administrators', async () => {
+    const member = await installFixture({ owner: { owns: true, role: 'member' } })
+    member.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+    await expect(member.catalog.list({ sessionId: member.sessionId }, new AbortController().signal))
+      .resolves.toEqual({ skills: [], installScopes: ['personal'], managedSkills: [] })
+
+    const administrator = await installFixture({ owner: { owns: true, role: 'admin' } })
+    administrator.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+    await expect(administrator.catalog.list(
+      { sessionId: administrator.sessionId },
+      new AbortController().signal,
+    )).resolves.toEqual({ skills: [], installScopes: ['personal', 'built-in'], managedSkills: [] })
+  })
+
+  it('does not fall back to project installation when account Skill access is unavailable', async () => {
+    const b = await installFixture({ owner: { owns: true, role: 'unavailable' } })
+    b.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+
+    await expect(b.catalog.list({ sessionId: b.sessionId }, new AbortController().signal))
+      .resolves.toEqual({ skills: [], installScopes: [], managedSkills: [] })
+    await expect(b.catalog.create({
+      sessionId: b.sessionId,
+      files: skillFiles(skillDocument('unavailable-helper')),
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'skill/forbidden',
+      details: { scope: 'project' },
+    })
+  })
+
+  it('accepts the JDCloud authentication controller through the shared Skill access interface', async () => {
+    const b = await installFixture({ owner: { owns: true, role: 'member', service: 'jdcloud' } })
+    b.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+
+    await expect(b.catalog.list({ sessionId: b.sessionId }, new AbortController().signal))
+      .resolves.toEqual({ skills: [], installScopes: ['personal'], managedSkills: [] })
+  })
+
+  it('lists account-managed Skills and enforces scope-specific deletion', async () => {
+    const member = await installFixture({ owner: { owns: true, role: 'member' } })
+    if (member.access === undefined) throw new Error('member fixture did not create Skill access')
+    member.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+    await member.catalog.create({
+      sessionId: member.sessionId,
+      scope: 'personal',
+      files: skillFiles(skillDocument('personal-helper', 'Private account helper.')),
+    }, new AbortController().signal)
+
+    await expect(member.catalog.list({ sessionId: member.sessionId }, new AbortController().signal))
+      .resolves.toMatchObject({
+        managedSkills: [{
+          name: 'personal-helper',
+          description: 'Private account helper.',
+          scope: 'personal',
+        }],
+      })
+    await expect(member.catalog.delete({
+      sessionId: member.sessionId,
+      scope: 'built-in',
+      name: 'shared-helper',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'skill/forbidden',
+      details: { scope: 'built-in' },
+    })
+    await expect(member.catalog.delete({
+      sessionId: member.sessionId,
+      scope: 'personal',
+      name: 'personal-helper',
+    }, new AbortController().signal)).resolves.toEqual({
+      deleted: true,
+      name: 'personal-helper',
+      scope: 'personal',
+    })
+    await expect(readFile(join(member.access.personalSkillDirectory, 'personal-helper', 'SKILL.md'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+
+    const administrator = await installFixture({ owner: { owns: true, role: 'admin' } })
+    if (administrator.access === undefined) throw new Error('administrator fixture did not create Skill access')
+    administrator.ctx.provide('skills', { list: () => Promise.resolve([]) } as never)
+    await administrator.catalog.create({
+      sessionId: administrator.sessionId,
+      scope: 'built-in',
+      files: skillFiles(skillDocument('shared-helper', 'Shared administrator helper.')),
+    }, new AbortController().signal)
+
+    await expect(administrator.catalog.list({
+      sessionId: administrator.sessionId,
+    }, new AbortController().signal)).resolves.toMatchObject({
+      managedSkills: [{
+        name: 'shared-helper',
+        description: 'Shared administrator helper.',
+        scope: 'built-in',
+      }],
+    })
+    await expect(administrator.catalog.delete({
+      sessionId: administrator.sessionId,
+      scope: 'built-in',
+      name: 'shared-helper',
+    }, new AbortController().signal)).resolves.toEqual({
+      deleted: true,
+      name: 'shared-helper',
+      scope: 'built-in',
+    })
+  })
+
+  it('installs personal Skills under the authenticated user workspace', async () => {
+    const b = await installFixture({ owner: { owns: true, role: 'member' } })
+    if (b.access === undefined) throw new Error('member fixture did not create Skill access')
+    const content = skillDocument('personal-helper', 'Private account helper.')
+
+    await expect(b.catalog.create({
+      sessionId: b.sessionId,
+      scope: 'personal',
+      files: skillFiles(content),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      skill: {
+        name: 'personal-helper',
+        path: join(b.access.personalSkillDirectory, 'personal-helper', 'SKILL.md'),
+      },
+    })
+    await expect(readFile(join(b.access.personalSkillDirectory, 'personal-helper', 'SKILL.md'), 'utf8'))
+      .resolves.toBe(content)
+  })
+
+  it('restricts shared built-in Skill installs to administrators', async () => {
+    const member = await installFixture({ owner: { owns: true, role: 'member' } })
+    await expect(member.catalog.create({
+      sessionId: member.sessionId,
+      scope: 'built-in',
+      files: skillFiles(skillDocument('shared-helper')),
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'skill/forbidden',
+      details: { scope: 'built-in' },
+    })
+
+    const administrator = await installFixture({ owner: { owns: true, role: 'admin' } })
+    if (administrator.access === undefined) throw new Error('administrator fixture did not create Skill access')
+    const content = skillDocument('shared-helper', 'Shared administrator helper.')
+    await expect(administrator.catalog.create({
+      sessionId: administrator.sessionId,
+      scope: 'built-in',
+      files: skillFiles(content),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      skill: {
+        name: 'shared-helper',
+        path: join(administrator.access.managedSkillDirectory, 'shared-helper', 'SKILL.md'),
+      },
+    })
+    await expect(readFile(join(administrator.access.managedSkillDirectory, 'shared-helper', 'SKILL.md'), 'utf8'))
+      .resolves.toBe(content)
+  })
+
   it('installs a validated SKILL.md at the nearest project root without overwriting', async () => {
     const b = await installFixture({ owner: { owns: true } })
     const content = skillDocument('workspace-helper', 'Guide work in this project.', 'disable-model-invocation: yes\n')
 
-    await expect(b.catalog.create({ sessionId: b.sessionId, content }, new AbortController().signal))
+    const files = skillFiles(content, [
+      { path: 'references/example.md', contentBase64: Buffer.from('Reference text.\n').toString('base64') },
+      { path: 'assets/icon.bin', contentBase64: Buffer.from([0, 255, 7]).toString('base64') },
+    ])
+    await expect(b.catalog.create({ sessionId: b.sessionId, files }, new AbortController().signal))
       .resolves.toEqual({
         skill: {
           name: 'workspace-helper',
@@ -297,10 +504,12 @@ describe('SessionSkillCatalog', () => {
       })
     const target = join(b.project, '.dsh', 'skills', 'workspace-helper', 'SKILL.md')
     await expect(readFile(target, 'utf8')).resolves.toBe(content)
+    await expect(readFile(join(target, '..', 'references', 'example.md'), 'utf8')).resolves.toBe('Reference text.\n')
+    await expect(readFile(join(target, '..', 'assets', 'icon.bin'))).resolves.toEqual(Buffer.from([0, 255, 7]))
     expect(b.observeSession).toHaveBeenCalledWith(b.sessionId)
     expect(b.assertWorkspacePath).toHaveBeenCalledWith(b.project)
 
-    await expect(b.catalog.create({ sessionId: b.sessionId, content }, new AbortController().signal))
+    await expect(b.catalog.create({ sessionId: b.sessionId, files }, new AbortController().signal))
       .rejects.toMatchObject({ code: 'skill/already-exists', details: { name: 'workspace-helper' } })
     await expect(readFile(target, 'utf8')).resolves.toBe(content)
   })
@@ -309,7 +518,7 @@ describe('SessionSkillCatalog', () => {
     const b = await installFixture({ git: false })
     const content = skillDocument('cwd-helper')
 
-    await expect(b.catalog.create({ sessionId: b.sessionId, content }, new AbortController().signal))
+    await expect(b.catalog.create({ sessionId: b.sessionId, files: skillFiles(content) }, new AbortController().signal))
       .resolves.toMatchObject({
         skill: { path: join(b.cwd, '.dsh', 'skills', 'cwd-helper', 'SKILL.md') },
       })
@@ -333,7 +542,59 @@ describe('SessionSkillCatalog', () => {
     const ctx = await context()
     const catalog = new SessionSkillCatalog(ctx)
     await expect(catalog.create(
-      { sessionId: SessionId('invalid-skill'), content },
+      { sessionId: SessionId('invalid-skill'), files: skillFiles(content) },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'skill/invalid', details: { reason } })
+  })
+
+  it.each([
+    { files: [], reason: 'empty-folder' },
+    {
+      files: [{ path: 'references/guide.md', contentBase64: '' }],
+      reason: 'missing-skill-file',
+    },
+    {
+      files: skillFiles(skillDocument(), [{ path: '../escape.txt', contentBase64: '' }]),
+      reason: 'invalid-file-path',
+    },
+    {
+      files: skillFiles(skillDocument(), [{ path: 'skill.md', contentBase64: '' }]),
+      reason: 'invalid-file-path',
+    },
+    {
+      files: skillFiles(skillDocument(), [{
+        path: 'assets/large.bin',
+        contentBase64: Buffer.alloc(SKILL_INSTALL_MAX_FILE_BYTES + 1).toString('base64'),
+      }]),
+      reason: 'file-too-large',
+    },
+    {
+      files: skillFiles(skillDocument(), Array.from({ length: 5 }, (_, index) => ({
+        path: `assets/${index}.bin`,
+        contentBase64: Buffer.alloc(SKILL_INSTALL_MAX_TOTAL_BYTES / 4).toString('base64'),
+      }))),
+      reason: 'folder-too-large',
+    },
+    {
+      files: Array.from({ length: SKILL_INSTALL_MAX_FILES + 1 }, (_, index) => ({
+        path: index === 0 ? 'SKILL.md' : `references/${index}.md`,
+        contentBase64: index === 0 ? Buffer.from(skillDocument()).toString('base64') : '',
+      })),
+      reason: 'too-many-files',
+    },
+    {
+      files: [{ path: 'SKILL.md', contentBase64: Buffer.from([0xff, 0xfe]).toString('base64') }],
+      reason: 'skill-file-not-text',
+    },
+    {
+      files: [{ path: 'SKILL.md', contentBase64: 'not base64' }],
+      reason: 'invalid-file-content',
+    },
+  ])('rejects an invalid imported folder: $reason', async ({ files, reason }) => {
+    const ctx = await context()
+    const catalog = new SessionSkillCatalog(ctx)
+    await expect(catalog.create(
+      { sessionId: SessionId('invalid-folder'), files },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'skill/invalid', details: { reason } })
   })
@@ -346,7 +607,7 @@ describe('SessionSkillCatalog', () => {
     const catalog = new SessionSkillCatalog(ctx)
 
     await expect(catalog.create(
-      { sessionId: SessionId('cwdless'), content: skillDocument() },
+      { sessionId: SessionId('cwdless'), files: skillFiles() },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'skill/invalid', details: { reason: 'project-cwd' } })
   })
@@ -355,7 +616,7 @@ describe('SessionSkillCatalog', () => {
     const b = await installFixture({ owner: { owns: false } })
 
     await expect(b.catalog.create(
-      { sessionId: b.sessionId, content: skillDocument() },
+      { sessionId: b.sessionId, files: skillFiles() },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'session/not-found' })
     expect(b.observeSession).not.toHaveBeenCalled()
@@ -365,7 +626,7 @@ describe('SessionSkillCatalog', () => {
     const b = await installFixture({ owner: { owns: true, workspace: join('different', 'project') } })
 
     await expect(b.catalog.create(
-      { sessionId: b.sessionId, content: skillDocument() },
+      { sessionId: b.sessionId, files: skillFiles() },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'skill/invalid', details: { reason: 'path' } })
   })
@@ -375,7 +636,7 @@ describe('SessionSkillCatalog', () => {
     vi.spyOn(b.ctx.fs, 'contains').mockReturnValue(false)
 
     await expect(b.catalog.create(
-      { sessionId: b.sessionId, content: skillDocument('escaped-skill') },
+      { sessionId: b.sessionId, files: skillFiles(skillDocument('escaped-skill')) },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'skill/invalid', details: { reason: 'path' } })
   })
@@ -387,7 +648,7 @@ describe('SessionSkillCatalog', () => {
     await writeFile(target, 'existing content', 'utf8')
 
     await expect(b.catalog.create(
-      { sessionId: b.sessionId, content: skillDocument() },
+      { sessionId: b.sessionId, files: skillFiles() },
       new AbortController().signal,
     )).rejects.toMatchObject({ code: 'skill/already-exists' })
     await expect(readFile(target, 'utf8')).resolves.toBe('existing content')
@@ -402,7 +663,7 @@ describe('SessionSkillCatalog', () => {
     abort.abort()
 
     await expect(catalog.create(
-      { sessionId: SessionId('cancelled-skill'), content: skillDocument() },
+      { sessionId: SessionId('cancelled-skill'), files: skillFiles() },
       abort.signal,
     )).rejects.toMatchObject({ code: 'gateway/cancelled' })
     expect(observeSession).not.toHaveBeenCalled()

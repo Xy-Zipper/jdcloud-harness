@@ -12,6 +12,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../interaction/commands" },
     { "path": "../../credentials/credentials" },
+    { "path": "../../util/home-paths" },
     { "path": "../session-controller/tsconfig.host.json" },
     { "path": "../../typert/protocol" }
   ]

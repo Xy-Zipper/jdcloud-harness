@@ -117,8 +117,8 @@ export interface FsDirEntry {
 /**
  * Guarded write intent. `createIfAbsent` rejects an existing target with
  * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with
- * `FS_STALE_VERSION`. Omitting the intent from `writeText` means unconditional
- * create-or-overwrite, not a third union arm.
+ * `FS_STALE_VERSION`. Omitting the intent from `writeText` or `writeBytes`
+ * means unconditional create-or-overwrite, not a third union arm.
  */
 export type FsWriteIntent =
   | { kind: 'createIfAbsent' }
@@ -141,6 +141,14 @@ export interface FsWriteOutcome {
   before: string | null
   /** The file's content AFTER the write, LF-normalized to share `before`'s diff basis. */
   after: string
+}
+
+/** Outcome of a full-file binary write. */
+export interface FsByteWriteOutcome {
+  /** Whether the write created a new file or replaced an existing one. */
+  operation: 'create' | 'update'
+  /** Opaque version of the file after the write. */
+  version: FsVersion
 }
 
 /** A literal-replacement edit request. */

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -17,6 +17,7 @@ const temporaryRoots: string[] = []
 
 afterEach(async () => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   await Promise.all(temporaryRoots.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
@@ -308,12 +309,45 @@ describe('Ontology authentication controller', () => {
 
     const workspace = await browserSession.run(request, () => ctx.ontologyAuthController.workspaceRoot())
     if (workspace === undefined) throw new Error('configured Ontology workspace root was not created')
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.currentSkillAccess()))
+      .resolves.toEqual({
+        userId: 'user-alice',
+        administrator: true,
+        workspaceRoot: workspace,
+        personalSkillDirectory: join(workspace, '.dsh', 'skills'),
+        managedSkillDirectory: join(users, '.dsh', 'skills'),
+      })
     const child = join(workspace, 'project')
     await mkdir(child)
     await expect(browserSession.run(request, () => ctx.ontologyAuthController.assertWorkspacePath(child)))
       .resolves.toBeUndefined()
     await expect(browserSession.run(request, () => ctx.ontologyAuthController.assertWorkspacePath(outside)))
       .rejects.toMatchObject({ code: 'gateway/bad-request' })
+  })
+
+  it('uses the Harness home account-workspaces directory by default', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ontology-auth-default-'))
+    temporaryRoots.push(root)
+    const dshHome = join(root, 'harness-home')
+    vi.stubEnv('DSH_HOME', dshHome)
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    await browserSession.run(request, () => ctx.ontologyAuthController.login({
+      username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+
+    const scopeKey = createHash('sha256')
+      .update('https://ontology.example.com').update('\0').update('user-alice').digest('hex')
+    const workspace = join(dshHome, 'account-workspaces', scopeKey)
+    const resolvedWorkspace = await browserSession.run(request, () => ctx.ontologyAuthController.workspaceRoot())
+    expect(resolvedWorkspace).toBe(await realpath(workspace))
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.currentSkillAccess()))
+      .resolves.toMatchObject({
+        workspaceRoot: resolvedWorkspace,
+        personalSkillDirectory: join(workspace, '.dsh', 'skills'),
+        managedSkillDirectory: join(dshHome, 'account-workspaces', '.dsh', 'skills'),
+      })
   })
 
   it('requires an Ontology administrator for danger-full-access commands', async () => {

@@ -1,5 +1,5 @@
 ---
-description: "dsh Web 客户端的 skill 发现、项目内 skill 管理、引用与专属 skill 工具行。"
+description: "dsh Web 客户端的 skill 发现、账号感知的 skill 管理、引用与专属 skill 工具行。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-skill` 为 Web 编辑器提供独立的可搜索 skill（技能）选择面板与项目内 skill 管理，同时保留 `/` 建议和直接输入 `/name` 的方式。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。skill 调用在对话中显示为可展开的 `Instructions` 卡片；即使已安装的 skill 目录发生变化，卡片落定后的内容仍保持稳定。
+`dsh-client-ui-skill` 为 Web 编辑器提供独立的可搜索 skill（技能）选择面板与账号感知的 skill 管理，同时保留 `/` 建议和直接输入 `/name` 的方式。用户可以为自己导入私有 skill，管理员可以为所有用户导入内置 skill。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。
 
 ## 目录
 
@@ -31,9 +31,9 @@ kind: "package-reference"
 
 普通会话的候选来自 `skills/list` Remote；宿主提供每一个用户可调用的 skill，`modelInvocable: false` 的条目（即 `disable-model-invocation` skill，此路径是其唯一入口）会以当前语言把仅限用户标记作为描述前缀带上。结果经 `/` 菜单共享的名字排序器（ui-primitives 的 `rankByName`）排名：查询作为不区分大小写的有序子序列匹配 skill 名，前缀命中排最前，同分保持宿主顺序（[排名决策](../../../.agents/notes/archived/feature/2026-08-04-web-slash-command-fuzzy-discovery.md)）。`skills/list` 调用失败时会被记录并静默丢弃该菜单组——菜单只显示 pending／ready 状态。
 
-### 项目内 skill 管理
+### skill 管理
 
-选择面板中的管理弹框可以通过名称、说明和指令字段创建 skill，也可以导入一份完整的 `SKILL.md`。Host 校验文档后，在 Session 项目根目录下创建 `.dsh/skills/<name>/SKILL.md`；项目根优先取最近的含 `.git` 祖先目录，没有标记时使用 Session cwd。安装仅限当前已认证用户的工作区，必须允许用户调用，UTF-8 内容最多 256 KiB，且绝不覆盖同名 skill。安装成功后，当前 Session 的缓存目录立即更新。
+选择面板中的管理弹框与设置中的“技能”页面打开同一个管理器。管理器会按账号受管范围列出已安装 skill，并可导入根目录含 `SKILL.md` 的完整本机文件夹，包括配套脚本、参考资料、资源、模板与二进制文件。已认证用户可以选择“我的技能”，把文件夹保存到自己的私有工作区，在自己的所有项目中使用并自行删除；管理员还会看到“内置技能”Tab，可以把文件夹保存到所有用户共享的受管目录并由管理员删除。每次删除都必须通过独立的确认弹框。没有账号级 Skill 访问能力的组合只提供“当前项目”安装。Host 会在安装前校验授权、元数据、路径与限制，绝不覆盖同名 skill，并在安装或删除后立即更新当前 Session 的缓存目录。
 
 ### skill 工具行
 
@@ -59,7 +59,7 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 
 ### 注册
 
-`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。选择面板注册进 `conversation.input.left`，并从插件取得按 Session 绑定的目录与安装操作；按地址访问的 subagent Session 不显示该面板。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。
+`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。选择面板注册进 `conversation.input.left`，设置页面注册进 `settings.section`，两者都从插件取得按 Session 绑定的目录、安装与删除操作；按地址访问的 subagent Session 不显示选择面板。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。
 
 </details>
 
@@ -104,7 +104,7 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 - **仅含工具结果的 history 页使用通用行**：键控分派要求配对的工具调用位于运行时窗口内；分页将工具调用留在窗口外时，工具结果没有工具身份。这项客户端呈现功能不会为了恢复该身份而扩展 history 协议约定。
 - **文本是唯一依据**：引用是普通的草稿文本；手动键入的相同 token 就是同一个引用，宿主手势边界评判的是发出的文本，而不是菜单交互。chip 视觉由 lexicon 扫描派生；提示词协议上没有 occurrence 身份、位置跟踪或结构化引用载荷。
 - **预热落定之前打开的菜单**：在那次击键下不显示 skill 候选；下一次击键会重新轮询已落定的缓存。
-- **导入只接受一个文件**：管理弹框只导入单个 `SKILL.md`，不导入 ZIP 包，也不携带配套的 `references/`、`scripts/`、`assets/` 与模板文件。
+- **导入要求浏览器选择文件夹**：管理弹框导入所选目录树，不接受 ZIP 压缩包或单独的 `SKILL.md` 文件。
 
 <a id="dev-note"></a>
 ### 开发备注

@@ -229,12 +229,12 @@ export interface Config {
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */
   readonly allowInsecureLoopback?: boolean
-  /** Persistent parent directory for Ontology user workspaces. */
+  /** Persistent parent directory for Ontology user workspaces; defaults below `$DSH_HOME`. */
   readonly userWorkspaceDirectory?: string
 }
 ```
 
-Source: [`packages/api/ontology-auth-controller/src/index.ts:49`](../packages/api/ontology-auth-controller/src/index.ts)
+Source: [`packages/api/ontology-auth-controller/src/index.ts:50`](../packages/api/ontology-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -1162,7 +1162,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/fs/fs-local/src/index.ts:45`](../packages/fs/fs-local/src/index.ts)
+Source: [`packages/fs/fs-local/src/index.ts:46`](../packages/fs/fs-local/src/index.ts)
 
 <a id="deepseek-aidsh-fs-sandbox"></a>
 
@@ -2767,6 +2767,10 @@ export interface Config {
   agentsHome?: string
   /** Additional skill roots scanned after project roots and before user roots. */
   customSkillDirs?: string[]
+  /** Shared administrator-managed skill root scanned for every workspace. */
+  managedSkillDir?: string
+  /** Parent whose direct user-scope child contributes a private `.dsh/skills` root selected from `cwd`. */
+  scopedUserWorkspaceDir?: string
   /** Whether host-local skill roots are watched for catalog changes. */
   watch?: boolean
   /** Whether Chokidar uses polling instead of native filesystem events. */
@@ -2784,7 +2788,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/skill/skill-filesystem/src/index.ts:49`](../packages/skill/skill-filesystem/src/index.ts)
+Source: [`packages/skill/skill-filesystem/src/index.ts:50`](../packages/skill/skill-filesystem/src/index.ts)
 
 <a id="deepseek-aidsh-skill-office"></a>
 

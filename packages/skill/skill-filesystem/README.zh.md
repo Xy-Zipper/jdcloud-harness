@@ -50,10 +50,11 @@ skill 可以是被扫描根目录顶层的目录 bundle `<name>/SKILL.md`，也�
 | 100 | `project-dsh` | `<projectRoot>/.dsh/skills` |
 | 200 | `project-agents` | `<projectRoot>/.agents/skills` |
 | 300 | `custom` | `Config.customSkillDirs` |
-| 400 | `user-dsh` | `<dshHome>/skills` |
+| 400 | `user-dsh` | `<scopedUserWorkspaceDir>/<scopeKey>/.dsh/skills` 或 `<dshHome>/skills` |
 | 500 | `user-agents` | `<agentsHome>/skills` |
+| 550 | `custom` | `Config.managedSkillDir` |
 
-项目根目录是包含 `.git` 的最近祖先目录；如果不存在，则使用当前 cwd。用户 DSH 根目录会跳过其 `.system` 子目录。`includeDefaultRoots: false` 会省略项目根、用户根以及 `$DSH_BUNDLED_SKILL_DIR` 默认值，使隔离提供方只看到自身配置的根；`bundledSkillDir` 会按 rank 600 添加一个随包提供的根目录。
+项目根目录是包含 `.git` 的最近祖先目录；如果不存在，则使用当前 cwd。`scopedUserWorkspaceDir` 默认是 `<dshHome>/account-workspaces`；当 cwd 位于其下某个名称为 64 位十六进制字符串的直接子目录中时，该子目录会贡献自己的 `.dsh/skills` 私有目录。`managedSkillDir` 默认是 `<scopedUserWorkspaceDir>/.dsh/skills`，提供跨工作区共享、由管理员管理的根目录。用户 DSH 根目录会跳过其 `.system` 子目录。`includeDefaultRoots: false` 会省略这些派生账号根、项目根、默认用户根以及 `$DSH_BUNDLED_SKILL_DIR` 默认值；显式配置的用户范围根、受管根与自定义根仍可用，而 `bundledSkillDir` 会按 rank 600 添加随包提供的根目录。
 
 ### 挂载与配置
 
@@ -71,6 +72,8 @@ skill 可以是被扫描根目录顶层的目录 bundle `<name>/SKILL.md`，也�
 | `dshHome` | `$DSH_HOME` 或 `~/.dsh` | Harness 配置根目录；扫描其 `skills` 子目录 |
 | `agentsHome` | `$DSH_AGENTS_HOME` 或 `~/.agents` | 为兼容 skill 扫描的共享 agent 配置根目录 |
 | `customSkillDirs` | `[]` | 其他本地 skill 根目录，位于项目根之后、用户根之前 |
+| `managedSkillDir` | `<scopedUserWorkspaceDir>/.dsh/skills` | 按 rank 550 扫描、跨工作区共享的管理员受管 skill 根目录 |
+| `scopedUserWorkspaceDir` | `<dshHome>/account-workspaces` | 哈希用户工作区目录的父目录；匹配的 cwd 会选择对应私有 skill 根目录 |
 | `watch` | `true` | 监视本地根，并在目录可能变化时使提供方失效 |
 | `bundledSkillDir` | — | 配置后按 rank 600 扫描的随包提供的 skill 根目录 |
 

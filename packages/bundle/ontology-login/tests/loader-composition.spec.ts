@@ -134,6 +134,11 @@ describe('Ontology login through a real Loader composition', () => {
         browserSessionTransport: 'bearer',
       },
     })
+    expect(rows.find(row => row.id === 'directory-picker')).toMatchObject({ disabled: true })
+    expect(rows.find(row => row.id === 'directory-picker-browse')?.name)
+      .toBe('@deepseek-ai/dsh-host-directory-picker-browse')
+    expect(rows.find(row => row.id === 'ui-directory-picker-browse')?.name)
+      .toBe('@deepseek-ai/dsh-client-ui-directory-picker-browse')
     expect(rows.find(row => row.id === 'ontology-auth-controller')?.name)
       .toBe('@deepseek-ai/dsh-api-ontology-auth-controller')
     expect(rows.find(row => row.id === 'tool-ontology')?.name)

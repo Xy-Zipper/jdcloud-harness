@@ -1,6 +1,7 @@
 /** Session-addressed skill catalog and workspace installer Remote. */
 
-import { dirname, join, resolve } from 'node:path'
+import { lstat, readdir, readFile, realpath, rm } from 'node:fs/promises'
+import { dirname, join, posix, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
 import { FsError, type FileSystem } from '@deepseek-ai/dsh-fs'
@@ -11,11 +12,20 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import { parse as parseYaml } from 'yaml'
 import {
   SKILL_INSTALL_MAX_BYTES,
+  SKILL_INSTALL_MAX_FILES,
+  SKILL_INSTALL_MAX_FILE_BYTES,
+  SKILL_INSTALL_MAX_TOTAL_BYTES,
+  type SkillInstallFile,
   type SkillInstallInvalidReason,
   type SkillInstallRequest,
+  type SkillInstallScope,
   type SkillInstallValue,
+  type SkillDeleteRequest,
+  type SkillDeleteValue,
   type SkillListRequest,
   type SkillListValue,
+  type SkillManagedEntry,
+  type SkillManagedScope,
 } from './types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -28,12 +38,30 @@ declare module '@deepseek-ai/cordis' {
 interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
   assertWorkspacePath(path: string): Promise<void>
+  currentSkillAccess?(): Promise<SkillAccess | undefined>
+}
+
+interface SkillAccess {
+  readonly userId: string
+  readonly administrator: boolean
+  readonly workspaceRoot: string
+  readonly personalSkillDirectory: string
+  readonly managedSkillDirectory: string
 }
 
 interface ParsedInstallSkill {
   readonly name: string
   readonly description: string
   readonly modelInvocable: boolean
+}
+
+interface PreparedInstallFolder extends ParsedInstallSkill {
+  readonly files: readonly PreparedInstallFile[]
+}
+
+interface PreparedInstallFile {
+  readonly path: string
+  readonly content: Uint8Array
 }
 
 /** Host service backing `ctx.remote.skills` without activating a cold Agent. */
@@ -54,8 +82,13 @@ export class SessionSkillCatalog extends TypertRemoteService {
    */
   @Remote
   async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue> {
-    void signal
+    this.throwIfCancelled(signal, 'listing')
     const { sessionId } = request
+    const owner = scopeOwner(this.ctx)
+    if (owner !== undefined && !(await owner.owns('session', String(sessionId)))) {
+      throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
+    }
+    const access = await owner?.currentSkillAccess?.()
     let cwd: string | undefined
     let agentPreset: string | undefined
     try {
@@ -66,6 +99,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
       cwd = observation.header.cwd
       agentPreset = observation.projections.values.agentPreset ?? undefined
     } catch (error: unknown) {
+      this.throwIfCancelled(signal, 'listing')
       if (error instanceof SessionQueryError
         && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') {
         throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
@@ -96,6 +130,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
     const scope = live ?? lease?.key
     try {
       const skills = (await skillRegistry.list({ cwd, scope })).filter(isUserInvocable)
+      const installScopes = allowedInstallScopes(owner, access)
       return {
         skills: skills.map(skill => ({
           name: skill.name,
@@ -104,23 +139,26 @@ export class SessionSkillCatalog extends TypertRemoteService {
           ...skill.whenToUse === undefined ? {} : { whenToUse: skill.whenToUse },
           modelInvocable: skill.invocation.modelInvocable,
         })),
+        installScopes,
+        managedSkills: await listManagedSkills(this.ctx, access, installScopes, signal),
       }
     } catch (error: unknown) {
+      this.throwIfCancelled(signal, 'listing')
       throw new RemoteError('gateway/internal', `skill listing failed: ${String(error)}`, {})
     }
   }
 
   /**
-   * Install one user-invocable SKILL.md in the Session project's `.dsh/skills` directory.
-   * @param request - Session identity and complete UTF-8 Markdown document.
+   * Install one complete user-invocable Skill folder in the Session project's `.dsh/skills` directory.
+   * @param request - Session identity and bounded folder files.
    * @param signal - caller lifetime carried by the Remote transport.
    * @returns installed metadata for optimistic catalog display.
    * @throws RemoteError when validation, ownership, containment, or the guarded create fails.
    */
   @Remote
   async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue> {
-    this.throwIfCancelled(signal)
-    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
+    this.throwIfCancelled(signal, 'installation')
+    const owner = scopeOwner(this.ctx)
     if (owner !== undefined && !(await owner.owns('session', String(request.sessionId)))) {
       throw new RemoteError(
         'session/not-found',
@@ -128,9 +166,14 @@ export class SessionSkillCatalog extends TypertRemoteService {
         { sessionId: request.sessionId },
       )
     }
-    this.throwIfCancelled(signal)
+    this.throwIfCancelled(signal, 'installation')
 
-    const parsed = parseInstallSkill(request.content)
+    const parsed = parseInstallFolder(request.files)
+    const access = await owner?.currentSkillAccess?.()
+    const scope = request.scope ?? (access === undefined ? 'project' : 'personal')
+    if (!allowedInstallScopes(owner, access).includes(scope)) {
+      throw new RemoteError('skill/forbidden', `skill install scope "${scope}" is not authorized`, { scope })
+    }
     let cwd: string | undefined
     try {
       using observation = await this.ctx.sessionQuery.observeSession(request.sessionId)
@@ -150,57 +193,59 @@ export class SessionSkillCatalog extends TypertRemoteService {
       )
     }
     if (cwd === undefined) throw invalidSkill('project-cwd', 'the Session has no project cwd')
-    this.throwIfCancelled(signal)
+    this.throwIfCancelled(signal, 'installation')
 
     const fs = this.ctx.fs
-    const projectRoot = await findProjectRoot(cwd, fs, signal)
-    const rootTarget = await fs.resolve(projectRoot, { signal })
+    const root = await installRoot(scope, cwd, access, fs, signal)
+    const rootTarget = await fs.resolve(root.containmentRoot, { signal })
     const rootInfo = await fs.stat(rootTarget, signal)
-    if (rootInfo?.type !== 'directory') {
-      throw invalidSkill('project-cwd', 'the Session project cwd is not a directory')
+    if (root.requireExistingDirectory && rootInfo?.type !== 'directory') {
+      throw invalidSkill('project-cwd', 'the Skill install root is not a directory')
     }
     const canonicalRoot = fs.processPath(rootTarget)
-    try {
-      await owner?.assertWorkspacePath(canonicalRoot)
-    } catch (error: unknown) {
-      throw new RemoteError(
-        'skill/invalid',
-        'the Session project is outside the current user workspace',
-        { reason: 'path' },
-        { cause: error },
-      )
-    }
-
-    const target = await fs.resolve(
-      join(canonicalRoot, '.dsh', 'skills', parsed.name, 'SKILL.md'),
-      { signal },
-    )
-    if (!fs.contains(rootTarget, target)) {
-      throw invalidSkill('path', 'the skill path leaves the Session project')
-    }
-
-    try {
-      await fs.writeText(
-        target,
-        request.content,
-        { kind: 'createIfAbsent' },
-        signal,
-        { mode: 'workspace-write', workspaceRoot: canonicalRoot, sessionId: request.sessionId },
-      )
-    } catch (error: unknown) {
-      this.throwIfCancelled(signal)
-      if (error instanceof FsError && error.code === 'FS_NOT_OBSERVED') {
+    if (scope !== 'built-in') {
+      try {
+        await owner?.assertWorkspacePath(canonicalRoot)
+      } catch (error: unknown) {
         throw new RemoteError(
-          'skill/already-exists',
-          `skill "${parsed.name}" already exists`,
-          { name: parsed.name },
+          'skill/invalid',
+          'the Skill install root is outside the current user workspace',
+          { reason: 'path' },
           { cause: error },
         )
+      }
+    }
+
+    const skillRoot = await fs.resolve(join(root.skillDirectory, parsed.name), { signal })
+    if (!fs.contains(rootTarget, skillRoot)) {
+      throw invalidSkill('path', 'the skill path leaves the selected Skill directory')
+    }
+    if (await fs.stat(skillRoot, signal) !== undefined) throw skillAlreadyExists(parsed.name)
+
+    try {
+      for (const file of parsed.files) {
+        this.throwIfCancelled(signal, 'installation')
+        const target = await fs.resolve(join(fs.processPath(skillRoot), ...file.path.split('/')), { signal })
+        if (!fs.contains(skillRoot, target)) throw invalidSkill('path', 'a skill file path leaves the skill directory')
+        await fs.writeBytes(
+          target,
+          file.content,
+          { kind: 'createIfAbsent' },
+          signal,
+          scope === 'built-in'
+            ? { mode: 'danger-full-access', workspaceRoot: canonicalRoot, sessionId: request.sessionId }
+            : { mode: 'workspace-write', workspaceRoot: canonicalRoot, sessionId: request.sessionId },
+        )
+      }
+    } catch (error: unknown) {
+      this.throwIfCancelled(signal, 'installation')
+      if (error instanceof FsError && error.code === 'FS_NOT_OBSERVED') {
+        throw skillAlreadyExists(parsed.name, error)
       }
       if (error instanceof FsError && error.code === 'FS_SANDBOX_DENIED') {
         throw new RemoteError(
           'skill/invalid',
-          'the skill path is not writable inside the Session project',
+          'the selected Skill directory is not writable',
           { reason: 'path' },
           { cause: error },
         )
@@ -213,9 +258,62 @@ export class SessionSkillCatalog extends TypertRemoteService {
         name: parsed.name,
         description: parsed.description,
         modelInvocable: parsed.modelInvocable,
-        path: fs.processPath(target),
+        path: fs.processPath(await fs.resolve(join(fs.processPath(skillRoot), 'SKILL.md'), { signal })),
       },
     }
+  }
+
+  /**
+   * Delete one personal Skill, or one shared Skill when the current user is an administrator.
+   * @param request - Session owner, account scope, and validated Skill name.
+   * @param signal - caller cancellation checked before the irreversible removal.
+   * @returns deletion confirmation after the complete Skill folder is absent.
+   * @throws RemoteError when authentication, authorization, ownership, or the target folder check fails.
+   */
+  @Remote('delete')
+  async delete(request: SkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue> {
+    this.throwIfCancelled(signal, 'deletion')
+    const owner = scopeOwner(this.ctx)
+    if (owner === undefined || !(await owner.owns('session', String(request.sessionId)))) {
+      throw new RemoteError(
+        'session/not-found',
+        `session "${request.sessionId}" not found`,
+        { sessionId: request.sessionId },
+      )
+    }
+    if (!isSkillName(request.name)) throw invalidSkill('name', 'skill name must use lowercase kebab-case')
+    const access = await owner.currentSkillAccess?.()
+    if (access === undefined || !allowedInstallScopes(owner, access).includes(request.scope)) {
+      throw new RemoteError(
+        'skill/forbidden',
+        `skill delete scope "${request.scope}" is not authorized`,
+        { scope: request.scope },
+      )
+    }
+    this.throwIfCancelled(signal, 'deletion')
+    const root = managedSkillRoot(access, request.scope)
+    let canonicalRoot: string
+    let target: string
+    try {
+      canonicalRoot = await realpath(root)
+      const requested = join(canonicalRoot, request.name)
+      const info = await lstat(requested)
+      if (!info.isDirectory() || info.isSymbolicLink()) throw skillNotFound(request.scope, request.name)
+      target = await realpath(requested)
+    } catch (error: unknown) {
+      if (isNodeErrorCode(error, 'ENOENT')) throw skillNotFound(request.scope, request.name)
+      if (error instanceof RemoteError) throw error
+      throw new RemoteError('gateway/internal', `skill deletion failed: ${String(error)}`, {}, { cause: error })
+    }
+    if (dirname(target) !== canonicalRoot) throw invalidSkill('path', 'the Skill folder leaves its managed directory')
+    this.throwIfCancelled(signal, 'deletion')
+    try {
+      await rm(target, { recursive: true, force: false })
+    } catch (error: unknown) {
+      if (isNodeErrorCode(error, 'ENOENT')) throw skillNotFound(request.scope, request.name)
+      throw new RemoteError('gateway/internal', `skill deletion failed: ${String(error)}`, {}, { cause: error })
+    }
+    return { deleted: true, scope: request.scope, name: request.name }
   }
 
   /** Resolve a live or standing preset scope without creating an Agent. */
@@ -232,16 +330,217 @@ export class SessionSkillCatalog extends TypertRemoteService {
     }
   }
 
-  /** Reject a cancelled install with the transport's stable cancellation code. */
-  private throwIfCancelled(signal: AbortSignal): void {
+  /** Reject a cancelled catalog operation with the transport's stable cancellation code. */
+  private throwIfCancelled(
+    signal: AbortSignal,
+    operation: 'listing' | 'installation' | 'deletion',
+  ): void {
     if (signal.aborted) {
-      throw new RemoteError('gateway/cancelled', 'skill installation was aborted', {})
+      throw new RemoteError('gateway/cancelled', `skill ${operation} was aborted`, {})
     }
   }
 }
 
+interface InstallRoot {
+  readonly containmentRoot: string
+  readonly skillDirectory: string
+  readonly requireExistingDirectory: boolean
+}
+
+/** Read the account-owned Skill folders that the current user may remove. */
+async function listManagedSkills(
+  ctx: Context,
+  access: SkillAccess | undefined,
+  installScopes: readonly SkillInstallScope[],
+  signal: AbortSignal,
+): Promise<SkillManagedEntry[]> {
+  if (access === undefined) return []
+  const scopes = installScopes.filter((scope): scope is SkillManagedScope => scope !== 'project')
+  const skills: SkillManagedEntry[] = []
+  for (const scope of scopes) {
+    signal.throwIfAborted()
+    const root = managedSkillRoot(access, scope)
+    let entries
+    try {
+      entries = await readdir(root, { withFileTypes: true })
+    } catch (error: unknown) {
+      if (isNodeErrorCode(error, 'ENOENT')) continue
+      throw error
+    }
+    for (const entry of entries) {
+      signal.throwIfAborted()
+      if (!entry.isDirectory() || !isSkillName(entry.name)) continue
+      const path = join(root, entry.name, 'SKILL.md')
+      try {
+        const info = await lstat(path)
+        if (!info.isFile() || info.size > SKILL_INSTALL_MAX_BYTES) continue
+        const parsed = parseInstallSkill(await readFile(path, { encoding: 'utf8', signal }))
+        if (parsed.name !== entry.name) continue
+        skills.push({ ...parsed, path, scope })
+      } catch (error: unknown) {
+        if (!isNodeErrorCode(error, 'ENOENT')) {
+          ctx.logger.warn(`managed skill ${path} ignored: ${String(error)}`)
+        }
+      }
+    }
+  }
+  return skills.sort((left, right) => left.name.localeCompare(right.name))
+}
+
+/** Select the authenticated account directory for one removable Skill scope. */
+function managedSkillRoot(access: SkillAccess, scope: SkillManagedScope): string {
+  return scope === 'personal' ? access.personalSkillDirectory : access.managedSkillDirectory
+}
+
+/** Select the persistent root authorized for one project, user, or shared Skill install. */
+async function installRoot(
+  scope: SkillInstallScope,
+  cwd: string,
+  access: SkillAccess | undefined,
+  fs: FileSystem,
+  signal: AbortSignal,
+): Promise<InstallRoot> {
+  if (scope === 'project') {
+    const containmentRoot = await findProjectRoot(cwd, fs, signal)
+    return {
+      containmentRoot,
+      skillDirectory: join(containmentRoot, '.dsh', 'skills'),
+      requireExistingDirectory: true,
+    }
+  }
+  if (access === undefined) {
+    throw new RemoteError('skill/forbidden', 'authenticated Skill access is unavailable', { scope })
+  }
+  return scope === 'personal'
+    ? {
+      containmentRoot: access.workspaceRoot,
+      skillDirectory: access.personalSkillDirectory,
+      requireExistingDirectory: true,
+    }
+    : {
+      containmentRoot: access.managedSkillDirectory,
+      skillDirectory: access.managedSkillDirectory,
+      requireExistingDirectory: false,
+    }
+}
+
+/** Return the install targets exposed to the current authenticated user. */
+function allowedInstallScopes(
+  owner: ScopeOwner | undefined,
+  access: SkillAccess | undefined,
+): readonly SkillInstallScope[] {
+  if (owner?.currentSkillAccess === undefined) return ['project']
+  if (access === undefined) return []
+  return access.administrator ? ['personal', 'built-in'] : ['personal']
+}
+
+/** Resolve the active authentication controller without coupling Skill management to one login product. */
+function scopeOwner(ctx: Context): ScopeOwner | undefined {
+  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
+  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
+  if (candidate === undefined
+    || typeof Reflect.get(candidate, 'owns') !== 'function'
+    || typeof Reflect.get(candidate, 'assertWorkspacePath') !== 'function') return undefined
+  return candidate as ScopeOwner
+}
+
 function invalidSkill(reason: SkillInstallInvalidReason, message: string): RemoteError {
   return new RemoteError('skill/invalid', message, { reason })
+}
+
+/** Build the stable refusal returned when an installed skill directory already exists. */
+function skillAlreadyExists(name: string, cause?: unknown): RemoteError {
+  return new RemoteError(
+    'skill/already-exists',
+    `skill "${name}" already exists`,
+    { name },
+    cause === undefined ? undefined : { cause },
+  )
+}
+
+/** Build the stable refusal returned when a managed Skill folder is absent. */
+function skillNotFound(scope: SkillManagedScope, name: string): RemoteError {
+  return new RemoteError('skill/not-found', `skill "${name}" was not found in scope "${scope}"`, { scope, name })
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && Reflect.get(error, 'code') === code
+}
+
+/** Validate one browser-selected folder and decode its required root SKILL.md. */
+function parseInstallFolder(files: readonly SkillInstallFile[]): PreparedInstallFolder {
+  if (files.length === 0) throw invalidSkill('empty-folder', 'the selected skill folder is empty')
+  if (files.length > SKILL_INSTALL_MAX_FILES) {
+    throw invalidSkill('too-many-files', `a skill folder may contain at most ${SKILL_INSTALL_MAX_FILES} files`)
+  }
+  const paths = new Set<string>()
+  let totalBytes = 0
+  let skillFile: PreparedInstallFile | undefined
+  const decodedFiles: PreparedInstallFile[] = []
+  for (const file of files) {
+    if (!isInstallFilePath(file.path)) {
+      throw invalidSkill('invalid-file-path', `invalid skill file path: ${JSON.stringify(file.path)}`)
+    }
+    const collisionKey = file.path.toLocaleLowerCase('en-US')
+    if (paths.has(collisionKey)) {
+      throw invalidSkill('invalid-file-path', `duplicate skill file path: ${JSON.stringify(file.path)}`)
+    }
+    paths.add(collisionKey)
+    const content = decodeInstallFile(file)
+    if (content.byteLength > SKILL_INSTALL_MAX_FILE_BYTES) {
+      throw invalidSkill('file-too-large', `skill file "${file.path}" exceeds ${SKILL_INSTALL_MAX_FILE_BYTES} bytes`)
+    }
+    totalBytes += content.byteLength
+    if (totalBytes > SKILL_INSTALL_MAX_TOTAL_BYTES) {
+      throw invalidSkill('folder-too-large', `skill folder exceeds ${SKILL_INSTALL_MAX_TOTAL_BYTES} bytes`)
+    }
+    const decoded = { path: file.path, content }
+    decodedFiles.push(decoded)
+    if (file.path === 'SKILL.md') skillFile = decoded
+  }
+  if (skillFile === undefined) throw invalidSkill('missing-skill-file', 'the skill folder root requires SKILL.md')
+  let content: string
+  try {
+    content = new TextDecoder('utf-8', { fatal: true }).decode(skillFile.content)
+  } catch (error: unknown) {
+    throw new RemoteError(
+      'skill/invalid',
+      'SKILL.md must contain valid UTF-8 text',
+      { reason: 'skill-file-not-text' },
+      { cause: error },
+    )
+  }
+  const parsed = parseInstallSkill(content)
+  // Publish SKILL.md last so an interrupted copy is not discovered as an installed skill.
+  const ordered = decodedFiles.sort((left, right) => {
+    if (left.path === 'SKILL.md') return 1
+    if (right.path === 'SKILL.md') return -1
+    return left.path.localeCompare(right.path)
+  })
+  return { ...parsed, files: ordered }
+}
+
+/** Decode the canonical padded Base64 carried by the JSON Remote request. */
+function decodeInstallFile(file: SkillInstallFile): Uint8Array {
+  const encoded = file.contentBase64
+  const maxEncodedLength = Math.ceil(SKILL_INSTALL_MAX_FILE_BYTES / 3) * 4
+  if (encoded.length > maxEncodedLength) {
+    throw invalidSkill('file-too-large', `skill file "${file.path}" exceeds ${SKILL_INSTALL_MAX_FILE_BYTES} bytes`)
+  }
+  if (encoded.length % 4 !== 0) {
+    throw invalidSkill('invalid-file-content', `skill file "${file.path}" is not canonical Base64`)
+  }
+  const content = Buffer.from(encoded, 'base64')
+  if (content.toString('base64') !== encoded) {
+    throw invalidSkill('invalid-file-content', `skill file "${file.path}" is not canonical Base64`)
+  }
+  return content
+}
+
+/** Accept only normalized slash-separated paths below the selected folder root. */
+function isInstallFilePath(path: string): boolean {
+  if (path.length === 0 || path.includes('\\') || path.includes('\0') || posix.isAbsolute(path)) return false
+  return path.split('/').every(segment => segment.length > 0 && segment !== '.' && segment !== '..')
 }
 
 /** Parse and validate the metadata needed by the human-facing installer. */

@@ -34,7 +34,9 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-api-ontology-auth-controller": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-directory-picker-browse": "workspace:*",
     "@deepseek-ai/dsh-client-ui-ontology-login": "workspace:*",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:*",
     "@deepseek-ai/dsh-tool-ontology": "workspace:*"
   },
   "peerDependencies": {

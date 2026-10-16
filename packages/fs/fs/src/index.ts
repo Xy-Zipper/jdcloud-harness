@@ -12,6 +12,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { FsError } from './types.ts'
 import type {
+  FsByteWriteOutcome,
   FsDirEntry,
   FsEditOutcome,
   FsEditRequest,
@@ -30,6 +31,7 @@ export {
   FsVersion,
 } from './types.ts'
 export type {
+  FsByteWriteOutcome,
   FsEditOutcome,
   FsEditRequest,
   FsDirEntry,
@@ -270,6 +272,26 @@ export abstract class FileSystem extends Service {
     signal?: AbortSignal,
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome>
+
+  /**
+   * Atomically create or replace raw bytes. `expected` guards intent and
+   * staleness; omission allows unconditional overwrite.
+   * @param target - the resolved target to write.
+   * @param content - the complete new file content.
+   * @param expected - the write intent guarding the write; omit for unconditional.
+   * @param signal - aborts before atomic publication takes effect.
+   * @param sandboxPolicy - the per-call mode and workspace root this write
+   *   runs under; a sandboxing backend fences the write by it, the bare backend
+   *   ignores it. Omit to leave the backend its own default.
+   * @returns the operation and version produced by the write.
+   */
+  abstract writeBytes(
+    target: FsTarget,
+    content: Uint8Array,
+    expected?: FsWriteIntent,
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxExecutionPolicy,
+  ): Promise<FsByteWriteOutcome>
 
   /**
    * Atomically edit literal text. When supplied, the version guard is checked

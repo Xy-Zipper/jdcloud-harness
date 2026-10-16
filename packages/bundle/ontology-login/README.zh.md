@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行以及账号呈现。它会关闭共享 Harness 启动鉴权、启用标签页级 browser Bearer session，并安装 Ontology controller、模型工具与登录 UI。Ontology 会成为该 profile 的应用身份与授权层。
+`@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行、账号范围 Workspace 浏览以及账号呈现。它会关闭共享 Harness 启动鉴权、启用标签页级 browser Bearer session，并安装 Ontology controller、模型工具、登录 UI 与应用内目录选择器。Ontology 会成为该 profile 的应用身份与授权层。
 
 ## 目录
 
@@ -39,14 +39,15 @@ pnpm dsh plugin --profile web remove @deepseek-ai/dsh-ontology-login
 ```dotenv
 ONTOLOGY_BASE_URL=https://ontology.example.com
 ONTOLOGY_REQUEST_TIMEOUT_MS=15000
-ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 ```
 
 本地开发可以显式设置 `ONTOLOGY_BASE_URL=http://127.0.0.1:8080`，并同时设置 `ONTOLOGY_ALLOW_INSECURE_LOOPBACK=true`。非 loopback HTTP 始终会被拒绝。
 
+用户 Workspace 与账号管理的 skill 默认保存在 `$DSH_HOME/account-workspaces`。服务器只需持久化 `$DSH_HOME`；只有需要把账号文件放入独立持久卷时，才设置 `ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users`。
+
 ### 获得的能力
 
-该 layer 把 Connection row 替换为 `browserAuthentication: false`、`browserSession: true` 与 `browserSessionTransport: bearer`。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。配置的用户 Workspace 目录会按稳定 Ontology 用户隔离文件。
+该 layer 把 Connection row 替换为 `browserAuthentication: false`、`browserSession: true` 与 `browserSessionTransport: bearer`。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会用应用内目录浏览器替换自适应操作系统选择器；选择器打开后位于已登录用户的 Workspace 根目录，只列出 Host 校验通过的后代目录，并允许在其中创建子文件夹。它还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。
 
 -----
 
@@ -56,7 +57,7 @@ ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 <details>
 <summary>实现内部细节——点击展开</summary>
 
-[`cordis.patch.yml`](cordis.patch.yml) 拥有完整的可选 layer。部署必须提供 `ONTOLOGY_BASE_URL`；patch 会把超时、loopback 策略与 `ONTOLOGY_USER_WORKSPACE_DIR` 传给 Host controller，并允许更上层的 profile 或命令行 patch 替换每个 row。[`src/index.ts`](src/index.ts) 是 package 加载所需的空 bundle 载体。
+[`cordis.patch.yml`](cordis.patch.yml) 拥有完整的可选 layer。部署必须提供 `ONTOLOGY_BASE_URL`；patch 会把超时、loopback 策略与可选的 `ONTOLOGY_USER_WORKSPACE_DIR` 覆盖值传给 Host controller，固定使用 browse 目录选择器组合，并允许更上层的 profile 或命令行 patch 替换每个 row。[`src/index.ts`](src/index.ts) 是 package 加载所需的空 bundle 载体。
 
 </details>
 
@@ -100,4 +101,4 @@ bundle 本身不增加请求前缀；插入的工具包负责 Prompt 与工具 s
 
 </details>
 
-**运行时不变式：** 不发布伴生入口。Loader 校验三个插入的 package row，各 package 校验自身状态。
+**运行时不变式：** 不发布伴生入口。Loader 校验五个插入的 package row，各 package 校验自身状态。

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the tab-scoped browser Bearer session, and installs the Ontology controller, model tools, and login UI. Ontology becomes the profile's application identity and authorization layer.
+`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, account-scoped Workspace browsing, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the tab-scoped browser Bearer session, and installs the Ontology controller, model tools, login UI, and in-app directory picker. Ontology becomes the profile's application identity and authorization layer.
 
 ## Table of Contents
 
@@ -39,14 +39,15 @@ Set the required Runtime address before launching the profile:
 ```dotenv
 ONTOLOGY_BASE_URL=https://ontology.example.com
 ONTOLOGY_REQUEST_TIMEOUT_MS=15000
-ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
 ```
 
 Local development may explicitly set `ONTOLOGY_BASE_URL=http://127.0.0.1:8080` together with `ONTOLOGY_ALLOW_INSECURE_LOOPBACK=true`. Non-loopback HTTP is always rejected.
 
+User workspaces and account-managed Skills default to `$DSH_HOME/account-workspaces`. A server only needs to persist `$DSH_HOME`; set `ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users` when those account files must use a separate persistent volume.
+
 ### What you get
 
-The layer replaces the Connection row with `browserAuthentication: false`, `browserSession: true`, and `browserSessionTransport: bearer`. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes. The configured user Workspace directory keeps files private to the stable Ontology user.
+The layer replaces the Connection row with `browserAuthentication: false`, `browserSession: true`, and `browserSessionTransport: bearer`. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
 
 -----
 
@@ -56,7 +57,7 @@ The layer replaces the Connection row with `browserAuthentication: false`, `brow
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-[`cordis.patch.yml`](cordis.patch.yml) owns the complete optional layer. `ONTOLOGY_BASE_URL` is deployment-required; the patch passes timeout, loopback policy, and `ONTOLOGY_USER_WORKSPACE_DIR` into the Host controller and leaves every row replaceable by profile or command-line patches above it. [`src/index.ts`](src/index.ts) is the empty bundle carrier required by package loading.
+[`cordis.patch.yml`](cordis.patch.yml) owns the complete optional layer. `ONTOLOGY_BASE_URL` is deployment-required; the patch passes timeout, loopback policy, and the optional `ONTOLOGY_USER_WORKSPACE_DIR` override into the Host controller, pins the browse directory-picker pair, and leaves every row replaceable by profile or command-line patches above it. [`src/index.ts`](src/index.ts) is the empty bundle carrier required by package loading.
 
 </details>
 
@@ -100,4 +101,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. Loader validates all three inserted package rows, and each package validates its own state.
+**Runtime invariant:** No companion is published. Loader validates all five inserted package rows, and each package validates its own state.

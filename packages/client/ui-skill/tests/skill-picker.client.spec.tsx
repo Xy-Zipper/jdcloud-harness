@@ -4,8 +4,15 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { InputActions } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {
+  SkillInstallFile,
+  SkillInstallScope,
+  SkillManagedEntry,
+  SkillManagedScope,
+} from '@deepseek-ai/dsh-api-session-controller/types'
 import {
   SkillPickerView,
+  type SkillDeleteOutcome,
   type SkillInstallOutcome,
   type SkillPickerViewProps,
 } from '../src/client/SkillPicker.tsx'
@@ -38,27 +45,62 @@ const catalog = [
 function setup(options: {
   readonly available?: boolean
   readonly inputActions?: InputActions
-  readonly installSkill?: (content: string) => Promise<SkillInstallOutcome>
-  readonly loadCatalog?: () => Promise<typeof catalog>
+  readonly installSkill?: (
+    scope: SkillInstallScope,
+    files: readonly SkillInstallFile[],
+  ) => Promise<SkillInstallOutcome>
+  readonly deleteSkill?: (scope: SkillManagedScope, name: string) => Promise<SkillDeleteOutcome>
+  readonly loadCatalog?: () => Promise<{
+    skills: typeof catalog
+    installScopes: readonly SkillInstallScope[]
+    managedSkills: readonly SkillManagedEntry[]
+  }>
 } = {}) {
   const inputActions = options.inputActions ?? actions()
-  const installSkill = options.installSkill ?? vi.fn(async (content: string): Promise<SkillInstallOutcome> => ({
+  const installSkill = options.installSkill ?? vi.fn(async (
+    _scope: SkillInstallScope,
+    files: readonly SkillInstallFile[],
+  ): Promise<SkillInstallOutcome> => ({
     ok: true as const,
     skill: {
-      name: content.includes('name: imported-skill') ? 'imported-skill' : 'workspace-helper',
+      name: atob(files.find(file => file.path === 'SKILL.md')?.contentBase64 ?? '').includes('name: imported-skill')
+        ? 'imported-skill'
+        : 'workspace-helper',
       description: '自定义技能',
       modelInvocable: true,
     },
   }))
-  const loadCatalog = options.loadCatalog ?? vi.fn(() => Promise.resolve(catalog))
+  const loadCatalog = options.loadCatalog ?? vi.fn(() => Promise.resolve({
+    skills: catalog,
+    installScopes: ['personal'] as const,
+    managedSkills: [],
+  }))
+  const deleteSkill = options.deleteSkill ?? vi.fn(() => Promise.resolve({ ok: true as const }))
   const view = render(<SkillPickerView
     available={options.available ?? true}
     inputActions={inputActions}
     installSkill={installSkill}
+    deleteSkill={deleteSkill}
     loadCatalog={loadCatalog}
     t={t}
   />)
-  return { inputActions, installSkill, loadCatalog, view }
+  return { deleteSkill, inputActions, installSkill, loadCatalog, view }
+}
+
+/** Build one browser directory entry with deterministic bytes for jsdom. */
+function folderFile(path: string, content: string | Uint8Array): File {
+  const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content
+  const file = new File([Uint8Array.from(bytes).buffer], path.split('/').at(-1) ?? path)
+  Object.defineProperty(file, 'webkitRelativePath', { value: path })
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: () => Promise.resolve(Uint8Array.from(bytes).buffer),
+  })
+  return file
+}
+
+/** Decode browser Base64 as UTF-8 for readable assertions. */
+function decodeBase64Text(encoded: string): string {
+  return new TextDecoder().decode(Uint8Array.from(atob(encoded), character => character.charCodeAt(0)))
 }
 
 function openPicker(): void {
@@ -109,51 +151,56 @@ describe('SkillPickerView', () => {
     expect(screen.getByRole('dialog', { name: '技能' })).toBeDefined()
   })
 
-  it('creates a workspace skill from the guided form', async () => {
-    const installSkill = vi.fn(async (): Promise<SkillInstallOutcome> => ({
-      ok: true,
-      skill: { name: 'workspace-helper', description: '处理工作区订单', modelInvocable: true },
-    }))
-    setup({ installSkill })
+  it('offers folder import without a skill creation form', async () => {
+    setup()
     await openManager()
-
-    fireEvent.change(screen.getByLabelText('技能名称'), { target: { value: 'workspace-helper' } })
-    fireEvent.change(screen.getByLabelText('功能说明'), { target: { value: '处理工作区订单' } })
-    fireEvent.change(screen.getByLabelText('技能指令'), { target: { value: '先检查订单，再输出异常。' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
-
-    await waitFor(() => {
-      expect(installSkill).toHaveBeenCalledWith([
-        '---',
-        'name: workspace-helper',
-        'description: "处理工作区订单"',
-        '---',
-        '',
-        '先检查订单，再输出异常。',
-        '',
-      ].join('\n'))
-    })
-    expect(screen.queryByRole('dialog', { name: '技能管理' })).toBeNull()
+    expect(screen.getByRole('button', { name: '选择文件夹' })).toBeDefined()
+    expect(screen.queryByText('新建技能')).toBeNull()
+    expect(screen.queryByLabelText('技能名称')).toBeNull()
   })
 
-  it('imports a single SKILL.md file and sends its exact text', async () => {
-    const installSkill = vi.fn(async (): Promise<SkillInstallOutcome> => ({
+  it('imports every selected folder file with its relative path and exact bytes', async () => {
+    const installSkill = vi.fn(async (
+      _scope: SkillInstallScope,
+      _files: readonly SkillInstallFile[],
+    ): Promise<SkillInstallOutcome> => ({
       ok: true,
       skill: { name: 'imported-skill', description: '导入技能', modelInvocable: true },
     }))
     const { view } = setup({ installSkill })
     await openManager()
-    fireEvent.click(screen.getByRole('tab', { name: '导入 SKILL.md' }))
     const content = '---\nname: imported-skill\ndescription: 导入技能\n---\n\n执行导入说明。\n'
-    const file = new File([content], 'SKILL.md', { type: 'text/markdown' })
-    Object.defineProperty(file, 'text', { value: () => Promise.resolve(content) })
+    const skill = folderFile('imported-skill/SKILL.md', content)
+    const asset = folderFile('imported-skill/assets/icon.png', Uint8Array.of(0, 255, 7))
     const input = view.baseElement.querySelector<HTMLInputElement>('input[type="file"]')
     expect(input).not.toBeNull()
-    fireEvent.change(input!, { target: { files: [file] } })
+    fireEvent.change(input!, { target: { files: [skill, asset] } })
 
-    expect(await screen.findByText('SKILL.md')).toBeDefined()
-    fireEvent.click(screen.getByRole('button', { name: '保存技能' }))
-    await waitFor(() => { expect(installSkill).toHaveBeenCalledWith(content) })
+    expect(await screen.findByText('已读取 2 个文件')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '导入技能' }))
+    await waitFor(() => {
+      expect(installSkill).toHaveBeenCalledOnce()
+      expect(installSkill.mock.calls[0]?.[0]).toBe('personal')
+      const files = installSkill.mock.calls[0]?.[1]
+      expect(files?.map(file => file.path)).toEqual(['SKILL.md', 'assets/icon.png'])
+      expect(decodeBase64Text(files?.[0]?.contentBase64 ?? '')).toBe(content)
+      expect(Uint8Array.from(atob(files?.[1]?.contentBase64 ?? ''), character => character.charCodeAt(0)))
+        .toEqual(Uint8Array.of(0, 255, 7))
+    })
+  })
+
+  it('rejects a folder without a root SKILL.md before calling the adapter', async () => {
+    const installSkill = vi.fn()
+    const { view } = setup({ installSkill })
+    await openManager()
+    const input = view.baseElement.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(input!, {
+      target: { files: [folderFile('incomplete/references/guide.md', 'guide')] },
+    })
+
+    expect((await screen.findByRole('alert')).textContent).toBe('文件夹根目录缺少 SKILL.md')
+    expect(screen.getByRole('button', { name: '导入技能' }).hasAttribute('disabled')).toBe(true)
+    expect(installSkill).not.toHaveBeenCalled()
   })
 
   it('keeps the manager open and explains a same-name refusal', async () => {
@@ -165,18 +212,113 @@ describe('SkillPickerView', () => {
     })
     await openManager()
     const dialog = screen.getByRole('dialog', { name: '技能管理' })
-    fireEvent.change(within(dialog).getByLabelText('技能名称'), { target: { value: 'code-review' } })
-    fireEvent.change(within(dialog).getByLabelText('功能说明'), { target: { value: '重复技能' } })
-    fireEvent.change(within(dialog).getByLabelText('技能指令'), { target: { value: '重复说明' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存技能' }))
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(input!, {
+      target: { files: [folderFile('code-review/SKILL.md', '---\nname: code-review\ndescription: 重复技能\n---\n')] },
+    })
+    await within(dialog).findByText('已读取 1 个文件')
+    fireEvent.click(within(dialog).getByRole('button', { name: '导入技能' }))
 
     expect((await within(dialog).findByRole('alert')).textContent).toContain('同名技能已存在，不会覆盖原文件')
     expect(screen.getByRole('dialog', { name: '技能管理' })).toBeDefined()
+  })
+
+  it('lets administrators choose the shared built-in target', async () => {
+    const installSkill = vi.fn(async (
+      _scope: SkillInstallScope,
+      _files: readonly SkillInstallFile[],
+    ): Promise<SkillInstallOutcome> => ({
+      ok: true,
+      skill: { name: 'shared-skill', description: '共享技能', modelInvocable: true },
+    }))
+    const { view } = setup({
+      installSkill,
+      loadCatalog: vi.fn(() => Promise.resolve({
+        skills: catalog,
+        installScopes: ['personal', 'built-in'] as const,
+        managedSkills: [],
+      })),
+    })
+    await openManager()
+    expect(screen.getByRole('tab', { name: '我的技能' }).getAttribute('aria-selected')).toBe('true')
+    const builtInTab = screen.getByRole('tab', { name: '内置技能' })
+    fireEvent.click(builtInTab)
+    expect(builtInTab.getAttribute('aria-selected')).toBe('true')
+    const input = view.baseElement.querySelector<HTMLInputElement>('input[type="file"]')
+    fireEvent.change(input!, {
+      target: { files: [folderFile('shared-skill/SKILL.md', '---\nname: shared-skill\ndescription: 共享技能\n---\n')] },
+    })
+    await screen.findByText('已读取 1 个文件')
+    fireEvent.click(screen.getByRole('button', { name: '导入技能' }))
+
+    await waitFor(() => { expect(installSkill.mock.calls[0]?.[0]).toBe('built-in') })
+  })
+
+  it('opens the same administrator tabs from Settings', async () => {
+    const installSkill = vi.fn(async (): Promise<SkillInstallOutcome> => ({
+      ok: true,
+      skill: { name: 'shared-skill', description: '共享技能', modelInvocable: true },
+    }))
+    render(<SkillPickerView
+      surface="settings"
+      available
+      installSkill={installSkill}
+      deleteSkill={() => Promise.resolve({ ok: true })}
+      loadCatalog={() => Promise.resolve({
+        skills: catalog,
+        installScopes: ['personal', 'built-in'],
+        managedSkills: [],
+      })}
+      t={t}
+    />)
+
+    expect(await screen.findByRole('heading', { name: '技能管理' })).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '管理技能' }))
+    await screen.findByRole('dialog', { name: '技能管理' })
+    expect(screen.getByRole('tab', { name: '我的技能' })).toBeDefined()
+    expect(screen.getByRole('tab', { name: '内置技能' })).toBeDefined()
   })
 
   it('shows catalog loading failures and a retryable empty state', async () => {
     setup({ loadCatalog: vi.fn(() => Promise.reject(new Error('offline'))) })
     openPicker()
     expect((await screen.findByRole('alert')).textContent).toContain('技能加载失败，请重试')
+  })
+
+  it('lists installed skills and confirms before deleting the selected scope', async () => {
+    const deleteSkill = vi.fn(() => Promise.resolve({ ok: true as const }))
+    setup({
+      deleteSkill,
+      loadCatalog: vi.fn(() => Promise.resolve({
+        skills: catalog,
+        installScopes: ['personal', 'built-in'] as const,
+        managedSkills: [
+          {
+            name: 'personal-helper',
+            description: '我的账号技能',
+            modelInvocable: true,
+            scope: 'personal' as const,
+          },
+          {
+            name: 'shared-helper',
+            description: '所有用户共享',
+            modelInvocable: true,
+            scope: 'built-in' as const,
+          },
+        ],
+      })),
+    })
+    await openManager()
+
+    expect(screen.getByText('personal-helper')).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '删除 personal-helper' }))
+    expect(screen.getByRole('dialog', { name: '删除技能' })).toBeDefined()
+    expect(deleteSkill).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => { expect(deleteSkill).toHaveBeenCalledWith('personal', 'personal-helper') })
+    await waitFor(() => { expect(screen.queryByText('personal-helper')).toBeNull() })
+
+    fireEvent.click(screen.getByRole('tab', { name: '内置技能' }))
+    expect(screen.getByText('shared-helper')).toBeDefined()
   })
 })

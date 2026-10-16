@@ -48,8 +48,8 @@ describe('ui-theme host', () => {
     expect(rows[0]).toMatchObject({ kind: 'style' })
     expect(rows[1]).toMatchObject({ kind: 'script', placement: 'body' })
     expect(rows[2]).toMatchObject({ kind: 'script', placement: 'head', text: 'window.afterTheme=true' })
-    expect(rowText(rows[0])).toContain('@media(prefers-color-scheme:dark)')
-    expect(rowText(rows[1])).toContain('const preference = "system"')
+    expect(rowText(rows[0])).not.toContain('@media(prefers-color-scheme:dark)')
+    expect(rowText(rows[1])).toContain('const preference = "light"')
     expect(rowText(rows[1])).toContain('"14px"')
     await configuration.update({ preference: 'dark', fontSize: 17 })
     expect(rowText(collect(ctx)[0])).toContain('color-scheme:dark')
@@ -59,10 +59,10 @@ describe('ui-theme host', () => {
     expect(collect(ctx)).toEqual([{ kind: 'script', placement: 'head', text: 'window.afterTheme=true' }])
   })
 
-  it('uses the system preference without a settings provider', async () => {
+  it('uses the light preference without a settings provider', async () => {
     const ctx = new Context()
     await ctx.plugin({ Config, apply }).await()
-    expect(rowText(collect(ctx)[1])).toContain('const preference = "system"')
+    expect(rowText(collect(ctx)[1])).toContain('const preference = "light"')
   })
 
 

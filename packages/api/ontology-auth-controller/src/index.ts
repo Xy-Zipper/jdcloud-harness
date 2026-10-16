@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -53,7 +54,7 @@ export interface Config {
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */
   readonly allowInsecureLoopback?: boolean
-  /** Persistent parent directory for Ontology user workspaces. */
+  /** Persistent parent directory for Ontology user workspaces; defaults below `$DSH_HOME`. */
   readonly userWorkspaceDirectory?: string
 }
 
@@ -77,7 +78,7 @@ export class OntologyAuthController extends TypertRemoteService {
 
   private readonly baseUrl: string
   private readonly requestTimeoutMs: number
-  private readonly userWorkspaceDirectory: string | undefined
+  private readonly userWorkspaceDirectory: string
   private readonly fetcher: typeof fetch
 
   /** @param ctx - Host context carrying browser sessions and durable credentials. @param config - Runtime connection policy. */
@@ -85,10 +86,10 @@ export class OntologyAuthController extends TypertRemoteService {
     super(ctx, 'ontologyAuthController', { namespace: 'ontologyAuth' })
     this.baseUrl = normalizeOntologyBaseUrl(config.ontologyBaseUrl, config.allowInsecureLoopback ?? false)
     this.requestTimeoutMs = config.requestTimeoutMs ?? 15_000
-    this.userWorkspaceDirectory = config.userWorkspaceDirectory === undefined
-      || config.userWorkspaceDirectory.trim() === ''
-      ? undefined
-      : resolve(config.userWorkspaceDirectory)
+    const configuredWorkspaceDirectory = config.userWorkspaceDirectory?.trim()
+    this.userWorkspaceDirectory = configuredWorkspaceDirectory === undefined || configuredWorkspaceDirectory === ''
+      ? join(resolveDshHome(), 'account-workspaces')
+      : resolve(configuredWorkspaceDirectory)
     this.fetcher = globalThis.fetch
     ctx.on('api-session/prompt-admission', async (request, next) => {
       const state = await this.authentication(request.signal)
@@ -217,10 +218,9 @@ export class OntologyAuthController extends TypertRemoteService {
 
   /**
    * Create and return the current Ontology user's persistent directory.
-   * @returns Canonical user directory, or undefined when the deployment has no private workspace root.
+   * @returns Canonical user directory under the configured or default account-workspace parent.
    */
   async workspaceRoot(): Promise<string | undefined> {
-    if (this.userWorkspaceDirectory === undefined) return undefined
     const scopeKey = await this.currentScopeKey()
     if (scopeKey === undefined) throw authRequired('missing')
     await mkdir(this.userWorkspaceDirectory, { recursive: true })
@@ -258,6 +258,32 @@ export class OntologyAuthController extends TypertRemoteService {
   async isCurrentAdministrator(): Promise<boolean> {
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     return state.kind === 'authenticated' && state.auth.user.accountType === 'admin'
+  }
+
+  /**
+   * Resolve the authenticated user's personal Skill directory and the shared administrator-managed directory.
+   * @returns User-id-backed Skill access, or undefined without login.
+   */
+  async currentSkillAccess(): Promise<{
+    readonly userId: string
+    readonly administrator: boolean
+    readonly workspaceRoot: string
+    readonly personalSkillDirectory: string
+    readonly managedSkillDirectory: string
+  } | undefined> {
+    const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
+    if (state.kind !== 'authenticated') return undefined
+    const workspaceRoot = await this.workspaceRoot()
+    if (workspaceRoot === undefined) return undefined
+    await mkdir(this.userWorkspaceDirectory, { recursive: true })
+    const parent = await realpath(this.userWorkspaceDirectory)
+    return {
+      userId: state.auth.user.userId,
+      administrator: state.auth.user.accountType === 'admin',
+      workspaceRoot,
+      personalSkillDirectory: join(workspaceRoot, '.dsh', 'skills'),
+      managedSkillDirectory: join(parent, '.dsh', 'skills'),
+    }
   }
 
   /**

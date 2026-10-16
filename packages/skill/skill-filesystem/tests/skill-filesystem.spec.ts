@@ -146,6 +146,10 @@ class TestFileSystem extends FileSystem {
     return { operation: 'create', version: FsVersion('test'), before: null, after: content }
   }
 
+  override async writeBytes(): Promise<never> {
+    throw new Error('not needed in skill tests')
+  }
+
   override async editText(_target: FsTarget, _request: FsEditRequest): Promise<FsEditOutcome> {
     throw new Error('not needed in skill tests')
   }
@@ -244,6 +248,52 @@ describe('FileSystemSkillProvider', () => {
 
     expect((await ctx.skills.get('project-name', { cwd: project }))?.description).toBe('Project wins')
     expect((await ctx.skills.get('runtime-name', { cwd: project }))?.description).toBe('Runtime wins')
+  })
+
+  it('merges one cwd-selected private root with the shared managed root', async () => {
+    const home = await tempDir('skill-managed-home')
+    const workspaceParent = await tempDir('skill-managed-users')
+    const firstScope = 'a'.repeat(64)
+    const secondScope = 'b'.repeat(64)
+    const firstProject = join(workspaceParent, firstScope, 'project')
+    const secondProject = join(workspaceParent, secondScope, 'project')
+    const managed = join(workspaceParent, '.dsh', 'skills')
+    await mkdir(firstProject, { recursive: true })
+    await mkdir(secondProject, { recursive: true })
+    await writeSkill(managed, 'shared-helper', 'Shared helper')
+    await writeSkill(join(workspaceParent, firstScope, '.dsh', 'skills'), 'personal-helper', 'First user helper')
+    await writeSkill(join(workspaceParent, secondScope, '.dsh', 'skills'), 'other-helper', 'Second user helper')
+
+    const ctx = await setupLocal(home, {
+      managedSkillDir: managed,
+      scopedUserWorkspaceDir: workspaceParent,
+    })
+
+    expect((await ctx.skills.list({ cwd: firstProject })).map(skill => skill.name)).toEqual([
+      'personal-helper',
+      'shared-helper',
+    ])
+    expect((await ctx.skills.list({ cwd: secondProject })).map(skill => skill.name)).toEqual([
+      'other-helper',
+      'shared-helper',
+    ])
+  })
+
+  it('derives account Skill roots from the configured Harness home', async () => {
+    const home = await tempDir('skill-default-account-home')
+    const scope = 'a'.repeat(64)
+    const workspaceParent = join(home, '.dsh', 'account-workspaces')
+    const project = join(workspaceParent, scope, 'project')
+    await mkdir(project, { recursive: true })
+    await writeSkill(join(workspaceParent, '.dsh', 'skills'), 'shared-helper', 'Shared helper')
+    await writeSkill(join(workspaceParent, scope, '.dsh', 'skills'), 'personal-helper', 'Personal helper')
+
+    const ctx = await setupLocal(home)
+
+    expect((await ctx.skills.list({ cwd: project })).map(skill => skill.name)).toEqual([
+      'personal-helper',
+      'shared-helper',
+    ])
   })
 
   it('parses flat skills and filters invalid skills from the invocation-neutral listing', async () => {

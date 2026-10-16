@@ -1,4 +1,4 @@
-# Agent Note: Web 项目内 skill（技能）管理
+# Agent Note: Web 账号感知的 skill（技能）管理
 
 Status: implemented
 
@@ -12,9 +12,9 @@ Web 编辑器可以通过 `/name` 调用已知 skill，但用户只能间接发�
 
 Web 编辑器为普通 Session 在 `conversation.input.left` 中注册独立的 skill 按钮。可搜索面板读取与 `/` trigger 相同的 `skills/list` 目录，选择条目后插入既有的字面文本 `/name`。选择面板不引入第二套调用协议，也不通过草稿传输 skill 正文。
 
-面板中的管理弹框可以根据引导字段创建 `SKILL.md`，也可以导入一份完整的 `SKILL.md`。按 Session 寻址的 `skills/create` Remote 负责校验与持久化。它校验发现流程所需的 frontmatter，要求 skill 保持允许用户调用，把 UTF-8 文档限制在 256 KiB 以内；Ontology 控制器存在时还会检查 Session 所有权与工作区包含关系，并通过文件系统的 `workspace-write` 策略写入。
+面板中的管理弹框导入一个以 `SKILL.md` 为根入口的完整本机文件夹。按 Session 寻址的 `skills/create` Remote 负责校验与持久化。它校验发现流程所需的 frontmatter，要求 skill 保持允许用户调用，把文件夹限制为 128 个文件、单文件 5 MiB、总计 20 MiB，以及 256 KiB 的 UTF-8 `SKILL.md` 内容，拒绝不安全或重复的相对路径，检查 Session 所有权与包含关系，并通过显式文件系统执行策略写入。
 
-安装后的 skill 位于 Session cwd 最近的含 `.git` 祖先目录下的 `.dsh/skills/<name>/SKILL.md`；没有该标记时，Session cwd 就是项目根目录。安装使用受保护的创建操作，绝不替换已存在的文件。目录继续只暴露元数据而不暴露指令正文；安装成功后仅更新当前 Session 的内存目录快照，使新条目可以立即选择。
+账号感知的鉴权控制器提供位于已认证用户哈希工作区下的个人安装目标，以及仅管理员可写、跨用户共享的受管目标。没有该适配器的组合仍在 Session cwd 最近的含 `.git` 祖先目录下安装项目 skill；没有该标记时使用 cwd。安装使用受保护的创建操作，绝不替换已存在的目录。`skills/list` 随元数据返回获准使用的目标，不暴露指令正文；安装成功后仅更新当前 Session 的内存目录快照，使新条目可以立即选择。
 
 ## 曾考虑的替代方案
 
@@ -24,10 +24,10 @@ Web 编辑器为普通 Session 在 `conversation.input.left` 中注册独立的 
 
 **在编辑器中引入结构化 skill 引用。** 不予采纳，因为 `/name` 已经是跨客户端的调用表示。复用它可以让手动输入、`/` 建议与新选择面板保持完全相同的行为。
 
-**导入包含配套文件的 ZIP 包。** 首个受支持的管理器不采用此方案，因为解压缩会引入路径穿越、冲突和部分写入决策。配套的 `references/`、`scripts/`、`assets/` 与模板文件仍通过外部项目文件工作流处理。
+**导入 ZIP 压缩包。** 不予采纳，因为解压缩会增加另一套路径穿越与部分写入机制。浏览器文件夹选择会直接提供完整的相对文件树，包括 `references/`、`scripts/`、`assets/`、模板与二进制文件。
 
 ## 后果
 
-非开发用户无需离开 Web 界面，即可发现、创建、导入和调用项目 skill。Host 提供唯一且可审计的写入路径，同名导入保持安全，安装后的 skill 仍是由现有 provider 消费的普通项目文件。
+非开发用户无需离开 Web 界面，即可发现、导入和调用 skill。每个已认证用户可以跨自己的项目维护私有 skill，管理员可以为所有用户维护内置 skill，没有账号级身份的组合则保留项目内管理。Host 提供唯一且可审计的写入路径，同名导入保持安全。
 
-管理弹框不能安装多文件 skill。在实时 registry 不监视项目变更的环境中，新建或导入的 skill 可能要等 provider 观察到新文件后才完全可用；选择面板会立即更新当前 Session 缓存，重载后的普通 provider 发现结果仍是权威来源。
+管理弹框不接受压缩包或单独的 `SKILL.md`；用户需要选择一个完整本机文件夹。在实时 registry 不监视对应根目录的环境中，导入的 skill 可能要等 provider 观察到新目录后才完全可用；选择面板会立即更新当前 Session 缓存，重载后的普通 provider 发现结果仍是权威来源。

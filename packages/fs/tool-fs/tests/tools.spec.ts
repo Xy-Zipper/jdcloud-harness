@@ -98,6 +98,9 @@ class FakeFs extends FileSystem {
     this.files.set(target.targetKey, content)
     return { operation: before !== null ? 'update' : 'create', version: FsVersion('v2'), before, after: content }
   }
+  override async writeBytes(): Promise<never> {
+    throw new Error('not needed in tool-fs tests')
+  }
   override async editText(target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }): Promise<FsEditOutcome> {
     this.throwIfArmed()
     this.editIntents.push(expected)

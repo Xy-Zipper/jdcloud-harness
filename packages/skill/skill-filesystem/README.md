@@ -50,10 +50,11 @@ Default roots are scanned in this provider's rank order:
 | 100 | `project-dsh` | `<projectRoot>/.dsh/skills` |
 | 200 | `project-agents` | `<projectRoot>/.agents/skills` |
 | 300 | `custom` | `Config.customSkillDirs` |
-| 400 | `user-dsh` | `<dshHome>/skills` |
+| 400 | `user-dsh` | `<scopedUserWorkspaceDir>/<scopeKey>/.dsh/skills` or `<dshHome>/skills` |
 | 500 | `user-agents` | `<agentsHome>/skills` |
+| 550 | `custom` | `Config.managedSkillDir` |
 
-The project root is the nearest ancestor containing `.git`; without one, the current cwd is used. The user DSH root skips its `.system` child. `includeDefaultRoots: false` omits the project and user rows plus the `$DSH_BUNDLED_SKILL_DIR` default so an isolated provider sees only its own configured roots; `bundledSkillDir` adds a bundled root at rank 600.
+The project root is the nearest ancestor containing `.git`; without one, the current cwd is used. `scopedUserWorkspaceDir` defaults to `<dshHome>/account-workspaces`; when cwd is inside one direct 64-character hexadecimal child, that child contributes its private `.dsh/skills` directory. `managedSkillDir` defaults to `<scopedUserWorkspaceDir>/.dsh/skills` and contributes the administrator-managed root shared across workspaces. The user DSH roots skip their `.system` children. `includeDefaultRoots: false` omits these derived account roots, the project and default user rows, and the `$DSH_BUNDLED_SKILL_DIR` default; explicitly configured scoped, managed, and custom roots remain available, while `bundledSkillDir` adds a bundled root at rank 600.
 
 ### Mount and configure
 
@@ -71,6 +72,8 @@ Load the plugin alongside the skill registry; it requires `ctx.skills`.
 | `dshHome` | `$DSH_HOME` or `~/.dsh` | Harness config root; its `skills` subdirectory is scanned |
 | `agentsHome` | `$DSH_AGENTS_HOME` or `~/.agents` | Shared agent config root scanned for compatible skills |
 | `customSkillDirs` | `[]` | Additional local skill roots, after project roots and before user roots |
+| `managedSkillDir` | `<scopedUserWorkspaceDir>/.dsh/skills` | Administrator-managed skill root shared across workspaces at rank 550 |
+| `scopedUserWorkspaceDir` | `<dshHome>/account-workspaces` | Parent of hashed user workspace directories whose matching cwd selects a private skill root |
 | `watch` | `true` | Watch local roots and invalidate the provider when the catalog may have changed |
 | `bundledSkillDir` | — | Bundled skill root scanned at rank 600 when configured |
 

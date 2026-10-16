@@ -8,7 +8,18 @@
     browserSessionTransport: bearer
     trustedHosts: !!js ctx.webRuntime.trustedHosts
 
+- id: directory-picker
+  disabled: true
+
 - insert:
+    # Ontology workspaces stay inside the authenticated user's private root, so
+    # the browser picker starts there and never exposes host directories above it.
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
     - id: ontology-auth-controller
       name: '@deepseek-ai/dsh-api-ontology-auth-controller'
       config:

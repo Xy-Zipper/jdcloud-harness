@@ -41,7 +41,7 @@ kind: "package-reference"
 | `ontologyBaseUrl` | 必填 | 固定的 Ontology Runtime 服务地址；除显式允许的 loopback 开发地址外必须使用 HTTPS。 |
 | `requestTimeoutMs` | `15000` | 登录、当前用户校验、刷新与注销的网络截止时间。 |
 | `allowInsecureLoopback` | `false` | 只允许 `localhost`、`127.0.0.1` 或 `::1` 显式使用 HTTP。 |
-| `userWorkspaceDirectory` | 禁用 | 可选的持久化父目录，用于把每个 Ontology 用户的 Workspace 路径限制在其私有目录中。 |
+| `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | 可选覆盖目录，用于持久化并隔离每个 Ontology 用户的 Workspace 与个人 skill 路径。 |
 
 完整字段以生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-ontology-auth-controller)为准。
 
@@ -51,7 +51,7 @@ kind: "package-reference"
 
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
-Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。Session、Workspace、文件与引用消费方使用该归属；`userWorkspaceDirectory` 还会把所选路径限制在该用户的私有目录中。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
+Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。Session、Workspace、文件、引用与个人 skill 消费方使用该归属。Controller 默认使用 `$DSH_HOME/account-workspaces` 作为父目录；部署需要把账号数据放到其他持久卷时，可用 `userWorkspaceDirectory` 覆盖。`currentSkillAccess()` 另外把该父目录的 `.dsh/skills` 作为内置 skill 目录，并且只有管理员账号可以向其中安装。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
 
 -----
 
