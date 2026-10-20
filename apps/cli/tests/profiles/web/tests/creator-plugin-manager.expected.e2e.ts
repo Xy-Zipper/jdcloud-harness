@@ -10,6 +10,7 @@ import { startHttpMcpFixture } from '../../../../../../packages/mcp/mcp-client/t
 
 interface Observation {
   approvals: string[]
+  initialPermission: string
   permission: string
   before: string[]
   denied: { isError: boolean; content: unknown }
@@ -82,6 +83,7 @@ it('configures MCP on a live profile, restores it on restart, and removes its to
   expect(initial.afterDenied).toEqual(initial.before)
   expect(initial.bundlesAfterDenied.map(bundle => bundle.name)).not.toContain('@test/creator-mcp')
   expect(initial.approvals).toEqual(['rejected', 'allowed-once'])
+  expect(initial.initialPermission).toBe('danger-full-access')
   expect(initial.permission).toBe('workspace-write')
   expect(initial.result).toMatchObject({ application: 'applied', changed: true })
   expect(initial.after).toContain('mcp__demo__ping')
@@ -95,6 +97,7 @@ it('configures MCP on a live profile, restores it on restart, and removes its to
   const restarted = await second.request('restart')
   expect(restarted.result).toEqual(expect.arrayContaining([expect.objectContaining({ name: '@test/creator-mcp' })]))
   expect(restarted.approvals).toEqual(['rejected', 'allowed-once'])
+  expect(restarted.initialPermission).toBe('danger-full-access')
   expect(restarted.permission).toBe('workspace-write')
   expect(restarted.before).toContain('mcp__demo__ping')
   expect(JSON.stringify(restarted.ping)).toContain('pong')
