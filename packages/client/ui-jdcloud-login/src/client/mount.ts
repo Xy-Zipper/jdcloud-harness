@@ -3,7 +3,6 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-jdcloud-auth-controller/remote'
-import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -23,7 +22,6 @@ const BRAND_PRIORITY = -10
 const TRANSFER_PRIORITY = -110
 const TRANSFER_PATH = '/login/transfer'
 const ADMIN_CONTROL_PRIORITY = -100
-const ORDINARY_USER_PERMISSION_PRESET = 'workspace-write'
 
 interface LoginTransferCredentials {
   readonly token: string
@@ -57,7 +55,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required after the generated JDCloud Remote namespace is mounted. */
 export const uiInject = [
   'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
-  'sidebarPanels', 'sessions', 'uiWorkspace',
+  'sidebarPanels', 'uiWorkspace',
 ]
 
 /** Null occupant that shadows one administrator-only single slot. */
@@ -84,19 +82,6 @@ function installAdministratorControlShadows(ctx: ClientContext): () => void {
   return () => {
     for (const dispose of disposers.reverse()) dispose()
   }
-}
-
-/** Force each ordinary-user new conversation onto the restricted permission preset before navigation. */
-function installOrdinaryUserSessionInitializer(ctx: ClientContext): () => void {
-  return ctx.uiWorkspace.registerNewSessionInitializer(async (sessionId) => {
-    const session = ctx.sessions.binding(sessionId)?.session
-    if (session === undefined) throw new Error(`JDCloud permission initialization cannot resolve Session "${sessionId}"`)
-    const result = await session.command(`/permission ${ORDINARY_USER_PERMISSION_PRESET}`)
-    if (!result.ok) {
-      throw new Error(`JDCloud permission initialization failed: ${result.error.code}: ${result.error.message}`)
-    }
-    if (!result.value.matched) throw new Error('JDCloud permission initialization requires the /permission command')
-  })
 }
 
 /** Install JDCloud occupants ahead of generic and official brand fallbacks. */
@@ -132,7 +117,6 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   let disposeAdministratorShadows: (() => void) | undefined
   let disposeTerminalFilter: (() => void) | undefined
   let disposePluginPanelFilter: (() => void) | undefined
-  let disposeNewSessionInitializer: (() => void) | undefined
   let systemAdministrator = false
   const isActive = (): boolean => active
 
@@ -143,7 +127,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }
 
   /** Apply the current tenant's administrator-only client controls. */
-  const applyAdministratorAccess = (allowed: boolean, initializeNewSessions: boolean): void => {
+  const applyAdministratorAccess = (allowed: boolean): void => {
     systemAdministrator = allowed
     if (allowed) {
       disposeAdministratorShadows?.()
@@ -152,8 +136,6 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       disposeTerminalFilter = undefined
       disposePluginPanelFilter?.()
       disposePluginPanelFilter = undefined
-      disposeNewSessionInitializer?.()
-      disposeNewSessionInitializer = undefined
       return
     }
     // A popup opened by an administrator must not survive a tenant-role downgrade.
@@ -164,12 +146,6 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
     disposeAdministratorShadows ??= installAdministratorControlShadows(ctx)
     disposeTerminalFilter ??= ctx.sidebarRightTabs.registerAvailabilityFilter(kind => kind !== 'terminal')
     disposePluginPanelFilter ??= ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins')
-    if (initializeNewSessions) {
-      disposeNewSessionInitializer ??= installOrdinaryUserSessionInitializer(ctx)
-    } else {
-      disposeNewSessionInitializer?.()
-      disposeNewSessionInitializer = undefined
-    }
   }
 
   const hideLogin = (): void => {
@@ -217,13 +193,13 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   const applyStatus = (status: JdcloudAuthStatus): void => {
     if (!active) return
     if (status.authenticated) {
-      applyAdministratorAccess(status.systemAdministrator, !status.systemAdministrator)
+      applyAdministratorAccess(status.systemAdministrator)
       hideLogin()
       hideTransfer()
       showAccount(status)
       return
     }
-    applyAdministratorAccess(false, false)
+    applyAdministratorAccess(false)
     hideAccount()
     showLogin()
   }
@@ -307,10 +283,8 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
       disposeTerminalFilter = undefined
       disposePluginPanelFilter?.()
       disposePluginPanelFilter = undefined
-      disposeNewSessionInitializer?.()
-      disposeNewSessionInitializer = undefined
     }
-  }, 'ui-jdcloud-login: ordinary-user Session policy')
+  }, 'ui-jdcloud-login: ordinary-user controls')
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
       if (!active || !String(key).startsWith(AUTH_RECORD_KEY)) return

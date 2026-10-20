@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-jdcloud-login/README.md
-README.md: bb271f0848cf7991e3d612f5e143c5c90cec3dc0
-README.zh.md: b329a3cbd989bb2af059a66895056316d8aabac2
+README.md: 279b4577a3029ca4c83a1abaed38bf64112f1beb
+README.zh.md: f55d7a8edf629eea872a76210971f392712e4308
