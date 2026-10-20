@@ -60,8 +60,9 @@ The Runtime user must be authorized to access the requested Project. Ontology re
 
 - JSON endpoints require `Content-Type: application/json` when they have a body.
 - Skill upload requires `multipart/form-data`; let the HTTP client generate its boundary.
-- Normal JSON responses use `Content-Type: application/json; charset=utf-8`.
-- The conversation endpoint returns `text/event-stream` and should be consumed incrementally.
+- Every JSON success uses `{ "code": 200, "data": ... }` and `Content-Type: application/json; charset=utf-8`.
+- Every JSON failure uses a numeric `code` equal to the HTTP status; `errorCode` retains the specific string error identifier.
+- The conversation endpoint returns `text/event-stream`; every successful SSE payload uses `{ "code": 200, "data": ... }`.
 - Routes are exact. For example, `POST /api/external/v1/skills` is not an upload request and returns `405`; use `/skills/upload`.
 - The plugin does not add a browser CORS policy. Browser clients need a same-origin deployment or a trusted server-side proxy.
 
@@ -96,15 +97,18 @@ The response contains visible personal and built-in Skills and the scopes that t
 
 ```json
 {
-  "skills": [
-    {
-      "name": "kami",
-      "description": "Example Skill",
-      "modelInvocable": false,
-      "scope": "personal"
-    }
-  ],
-  "installScopes": ["personal"]
+  "code": 200,
+  "data": {
+    "skills": [
+      {
+        "name": "kami",
+        "description": "Example Skill",
+        "modelInvocable": false,
+        "scope": "personal"
+      }
+    ],
+    "installScopes": ["personal"]
+  }
 }
 ```
 
@@ -129,11 +133,14 @@ Example response:
 
 ```json
 {
-  "skill": {
-    "name": "kami",
-    "description": "Example Skill",
-    "modelInvocable": false,
-    "scope": "personal"
+  "code": 200,
+  "data": {
+    "skill": {
+      "name": "kami",
+      "description": "Example Skill",
+      "modelInvocable": false,
+      "scope": "personal"
+    }
   }
 }
 ```
@@ -153,9 +160,12 @@ Example response:
 
 ```json
 {
-  "deleted": true,
-  "scope": "personal",
-  "name": "kami"
+  "code": 200,
+  "data": {
+    "deleted": true,
+    "scope": "personal",
+    "name": "kami"
+  }
 }
 ```
 
@@ -175,16 +185,19 @@ Example response:
 
 ```json
 {
-  "workspaces": [
-    {
-      "workspaceId": "workspace-id",
-      "path": "D:\\dsh-workspaces\\project-a",
-      "title": "project-a",
-      "sessionIds": [],
-      "createdAt": "2026-10-20T08:00:00.000Z",
-      "updatedAt": "2026-10-20T08:00:00.000Z"
-    }
-  ]
+  "code": 200,
+  "data": {
+    "workspaces": [
+      {
+        "workspaceId": "workspace-id",
+        "path": "D:\\dsh-workspaces\\project-a",
+        "title": "project-a",
+        "sessionIds": [],
+        "createdAt": "2026-10-20T08:00:00.000Z",
+        "updatedAt": "2026-10-20T08:00:00.000Z"
+      }
+    ]
+  }
 }
 ```
 
@@ -205,15 +218,18 @@ Example response:
 
 ```json
 {
-  "workspace": {
-    "workspaceId": "workspace-id",
-    "path": "D:\\dsh-workspaces\\project-a",
-    "title": "project-a",
-    "sessionIds": [],
-    "createdAt": "2026-10-20T08:00:00.000Z",
-    "updatedAt": "2026-10-20T08:00:00.000Z"
-  },
-  "created": true
+  "code": 200,
+  "data": {
+    "workspace": {
+      "workspaceId": "workspace-id",
+      "path": "D:\\dsh-workspaces\\project-a",
+      "title": "project-a",
+      "sessionIds": [],
+      "createdAt": "2026-10-20T08:00:00.000Z",
+      "updatedAt": "2026-10-20T08:00:00.000Z"
+    },
+    "created": true
+  }
 }
 ```
 
@@ -234,12 +250,15 @@ Example response:
 
 ```json
 {
-  "path": "src",
-  "entries": [
-    { "name": "components", "type": "directory" },
-    { "name": "index.ts", "type": "file", "size": 1024 }
-  ],
-  "truncated": false
+  "code": 200,
+  "data": {
+    "path": "src",
+    "entries": [
+      { "name": "components", "type": "directory" },
+      { "name": "index.ts", "type": "file", "size": 1024 }
+    ],
+    "truncated": false
+  }
 }
 ```
 
@@ -287,13 +306,13 @@ Example frames:
 
 ```text
 event: session
-data: {"sessionId":"session-id"}
+data: {"code":200,"data":{"sessionId":"session-id"}}
 
 event: assistant
-data: {"type":"assistant-stream","frame":{"type":"chunk","chunk":{"content":"..."}}}
+data: {"code":200,"data":{"type":"assistant-stream","frame":{"type":"chunk","chunk":{"content":"..."}}}}
 
 event: done
-data: {"sessionId":"session-id"}
+data: {"code":200,"data":{"sessionId":"session-id"}}
 ```
 
 The API forwards model-provided stream fields but does not generate or expose hidden reasoning. A client should retain the returned `sessionId` and reconnect by sending it in the next request.
@@ -305,7 +324,8 @@ JSON failures normally use this structure:
 
 ```json
 {
-  "code": "gateway/bad-request",
+  "code": 400,
+  "errorCode": "gateway/bad-request",
   "message": "description of the failure",
   "details": {}
 }
@@ -323,7 +343,7 @@ JSON failures normally use this structure:
 | `500` | An internal service operation failed. |
 | `503` | No supported external authentication controller is active. |
 
-After `/chat` returns HTTP `200`, a later failure appears as an SSE `error` event instead of a new HTTP error response.
+After `/chat` returns HTTP `200`, a later failure appears as an SSE `error` event instead of a new HTTP error response. Its payload uses the same numeric `code`, `errorCode`, `message`, and optional `details` fields.
 
 <a id="security-and-deployment"></a>
 ## Security and deployment
@@ -343,7 +363,7 @@ After starting Harness, verify route registration without sending a real Token:
 curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/skills"
 ```
 
-A registered route returns JSON with HTTP `401` because the Bearer Token is missing. Plain `not found` with HTTP `404` means the running process has not loaded the External API plugin or has not been restarted after the route was added.
+A registered route returns `{ "code": 401, "errorCode": "unauthorized", ... }` with HTTP `401` because the Bearer Token is missing. A response that does not follow the numeric envelope means the running process has not loaded the current External API plugin or has not been restarted after the protocol changed.
 
 <a id="dev-note"></a>
 ## Dev Note
