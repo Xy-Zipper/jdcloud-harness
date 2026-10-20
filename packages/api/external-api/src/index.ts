@@ -108,7 +108,9 @@ function register(ctx: Context, path: string): void {
  */
 export function fetchExternalApi(ctx: Context, request: Request): Promise<Response> {
   const handler = ROUTES.get(new URL(request.url).pathname)
-  return handler === undefined ? Promise.resolve(new Response('not found', { status: 404 })) : handler(ctx, request)
+  return handler === undefined
+    ? Promise.resolve(failureResponse(404, 'not_found', 'External API route not found'))
+    : handler(ctx, request)
 }
 
 async function skillsList(ctx: Context, request: Request): Promise<Response> {
@@ -173,7 +175,9 @@ async function workspaceFilesList(ctx: Context, request: Request): Promise<Respo
 async function chat(ctx: Context, request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed('POST')
   const authenticator = externalAuthenticator(ctx)
-  if (authenticator === undefined) return jsonResponse({ code: 'external_api_unavailable' }, 503)
+  if (authenticator === undefined) {
+    return failureResponse(503, 'external_api_unavailable', 'External API authentication is unavailable')
+  }
   const credentials = requestCredentials(request, authenticator.externalScopeHeader())
   if (credentials instanceof Response) return credentials
   try {
@@ -268,7 +272,7 @@ async function pumpChat(
     }
   } catch (error: unknown) {
     if (!signal.aborted) {
-      sendEvent(controller, encoder, 'error', responseError(error))
+      sendErrorEvent(controller, encoder, error)
       controller.close()
     }
   } finally {
@@ -290,7 +294,18 @@ function sendEvent(
   event: string,
   value: unknown,
 ): void {
-  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`))
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ code: 200, data: value })}\n\n`))
+}
+
+function sendErrorEvent(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  error: unknown,
+): void {
+  // The HTTP status is already committed after SSE opens, so the event carries the numeric failure status.
+  const value = responseError(error)
+  const payload = failureBody(errorStatus(value.errorCode), value.errorCode, value.message, value.details)
+  controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify(payload)}\n\n`))
 }
 
 async function authenticated(
@@ -299,7 +314,9 @@ async function authenticated(
   operation: (authenticator: ExternalAuthenticator) => Promise<unknown>,
 ): Promise<Response> {
   const authenticator = externalAuthenticator(ctx)
-  if (authenticator === undefined) return jsonResponse({ code: 'external_api_unavailable' }, 503)
+  if (authenticator === undefined) {
+    return failureResponse(503, 'external_api_unavailable', 'External API authentication is unavailable')
+  }
   const credentials = requestCredentials(request, authenticator.externalScopeHeader())
   if (credentials instanceof Response) return credentials
   try {
@@ -310,7 +327,7 @@ async function authenticated(
       request.signal,
       () => operation(authenticator),
     )
-    return jsonResponse(value)
+    return successResponse(value)
   } catch (error: unknown) {
     return errorResponse(error)
   }
@@ -333,31 +350,25 @@ function requestCredentials(
   const authorization = request.headers.get('authorization')
   const match = authorization === null ? null : /^Bearer\s+(.+)$/iu.exec(authorization)
   if (match?.[1] === undefined || match[1].trim() === '') {
-    return jsonResponse({ code: 'unauthorized', message: 'Bearer token is required' }, 401)
+    return failureResponse(401, 'unauthorized', 'Bearer token is required')
   }
   const otherHeader = scopeHeader === 'x-tenant-id' ? 'x-project-id' : 'x-tenant-id'
   if ((request.headers.get(otherHeader)?.trim() ?? '') !== '') {
-    return jsonResponse({
-      code: 'invalid_scope',
-      message: `${headerName(otherHeader)} is not accepted by this deployment`,
-    }, 400)
+    return failureResponse(400, 'invalid_scope', `${headerName(otherHeader)} is not accepted by this deployment`)
   }
   const scopeId = request.headers.get(scopeHeader)?.trim()
   if (scopeId === undefined || scopeId === '') {
-    return jsonResponse({ code: 'invalid_scope', message: `${headerName(scopeHeader)} is required` }, 400)
+    return failureResponse(400, 'invalid_scope', `${headerName(scopeHeader)} is required`)
   }
   const serviceBaseUrl = request.headers.get('x-jdcloud-base-url')?.trim()
   if (scopeHeader === 'x-project-id') {
     if (serviceBaseUrl !== undefined && serviceBaseUrl !== '') {
-      return jsonResponse({
-        code: 'invalid_scope',
-        message: 'X-JDCloud-Base-Url is not accepted by this deployment',
-      }, 400)
+      return failureResponse(400, 'invalid_scope', 'X-JDCloud-Base-Url is not accepted by this deployment')
     }
     return { token: match[1].trim(), scopeId }
   }
   if (serviceBaseUrl === undefined || serviceBaseUrl === '') {
-    return jsonResponse({ code: 'invalid_request', message: 'X-JDCloud-Base-Url is required' }, 400)
+    return failureResponse(400, 'invalid_request', 'X-JDCloud-Base-Url is required')
   }
   return { token: match[1].trim(), scopeId, serviceBaseUrl }
 }
@@ -516,30 +527,50 @@ function badRequest(message: string, cause?: unknown): RemoteError {
 }
 
 function methodNotAllowed(allowed: 'GET' | 'POST'): Response {
-  return new Response(null, { status: 405, headers: { allow: allowed } })
+  return failureResponse(405, 'method_not_allowed', 'Method not allowed', undefined, { allow: allowed })
 }
 
 function errorResponse(error: unknown): Response {
   const value = responseError(error)
-  return jsonResponse(value, errorStatus(value.code))
+  return failureResponse(errorStatus(value.errorCode), value.errorCode, value.message, value.details)
 }
 
-function responseError(error: unknown): { code: string; message: string; details?: unknown } {
+function responseError(error: unknown): { errorCode: string; message: string; details?: unknown } {
   const remote = remoteErrorOf(error)
-  if (remote !== undefined) return { code: remote.code, message: remote.message, details: remote.details }
-  return { code: 'internal_error', message: 'External API request failed' }
+  if (remote !== undefined) return { errorCode: remote.code, message: remote.message, details: remote.details }
+  return { errorCode: 'internal_error', message: 'External API request failed' }
 }
 
-function errorStatus(code: string): number {
-  if (code === 'jdcloud/auth-required' || code === 'ontology/auth-required') return 401
-  if (code.includes('forbidden') || code === 'skill/forbidden') return 403
-  if (code.includes('not-found')) return 404
-  if (code === 'skill/already-exists') return 409
-  if (code === 'gateway/bad-request' || code === 'skill/invalid') return 400
-  if (code === 'gateway/cancelled') return 499
+function errorStatus(errorCode: string): number {
+  if (errorCode === 'jdcloud/auth-required' || errorCode === 'ontology/auth-required') return 401
+  if (errorCode.includes('forbidden') || errorCode === 'skill/forbidden') return 403
+  if (errorCode.includes('not-found')) return 404
+  if (errorCode === 'skill/already-exists') return 409
+  if (errorCode === 'gateway/bad-request' || errorCode === 'skill/invalid') return 400
+  if (errorCode === 'gateway/cancelled') return 499
   return 500
 }
 
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS })
+function successResponse(value: unknown): Response {
+  return jsonResponse({ code: 200, data: value }, 200)
+}
+
+/** Preserve the internal error identity without using it as the public numeric code. */
+function failureBody(code: number, errorCode: string, message: string, details?: unknown): object {
+  return { code, errorCode, message, ...details === undefined ? {} : { details } }
+}
+
+function failureResponse(
+  code: number,
+  errorCode: string,
+  message: string,
+  details?: unknown,
+  additionalHeaders: Record<string, string> = {},
+): Response {
+  // Callers can use the same number from either the HTTP status or the JSON body.
+  return jsonResponse(failureBody(code, errorCode, message, details), code, additionalHeaders)
+}
+
+function jsonResponse(value: unknown, status: number, additionalHeaders: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(value), { status, headers: { ...JSON_HEADERS, ...additionalHeaders } })
 }

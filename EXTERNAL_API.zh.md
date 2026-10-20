@@ -60,8 +60,9 @@ Runtime 用户必须有权访问指定项目。Ontology 会拒绝 `X-Tenant-Id` 
 
 - 有请求体的 JSON 接口必须使用 `Content-Type: application/json`。
 - Skill 上传必须使用 `multipart/form-data`，应由 HTTP 客户端自动生成 boundary。
-- 普通 JSON 响应使用 `Content-Type: application/json; charset=utf-8`。
-- 对话接口返回 `text/event-stream`，客户端应按流式方式读取。
+- 所有 JSON 成功响应均使用 `{ "code": 200, "data": ... }` 和 `Content-Type: application/json; charset=utf-8`。
+- 所有 JSON 失败响应中的数字 `code` 都等于 HTTP 状态码；`errorCode` 保留具体字符串错误标识。
+- 对话接口返回 `text/event-stream`；所有成功 SSE 数据均使用 `{ "code": 200, "data": ... }`。
 - 路由是精确匹配的。例如，`POST /api/external/v1/skills` 不是上传接口并会返回 `405`；上传必须使用 `/skills/upload`。
 - 插件不会主动添加浏览器 CORS 策略。浏览器客户端需要使用同源部署或受信任的服务端代理。
 
@@ -96,15 +97,18 @@ curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/skills" `
 
 ```json
 {
-  "skills": [
-    {
-      "name": "kami",
-      "description": "Example Skill",
-      "modelInvocable": false,
-      "scope": "personal"
-    }
-  ],
-  "installScopes": ["personal"]
+  "code": 200,
+  "data": {
+    "skills": [
+      {
+        "name": "kami",
+        "description": "Example Skill",
+        "modelInvocable": false,
+        "scope": "personal"
+      }
+    ],
+    "installScopes": ["personal"]
+  }
 }
 ```
 
@@ -129,11 +133,14 @@ curl.exe --request POST "http://127.0.0.1:3080/api/external/v1/skills/upload" `
 
 ```json
 {
-  "skill": {
-    "name": "kami",
-    "description": "Example Skill",
-    "modelInvocable": false,
-    "scope": "personal"
+  "code": 200,
+  "data": {
+    "skill": {
+      "name": "kami",
+      "description": "Example Skill",
+      "modelInvocable": false,
+      "scope": "personal"
+    }
   }
 }
 ```
@@ -153,9 +160,12 @@ curl.exe --request POST "http://127.0.0.1:3080/api/external/v1/skills/delete" `
 
 ```json
 {
-  "deleted": true,
-  "scope": "personal",
-  "name": "kami"
+  "code": 200,
+  "data": {
+    "deleted": true,
+    "scope": "personal",
+    "name": "kami"
+  }
 }
 ```
 
@@ -175,16 +185,19 @@ curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/workspaces" `
 
 ```json
 {
-  "workspaces": [
-    {
-      "workspaceId": "workspace-id",
-      "path": "D:\\dsh-workspaces\\project-a",
-      "title": "project-a",
-      "sessionIds": [],
-      "createdAt": "2026-10-20T08:00:00.000Z",
-      "updatedAt": "2026-10-20T08:00:00.000Z"
-    }
-  ]
+  "code": 200,
+  "data": {
+    "workspaces": [
+      {
+        "workspaceId": "workspace-id",
+        "path": "D:\\dsh-workspaces\\project-a",
+        "title": "project-a",
+        "sessionIds": [],
+        "createdAt": "2026-10-20T08:00:00.000Z",
+        "updatedAt": "2026-10-20T08:00:00.000Z"
+      }
+    ]
+  }
 }
 ```
 
@@ -205,15 +218,18 @@ curl.exe --request POST "http://127.0.0.1:3080/api/external/v1/workspaces/create
 
 ```json
 {
-  "workspace": {
-    "workspaceId": "workspace-id",
-    "path": "D:\\dsh-workspaces\\project-a",
-    "title": "project-a",
-    "sessionIds": [],
-    "createdAt": "2026-10-20T08:00:00.000Z",
-    "updatedAt": "2026-10-20T08:00:00.000Z"
-  },
-  "created": true
+  "code": 200,
+  "data": {
+    "workspace": {
+      "workspaceId": "workspace-id",
+      "path": "D:\\dsh-workspaces\\project-a",
+      "title": "project-a",
+      "sessionIds": [],
+      "createdAt": "2026-10-20T08:00:00.000Z",
+      "updatedAt": "2026-10-20T08:00:00.000Z"
+    },
+    "created": true
+  }
 }
 ```
 
@@ -234,12 +250,15 @@ curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/workspaces/files?w
 
 ```json
 {
-  "path": "src",
-  "entries": [
-    { "name": "components", "type": "directory" },
-    { "name": "index.ts", "type": "file", "size": 1024 }
-  ],
-  "truncated": false
+  "code": 200,
+  "data": {
+    "path": "src",
+    "entries": [
+      { "name": "components", "type": "directory" },
+      { "name": "index.ts", "type": "file", "size": 1024 }
+    ],
+    "truncated": false
+  }
 }
 ```
 
@@ -287,13 +306,13 @@ curl.exe --no-buffer --request POST "http://127.0.0.1:3080/api/external/v1/chat"
 
 ```text
 event: session
-data: {"sessionId":"session-id"}
+data: {"code":200,"data":{"sessionId":"session-id"}}
 
 event: assistant
-data: {"type":"assistant-stream","frame":{"type":"chunk","chunk":{"content":"..."}}}
+data: {"code":200,"data":{"type":"assistant-stream","frame":{"type":"chunk","chunk":{"content":"..."}}}}
 
 event: done
-data: {"sessionId":"session-id"}
+data: {"code":200,"data":{"sessionId":"session-id"}}
 ```
 
 API 会转发模型提供方返回的流式字段，但不会生成或暴露隐藏推理。客户端应保存返回的 `sessionId`，后续请求通过该 ID 继续对话。
@@ -305,7 +324,8 @@ JSON 错误通常采用以下结构：
 
 ```json
 {
-  "code": "gateway/bad-request",
+  "code": 400,
+  "errorCode": "gateway/bad-request",
   "message": "description of the failure",
   "details": {}
 }
@@ -323,7 +343,7 @@ JSON 错误通常采用以下结构：
 | `500` | 内部服务操作失败。 |
 | `503` | 当前没有启用受支持的外部认证 Controller。 |
 
-`/chat` 已经返回 HTTP `200` 后发生的错误会通过 SSE `error` 事件返回，不会再产生新的 HTTP 错误响应。
+`/chat` 已经返回 HTTP `200` 后发生的错误会通过 SSE `error` 事件返回，不会再产生新的 HTTP 错误响应。事件数据使用相同的数字 `code`、`errorCode`、`message` 和可选 `details` 字段。
 
 <a id="security-and-deployment"></a>
 ## 安全与部署
@@ -343,7 +363,7 @@ JSON 错误通常采用以下结构：
 curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/skills"
 ```
 
-路由注册成功时，因为缺少 Bearer Token，接口会返回 HTTP `401` 和 JSON。若返回 HTTP `404` 与纯文本 `not found`，说明当前进程尚未加载 External API 插件，或者添加路由后还没有重启。
+路由注册成功时，因为缺少 Bearer Token，接口会返回 HTTP `401` 和 `{ "code": 401, "errorCode": "unauthorized", ... }`。如果响应不符合数字 envelope，说明当前进程尚未加载当前版本的 External API 插件，或者协议修改后还没有重启。
 
 <a id="dev-note"></a>
 ## 开发备注

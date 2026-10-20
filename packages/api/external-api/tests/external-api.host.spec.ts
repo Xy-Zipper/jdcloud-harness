@@ -86,16 +86,19 @@ describe('external API authentication', () => {
       authorization: '',
     }))
     expect(missingToken.status).toBe(401)
+    await expect(missingToken.json()).resolves.toMatchObject({ code: 401, errorCode: 'unauthorized' })
 
     const missingScope = await fetchExternalApi(ctx, request('/api/external/v1/skills', {}, {
       'x-tenant-id': '',
     }))
     expect(missingScope.status).toBe(400)
+    await expect(missingScope.json()).resolves.toMatchObject({ code: 400, errorCode: 'invalid_scope' })
 
     const missingServiceAddress = await fetchExternalApi(ctx, request('/api/external/v1/skills', {}, {
       'x-jdcloud-base-url': '',
     }))
     expect(missingServiceAddress.status).toBe(400)
+    await expect(missingServiceAddress.json()).resolves.toMatchObject({ code: 400, errorCode: 'invalid_request' })
   })
 
   it('accepts only the scope header selected by the active authentication controller', async () => {
@@ -138,7 +141,10 @@ describe('external API authentication', () => {
       expect.any(AbortSignal),
       expect.any(Function),
     )
-    await expect(response.json()).resolves.toMatchObject({ installScopes: ['personal'] })
+    await expect(response.json()).resolves.toMatchObject({
+      code: 200,
+      data: { installScopes: ['personal'] },
+    })
   })
 
   it('maps tenant and administrator refusals without exposing an internal failure', async () => {
@@ -149,7 +155,12 @@ describe('external API authentication', () => {
         { tenantId: 'tenant-a' },
       )),
     })
-    expect((await fetchExternalApi(tenant, request('/api/external/v1/skills'))).status).toBe(403)
+    const tenantResponse = await fetchExternalApi(tenant, request('/api/external/v1/skills'))
+    expect(tenantResponse.status).toBe(403)
+    await expect(tenantResponse.json()).resolves.toMatchObject({
+      code: 403,
+      errorCode: 'jdcloud/external-tenant-forbidden',
+    })
 
     const member = context({
       skills: {
@@ -165,6 +176,7 @@ describe('external API authentication', () => {
       body: skillArchiveForm('built-in'),
     }))
     expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toMatchObject({ code: 403, errorCode: 'skill/forbidden' })
   })
 
   it('installs one ZIP archive after removing its wrapping directory', async () => {
@@ -179,6 +191,10 @@ describe('external API authentication', () => {
     }))
 
     expect(response.status).toBe(200)
+    await expect(response.clone().json()).resolves.toMatchObject({
+      code: 200,
+      data: { skill: { name: 'sample-skill', scope: 'personal' } },
+    })
     expect(createAccount).toHaveBeenCalledWith({
       scope: 'personal',
       files: [
@@ -204,7 +220,50 @@ describe('external API authentication', () => {
     }, { 'content-type': 'application/json' }))
 
     expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toMatchObject({ message: 'content type must be multipart/form-data' })
+    await expect(response.json()).resolves.toMatchObject({
+      code: 400,
+      errorCode: 'gateway/bad-request',
+      message: 'content type must be multipart/form-data',
+    })
+  })
+
+  it('returns numeric envelopes for unknown routes and unsupported methods', async () => {
+    const ctx = context()
+    const missing = await fetchExternalApi(ctx, request('/api/external/v1/missing'))
+    expect(missing.status).toBe(404)
+    await expect(missing.json()).resolves.toEqual({
+      code: 404,
+      errorCode: 'not_found',
+      message: 'External API route not found',
+    })
+
+    const method = await fetchExternalApi(ctx, request('/api/external/v1/skills', { method: 'POST' }))
+    expect(method.status).toBe(405)
+    expect(method.headers.get('allow')).toBe('GET')
+    await expect(method.json()).resolves.toEqual({
+      code: 405,
+      errorCode: 'method_not_allowed',
+      message: 'Method not allowed',
+    })
+
+    const unavailable = new Context()
+    contexts.push(unavailable)
+    const unavailableResponse = await fetchExternalApi(unavailable, request('/api/external/v1/skills'))
+    expect(unavailableResponse.status).toBe(503)
+    await expect(unavailableResponse.json()).resolves.toEqual({
+      code: 503,
+      errorCode: 'external_api_unavailable',
+      message: 'External API authentication is unavailable',
+    })
+
+    const failed = context({ authenticate: () => Promise.reject(new Error('private failure')) })
+    const failedResponse = await fetchExternalApi(failed, request('/api/external/v1/skills'))
+    expect(failedResponse.status).toBe(500)
+    await expect(failedResponse.json()).resolves.toEqual({
+      code: 500,
+      errorCode: 'internal_error',
+      message: 'External API request failed',
+    })
   })
 })
 
@@ -272,5 +331,38 @@ describe('external API chat stream', () => {
     expect(stream).toContain('event: assistant')
     expect(stream).toContain('model-provided reasoning')
     expect(stream).toContain('event: done')
+    expect(stream).toContain('data: {"code":200,"data":{"sessionId":"session-external"}}')
+  })
+
+  it('streams a numeric error envelope after the response has opened', async () => {
+    async function* follow() {
+      yield {
+        type: 'snapshot',
+        header: { id: 'session-external' },
+        cursor: -1,
+        records: [],
+        hasMore: false,
+        projections: { asOfSeq: -1, values: {} },
+        assistantStream: { revision: 0 },
+      }
+    }
+    const ctx = context({
+      skills: { list: () => Promise.resolve({ skills: [] }) },
+      sessions: {
+        create: () => Promise.resolve({ sessionId: 'session-external' }),
+        follow,
+        prompt: () => Promise.reject(new RemoteError('gateway/bad-request', 'prompt rejected', {})),
+      },
+    })
+
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/chat', {
+      method: 'POST',
+      body: JSON.stringify({ workspaceId: 'workspace-a', message: 'test' }),
+    }, { 'content-type': 'application/json' }))
+    const stream = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(stream).toContain('event: error')
+    expect(stream).toContain('data: {"code":400,"errorCode":"gateway/bad-request","message":"prompt rejected","details":{}}')
   })
 })
