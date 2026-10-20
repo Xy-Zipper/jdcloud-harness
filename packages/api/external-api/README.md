@@ -16,7 +16,7 @@ English | [中文](README.zh.md)
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/external/v1/skills` | List personal and built-in Skills. |
-| `POST` | `/api/external/v1/skills/upload` | Install a complete `personal` or `built-in` Skill folder. |
+| `POST` | `/api/external/v1/skills/upload` | Install a `personal` or `built-in` Skill from one ZIP archive. |
 | `POST` | `/api/external/v1/skills/delete` | Delete an authorized personal or built-in Skill. |
 | `GET` | `/api/external/v1/workspaces` | List visible Workspaces. |
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse one child directory and Workspace. |
@@ -24,6 +24,8 @@ English | [中文](README.zh.md)
 | `POST` | `/api/external/v1/chat` | Create or continue a Session and return SSE events. |
 
 All requests carry `Authorization: Bearer <token>`. JDCloud accepts only the low-code Token with `X-Tenant-Id`; Ontology accepts only the Go Runtime Access Token with `X-Project-Id`. The two scope headers are not aliases, and a deployment rejects the other header. The chat body accepts `message`, optional `sessionId`, `workspaceId` for a new Session, and optional `skillNames`. SSE emits `session`, `snapshot`, `event`, `assistant`, `done`, and `error`. `assistant` contains the model-provided live chunk, including provider reasoning fields when the model emits them; the API does not manufacture or expose hidden reasoning.
+
+`POST /api/external/v1/skills/upload` accepts `multipart/form-data` with one text field named `scope` (`personal` or `built-in`) and one `.zip` file field named `file`. The archive may place `SKILL.md` at its root or inside one wrapping directory; every archived file must belong to that Skill folder. The endpoint rejects the former JSON file-array body and applies the existing Skill path, file-count, expanded-size, metadata, and administrator checks.
 
 ## Model Experience
 

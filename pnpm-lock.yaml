@@ -1037,6 +1037,9 @@ importers:
       '@deepseek-ai/dsh-workspace':
         specifier: workspace:*
         version: link:../../workspace/workspace
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~

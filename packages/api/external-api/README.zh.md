@@ -16,7 +16,7 @@ kind: "package-reference"
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/external/v1/skills` | 查询个人与内置 Skill。 |
-| `POST` | `/api/external/v1/skills/upload` | 上传完整的 `personal` 或 `built-in` Skill 文件夹。 |
+| `POST` | `/api/external/v1/skills/upload` | 从一个 ZIP 压缩包安装 `personal` 或 `built-in` Skill。 |
 | `POST` | `/api/external/v1/skills/delete` | 删除有权限管理的个人或内置 Skill。 |
 | `GET` | `/api/external/v1/workspaces` | 查询可见工作区。 |
 | `POST` | `/api/external/v1/workspaces/create` | 创建或复用一个子目录和工作区。 |
@@ -24,6 +24,8 @@ kind: "package-reference"
 | `POST` | `/api/external/v1/chat` | 创建或继续 Session，并返回 SSE 事件。 |
 
 所有请求都携带 `Authorization: Bearer <token>`。JDCloud 只接受低代码 Token 与 `X-Tenant-Id`；Ontology 只接受 Go Runtime Access Token 与 `X-Project-Id`。两个范围 Header 不是别名，当前部署会拒绝另一种 Header。对话请求体包含 `message`，可选的 `sessionId`，新建 Session 时使用的 `workspaceId`，以及可选的 `skillNames`。SSE 会发送 `session`、`snapshot`、`event`、`assistant`、`done` 和 `error`。模型提供 reasoning 字段时会原样包含在 `assistant` 实时块中；接口不会生成或暴露隐藏推理。
+
+`POST /api/external/v1/skills/upload` 接受 `multipart/form-data`：一个名为 `scope` 的文本字段（`personal` 或 `built-in`），以及一个名为 `file` 的 `.zip` 文件字段。压缩包可以把 `SKILL.md` 放在根目录，也可以放在一层包装目录中；压缩包内的所有文件必须属于该 Skill 文件夹。接口不再接受旧的 JSON 文件数组，并继续执行现有的 Skill 路径、文件数量、解压后大小、元数据和管理员权限校验。
 
 ## 模型体验
 
