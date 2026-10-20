@@ -90,6 +90,7 @@
       "@deepseek-ai/dsh-api-gateway": ["./packages/api/gateway/src/index.ts"],
       "@deepseek-ai/dsh-api-gateway/client": ["./packages/api/gateway/src/client/index.ts"],
       "@deepseek-ai/dsh-api-gateway/types": ["./packages/api/gateway/src/types.ts"],
+      "@deepseek-ai/dsh-api-external": ["./packages/api/external-api/src/index.ts"],
       "@deepseek-ai/dsh-api-ontology-auth-controller": ["./packages/api/ontology-auth-controller/src/index.ts"],
       "@deepseek-ai/dsh-api-ontology-auth-controller/types": ["./packages/api/ontology-auth-controller/src/types.ts"],
       "@deepseek-ai/dsh-tool-ontology": ["./packages/ontology/tool-ontology/src/index.ts"],
