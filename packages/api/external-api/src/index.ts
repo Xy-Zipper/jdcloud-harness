@@ -5,11 +5,15 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
-import type {
-  AccountSkillDeleteRequest,
-  AccountSkillInstallRequest,
-  SessionFollowFrame,
-  SessionRequestId,
+import {
+  SKILL_INSTALL_MAX_FILES,
+  SKILL_INSTALL_MAX_FILE_BYTES,
+  SKILL_INSTALL_MAX_TOTAL_BYTES,
+  type AccountSkillDeleteRequest,
+  type AccountSkillInstallRequest,
+  type SessionFollowFrame,
+  type SessionRequestId,
+  type SkillInstallFile,
 } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-files'
@@ -19,6 +23,7 @@ import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import { unzipSync } from 'fflate'
 
 export const name = 'external-api'
 export const inject = [
@@ -112,18 +117,7 @@ async function skillsList(ctx: Context, request: Request): Promise<Response> {
 async function skillsUpload(ctx: Context, request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed('POST')
   return authenticated(ctx, request, async () => {
-    const body = await jsonBody(request)
-    const scope = managedSkillScope(body['scope'])
-    const rawFiles = body['files']
-    if (!Array.isArray(rawFiles)) throw badRequest('files must be an array')
-    const files = rawFiles.map((value, index) => {
-      const file = record(value, `files[${String(index)}]`)
-      return {
-        path: requiredString(file['path'], `files[${String(index)}].path`),
-        contentBase64: stringValue(file['contentBase64'], `files[${String(index)}].contentBase64`),
-      }
-    })
-    const input: AccountSkillInstallRequest = { scope, files }
+    const input = await skillArchiveUpload(request)
     return ctx.sessionSkillCatalog.createAccount(input, request.signal)
   })
 }
@@ -384,6 +378,92 @@ function managedSkillScope(value: unknown): AccountSkillInstallRequest['scope'] 
   return value
 }
 
+/** Parse one multipart ZIP upload and preserve the existing Skill folder validation path. */
+async function skillArchiveUpload(request: Request): Promise<AccountSkillInstallRequest> {
+  const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'multipart/form-data') throw badRequest('content type must be multipart/form-data')
+  let form: FormData
+  try {
+    form = await request.formData()
+  } catch (error: unknown) {
+    throw badRequest('body is not valid multipart form data', error)
+  }
+  for (const name of form.keys()) {
+    if (name !== 'scope' && name !== 'file') throw badRequest(`unexpected multipart field: ${name}`)
+  }
+  const scopes = form.getAll('scope')
+  if (scopes.length !== 1) throw badRequest('one scope field is required')
+  const scope = managedSkillScope(scopes[0])
+  const archives = form.getAll('file')
+  if (archives.length !== 1 || !(archives[0] instanceof File)) throw badRequest('one ZIP file field is required')
+  const archive = archives[0]
+  if (!archive.name.toLowerCase().endsWith('.zip')) throw badRequest('file name must end with .zip')
+  if (archive.size === 0) throw badRequest('ZIP file must not be empty')
+  return {
+    scope,
+    files: skillFilesFromZip(new Uint8Array(await archive.arrayBuffer())),
+  }
+}
+
+/** Expand one bounded Skill ZIP and remove its optional wrapping directory. */
+function skillFilesFromZip(archive: Uint8Array): readonly SkillInstallFile[] {
+  let declaredFiles = 0
+  let declaredBytes = 0
+  let expanded: Record<string, Uint8Array>
+  try {
+    expanded = unzipSync(archive, {
+      filter: (file) => {
+        if (file.name.endsWith('/')) return false
+        declaredFiles += 1
+        if (declaredFiles > SKILL_INSTALL_MAX_FILES) {
+          throw badRequest(`ZIP archive exceeds ${String(SKILL_INSTALL_MAX_FILES)} files`)
+        }
+        if (file.originalSize > SKILL_INSTALL_MAX_FILE_BYTES) {
+          throw badRequest(`ZIP entry "${file.name}" exceeds ${String(SKILL_INSTALL_MAX_FILE_BYTES)} bytes`)
+        }
+        declaredBytes += file.originalSize
+        if (declaredBytes > SKILL_INSTALL_MAX_TOTAL_BYTES) {
+          throw badRequest(`ZIP archive exceeds ${String(SKILL_INSTALL_MAX_TOTAL_BYTES)} expanded bytes`)
+        }
+        return true
+      },
+    })
+  } catch (error: unknown) {
+    if (remoteErrorOf(error) !== undefined) throw error
+    throw badRequest('file must contain a valid ZIP archive', error)
+  }
+  const entries = Object.entries(expanded)
+  if (entries.length === 0) throw badRequest('ZIP archive contains no files')
+  for (const [path] of entries) {
+    if (!isArchiveFilePath(path)) throw badRequest(`ZIP archive contains an invalid path: ${JSON.stringify(path)}`)
+  }
+  const skillFiles = entries.filter(([path]) => path === 'SKILL.md' || path.endsWith('/SKILL.md'))
+  if (skillFiles.length !== 1) throw badRequest('ZIP archive must contain exactly one SKILL.md')
+  const skillPath = skillFiles[0]?.[0]
+  if (skillPath === undefined) throw badRequest('ZIP archive must contain SKILL.md')
+  const root = skillPath.slice(0, -'SKILL.md'.length)
+  let expandedBytes = 0
+  return entries.map(([path, content]) => {
+    if (!path.startsWith(root)) throw badRequest('every ZIP file must be inside the Skill folder')
+    const relativePath = path.slice(root.length)
+    if (relativePath === '') throw badRequest('ZIP archive contains an empty file path')
+    expandedBytes += content.byteLength
+    if (content.byteLength > SKILL_INSTALL_MAX_FILE_BYTES || expandedBytes > SKILL_INSTALL_MAX_TOTAL_BYTES) {
+      throw badRequest('ZIP expanded content exceeds the Skill upload limits')
+    }
+    return { path: relativePath, contentBase64: Buffer.from(content).toString('base64') }
+  }).sort((left, right) => left.path.localeCompare(right.path))
+}
+
+/** Reject traversal and platform-specific separators before removing the wrapping directory. */
+function isArchiveFilePath(path: string): boolean {
+  return path.length > 0
+    && !path.startsWith('/')
+    && !path.includes('\\')
+    && !path.includes('\0')
+    && path.split('/').every(segment => segment.length > 0 && segment !== '.' && segment !== '..')
+}
+
 function record(value: unknown, name: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw badRequest(`${name} must be an object`)
   return value as Record<string, unknown>
@@ -391,11 +471,6 @@ function record(value: unknown, name: string): Record<string, unknown> {
 
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.length === 0) throw badRequest(`${name} must be a non-empty string`)
-  return value
-}
-
-function stringValue(value: unknown, name: string): string {
-  if (typeof value !== 'string') throw badRequest(`${name} must be a string`)
   return value
 }
 

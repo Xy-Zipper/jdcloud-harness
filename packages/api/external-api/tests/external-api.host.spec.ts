@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchExternalApi } from '../src/index.ts'
 
@@ -22,6 +23,20 @@ function request(
       ...headers,
     },
   })
+}
+
+/** Build the public multipart upload with one optionally wrapped Skill folder. */
+function skillArchiveForm(scope: 'personal' | 'built-in' = 'personal'): FormData {
+  const archive = zipSync({
+    'sample-skill/SKILL.md': new TextEncoder().encode(
+      '---\nname: sample-skill\ndescription: Sample external Skill.\n---\n\nUse the sample.\n',
+    ),
+    'sample-skill/references/guide.md': new TextEncoder().encode('Guide.\n'),
+  })
+  const form = new FormData()
+  form.set('scope', scope)
+  form.set('file', new Blob([Uint8Array.from(archive)], { type: 'application/zip' }), 'sample-skill.zip')
+  return form
 }
 
 function context(services: {
@@ -132,9 +147,49 @@ describe('external API authentication', () => {
     })
     const response = await fetchExternalApi(member, request('/api/external/v1/skills/upload', {
       method: 'POST',
-      body: JSON.stringify({ scope: 'built-in', files: [] }),
-    }, { 'content-type': 'application/json' }))
+      body: skillArchiveForm('built-in'),
+    }))
     expect(response.status).toBe(403)
+  })
+
+  it('installs one ZIP archive after removing its wrapping directory', async () => {
+    const createAccount = vi.fn(() => Promise.resolve({
+      skill: { name: 'sample-skill', description: 'Sample external Skill.', scope: 'personal' },
+    }))
+    const ctx = context({ skills: { createAccount } })
+
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/skills/upload', {
+      method: 'POST',
+      body: skillArchiveForm(),
+    }))
+
+    expect(response.status).toBe(200)
+    expect(createAccount).toHaveBeenCalledWith({
+      scope: 'personal',
+      files: [
+        {
+          path: 'references/guide.md',
+          contentBase64: Buffer.from('Guide.\n').toString('base64'),
+        },
+        {
+          path: 'SKILL.md',
+          contentBase64: Buffer.from(
+            '---\nname: sample-skill\ndescription: Sample external Skill.\n---\n\nUse the sample.\n',
+          ).toString('base64'),
+        },
+      ],
+    }, expect.any(AbortSignal))
+  })
+
+  it('rejects the former JSON file-array upload format', async () => {
+    const ctx = context({ skills: { createAccount: vi.fn() } })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/skills/upload', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'personal', files: [] }),
+    }, { 'content-type': 'application/json' }))
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({ message: 'content type must be multipart/form-data' })
   })
 })
 
