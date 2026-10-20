@@ -47,6 +47,7 @@ interface ExternalAuthenticator {
   runExternalRequest<Value>(
     token: string,
     scopeId: string,
+    serviceBaseUrl: string | undefined,
     signal: AbortSignal,
     operation: () => Value,
   ): Promise<Awaited<Value>>
@@ -56,6 +57,7 @@ interface ExternalAuthenticator {
 interface ExternalRequestCredentials {
   readonly token: string
   readonly scopeId: string
+  readonly serviceBaseUrl?: string
 }
 
 interface ChatRequest {
@@ -175,20 +177,26 @@ async function chat(ctx: Context, request: Request): Promise<Response> {
   const credentials = requestCredentials(request, authenticator.externalScopeHeader())
   if (credentials instanceof Response) return credentials
   try {
-    return await authenticator.runExternalRequest(credentials.token, credentials.scopeId, request.signal, async () => {
-      const input = parseChatRequest(await jsonBody(request))
-      const sessionId = input.sessionId === undefined
-        ? (await ctx.sessionController.create({
-          workspaceId: brandString<WorkspaceId>(requiredValue(input.workspaceId, 'workspaceId is required for a new chat')),
-        })).sessionId
-        : brandString<SessionId>(input.sessionId)
-      const catalog = await ctx.sessionSkillCatalog.list({ sessionId }, request.signal)
-      const available = new Set(catalog.skills.map(skill => skill.name))
-      for (const skillName of input.skillNames) {
-        if (!available.has(skillName)) throw badRequest(`skill "${skillName}" is unavailable in this Session`)
-      }
-      return chatStream(ctx, request, sessionId, input)
-    })
+    return await authenticator.runExternalRequest(
+      credentials.token,
+      credentials.scopeId,
+      credentials.serviceBaseUrl,
+      request.signal,
+      async () => {
+        const input = parseChatRequest(await jsonBody(request))
+        const sessionId = input.sessionId === undefined
+          ? (await ctx.sessionController.create({
+            workspaceId: brandString<WorkspaceId>(requiredValue(input.workspaceId, 'workspaceId is required for a new chat')),
+          })).sessionId
+          : brandString<SessionId>(input.sessionId)
+        const catalog = await ctx.sessionSkillCatalog.list({ sessionId }, request.signal)
+        const available = new Set(catalog.skills.map(skill => skill.name))
+        for (const skillName of input.skillNames) {
+          if (!available.has(skillName)) throw badRequest(`skill "${skillName}" is unavailable in this Session`)
+        }
+        return chatStream(ctx, request, sessionId, input)
+      },
+    )
   } catch (error: unknown) {
     return errorResponse(error)
   }
@@ -298,6 +306,7 @@ async function authenticated(
     const value = await authenticator.runExternalRequest(
       credentials.token,
       credentials.scopeId,
+      credentials.serviceBaseUrl,
       request.signal,
       () => operation(authenticator),
     )
@@ -337,7 +346,20 @@ function requestCredentials(
   if (scopeId === undefined || scopeId === '') {
     return jsonResponse({ code: 'invalid_scope', message: `${headerName(scopeHeader)} is required` }, 400)
   }
-  return { token: match[1].trim(), scopeId }
+  const serviceBaseUrl = request.headers.get('x-jdcloud-base-url')?.trim()
+  if (scopeHeader === 'x-project-id') {
+    if (serviceBaseUrl !== undefined && serviceBaseUrl !== '') {
+      return jsonResponse({
+        code: 'invalid_scope',
+        message: 'X-JDCloud-Base-Url is not accepted by this deployment',
+      }, 400)
+    }
+    return { token: match[1].trim(), scopeId }
+  }
+  if (serviceBaseUrl === undefined || serviceBaseUrl === '') {
+    return jsonResponse({ code: 'invalid_request', message: 'X-JDCloud-Base-Url is required' }, 400)
+  }
+  return { token: match[1].trim(), scopeId, serviceBaseUrl }
 }
 
 function headerName(header: 'x-tenant-id' | 'x-project-id'): 'X-Tenant-Id' | 'X-Project-Id' {

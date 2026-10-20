@@ -44,14 +44,14 @@ The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and r
 
 Host plugins can call `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests, or one `POST` multipart file under the `file` field; a multipart file can carry Host-owned bytes or an exact-length asynchronous byte stream, which the controller forwards without complete-file buffering. JSON and multipart bodies are mutually exclusive, and `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
 
-External server integrations pass their original low-code Token to `runExternalRequest()` together with the tenant from `X-Tenant-Id`. The controller validates both tenant-list and current-user responses against that tenant, installs the identity only in request-local asynchronous storage, and removes it when the operation settles. It never switches the Token's tenant, never writes browser login state, and refuses `X-Project-Id` through the external API composition.
+External server integrations pass their original low-code Token to `runExternalRequest()` together with the tenant from `X-Tenant-Id` and service address from `X-JDCloud-Base-Url`. The controller normalizes the caller-selected address, validates both tenant-list and current-user responses against that tenant, installs the address-scoped identity only in request-local asynchronous storage, and removes it when the operation settles. It never reads `defaultBaseUrl` for an external request, switches the Token's tenant, or writes browser login state; the external API composition refuses `X-Project-Id`.
 
 <a id="configuration"></a>
 ## Configuration
 
 | Field | Default | Meaning |
 |---|---:|---|
-| `defaultBaseUrl` | empty | Initial service address shown before a login is stored |
+| `defaultBaseUrl` | empty | Initial service address shown before a browser login is stored; external API requests ignore it |
 | `requestTimeoutMs` | `15,000` | Deadline for login, tenant, current-user, tenant-switch, and Host authenticated requests |
 | `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | Persistent parent for per-user directories and shared built-in Skills; the Docker bundle can select `/workspace/jdcloud-users` |
 
@@ -69,7 +69,7 @@ None; accepted requests are unchanged, and rejected requests never reach prompt 
 <a id="known-limitations-and-deferred-work"></a>
 
 - `requestAuthenticated()` is Host-only and accepts JSON or one multipart `file` part; it is not a browser proxy or a general-purpose multipart client.
-- A transferred service address is unrestricted after HTTP(S) URL validation, so a link can direct the Host to disclose its supplied Token to an arbitrary server and request private-network addresses.
+- Transferred login and external API service addresses are unrestricted after HTTP(S) URL validation, so a caller can direct the Host to disclose its supplied Token to an arbitrary server and request private-network addresses.
 - The inherited JDCloud login protocol uses MD5 because the upstream endpoint requires that wire behavior; it is not a password-storage scheme.
 
 <a id="dev-note"></a>

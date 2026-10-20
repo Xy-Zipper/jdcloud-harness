@@ -146,13 +146,14 @@ describe('JDCloud external request authentication', () => {
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant') }))
       .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', true, 'external') }))
     const ctx = await boot(fetcher as typeof fetch, {
-      defaultBaseUrl: 'https://kindoucloud.com',
+      defaultBaseUrl: '',
       userWorkspaceDirectory: parent,
     })
 
     const result = await ctx.jdcloudAuthController.runExternalRequest(
       ' raw-token ',
       'corp-current',
+      ' http://127.0.0.1:9000/ ',
       AbortSignal.timeout(1000),
       async () => ({
         status: await ctx.jdcloudAuthController.status(),
@@ -162,6 +163,7 @@ describe('JDCloud external request authentication', () => {
 
     expect(result.status).toMatchObject({
       authenticated: true,
+      baseUrl: 'http://127.0.0.1:9000',
       username: 'external',
       corpId: 'corp-current',
       systemAdministrator: true,
@@ -169,8 +171,15 @@ describe('JDCloud external request authentication', () => {
     expect(result.access).toMatchObject({ userId: 'id-external', administrator: true })
     await expect(ctx.jdcloudAuthController.status()).resolves.toEqual({
       authenticated: false,
-      baseUrl: 'https://kindoucloud.com',
+      baseUrl: '',
     })
+    expect(fetcher.mock.calls.map((call) => {
+      const url = new URL(String(call[0]))
+      return `${url.origin}${url.pathname}`
+    })).toEqual([
+      'http://127.0.0.1:9000/api/system/corp/getCorpList',
+      'http://127.0.0.1:9000/api/oauth/currentUser',
+    ])
     expect(fetcher.mock.calls.map(call => (call[1] as RequestInit).headers)).toEqual([
       { authorization: 'raw-token' },
       { authorization: 'raw-token' },
@@ -187,6 +196,7 @@ describe('JDCloud external request authentication', () => {
     const response = await ctx.jdcloudAuthController.runExternalRequest(
       'raw-token',
       'corp-current',
+      'https://kindoucloud.com',
       AbortSignal.timeout(1000),
       () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -213,9 +223,22 @@ describe('JDCloud external request authentication', () => {
     await expect(ctx.jdcloudAuthController.runExternalRequest(
       'raw-token',
       'corp-other',
+      'https://kindoucloud.com',
       AbortSignal.timeout(1000),
       () => Promise.resolve('unreachable'),
     )).rejects.toMatchObject({ code: 'jdcloud/external-tenant-forbidden' })
+  })
+
+  it('rejects an external service address that contains a query', async () => {
+    const ctx = await boot(fetch)
+
+    await expect(ctx.jdcloudAuthController.runExternalRequest(
+      'raw-token',
+      'corp-current',
+      'https://kindoucloud.com?redirect=private',
+      AbortSignal.timeout(1000),
+      () => Promise.resolve('unreachable'),
+    )).rejects.toMatchObject({ code: 'gateway/bad-request' })
   })
 })
 

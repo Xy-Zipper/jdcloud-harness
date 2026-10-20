@@ -7,10 +7,18 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
-`@deepseek-ai/dsh-api-external` 提供固定的 `/api/external/v1/*` 路由。JDCloud 部署使用低代码原始 Token 与 `X-Tenant-Id`；Ontology 部署使用 Runtime Access Token 与 `X-Project-Id`。每次请求都由当前认证 Controller 校验，再复用现有 Skill、Workspace、文件和 Session 服务。
+`@deepseek-ai/dsh-api-external` 提供固定的 `/api/external/v1/*` 路由。JDCloud 部署使用低代码原始 Token、`X-Tenant-Id` 与调用方选择的 `X-JDCloud-Base-Url`；Ontology 部署使用 Runtime Access Token 与 `X-Project-Id`。每次请求都由当前认证 Controller 校验，再复用现有 Skill、Workspace、文件和 Session 服务。
 
+## 目录
+
+- [路由](#routes)
+- [模型体验](#model-experience)
+- [已知限制与后续事项](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
+
+<a id="routes"></a>
 ## 路由
 
 | 方法 | 路径 | 用途 |
@@ -23,10 +31,11 @@ kind: "package-reference"
 | `GET` | `/api/external/v1/workspaces/files` | 查询工作区目录内容。 |
 | `POST` | `/api/external/v1/chat` | 创建或继续 Session，并返回 SSE 事件。 |
 
-所有请求都携带 `Authorization: Bearer <token>`。JDCloud 只接受低代码 Token 与 `X-Tenant-Id`；Ontology 只接受 Go Runtime Access Token 与 `X-Project-Id`。两个范围 Header 不是别名，当前部署会拒绝另一种 Header。对话请求体包含 `message`，可选的 `sessionId`，新建 Session 时使用的 `workspaceId`，以及可选的 `skillNames`。SSE 会发送 `session`、`snapshot`、`event`、`assistant`、`done` 和 `error`。模型提供 reasoning 字段时会原样包含在 `assistant` 实时块中；接口不会生成或暴露隐藏推理。
+所有请求都携带 `Authorization: Bearer <token>`。JDCloud 要求低代码 Token、`X-Tenant-Id` 与 `X-JDCloud-Base-Url`；controller 接受任意语法合法、且不包含账号密码、query 或 fragment 的绝对 HTTP(S) 地址。Ontology 要求 Go Runtime Access Token 与 `X-Project-Id`，并拒绝 JDCloud Header。对话请求体包含 `message`，可选的 `sessionId`，新建 Session 时使用的 `workspaceId`，以及可选的 `skillNames`。SSE 会发送 `session`、`snapshot`、`event`、`assistant`、`done` 和 `error`。模型提供 reasoning 字段时会原样包含在 `assistant` 实时块中；接口不会生成或暴露隐藏推理。
 
 `POST /api/external/v1/skills/upload` 接受 `multipart/form-data`：一个名为 `scope` 的文本字段（`personal` 或 `built-in`），以及一个名为 `file` 的 `.zip` 文件字段。压缩包可以把 `SKILL.md` 放在根目录，也可以放在一层包装目录中；压缩包内的所有文件必须属于该 Skill 文件夹。接口不再接受旧的 JSON 文件数组，并继续执行现有的 Skill 路径、文件数量、解压后大小、元数据和管理员权限校验。
 
+<a id="model-experience"></a>
 ## 模型体验
 
 ### 已选 Skill
@@ -43,13 +52,15 @@ kind: "package-reference"
 
 选择、移除或调整 Skill 顺序会改变有日志记录的用户消息与解析出的指令，因此受影响请求不会保留其他条件相同但未选择 Skill 的前缀。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续事项
 
 - 路由不主动添加浏览器 CORS 策略；浏览器项目应使用同源部署或服务端代理。
 - 当前工作区文件接口只提供目录列表，不提供文件内容下载。
+- JDCloud 调用方可以选择不受限制的 HTTP(S) 目标。Host 会把调用方提供的 Token 发送到该目标，并且可以访问私有网络地址；部署方在公开这些路由前必须信任调用方，或在上游增加地址白名单。
 
 <a id="dev-note"></a>
-### 开发说明
+### 开发备注
 
 无。
 

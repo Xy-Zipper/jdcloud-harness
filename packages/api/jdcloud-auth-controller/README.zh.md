@@ -44,14 +44,14 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 
 Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` 请求固定的 `/api/...` 路径。controller 会在内部读取当前 credential、添加 authorization header、应用 `requestTimeoutMs`，并只返回成功响应中的 `data`，不会返回 Token。该方法接受 JSON `GET`、`POST`、`PUT` 和 `DELETE` 请求，或在 `file` 字段中携带一个文件的 `POST` multipart 请求；multipart 文件可以携带 Host 持有的字节，也可以携带长度明确的异步字节流，controller 转发后者时不会缓冲完整文件。JSON 与 multipart body 互斥，`GET` 会绕过缓存。业务码 `600`、`601`、`602` 会删除登录并转换为 `jdcloud/auth-required`，其他业务错误保留登录状态。
 
-外部服务集成把低代码原始 Token 与 `X-Tenant-Id` 指定的租户传给 `runExternalRequest()`。controller 会校验租户列表与当前用户响应均指向该租户，只在请求级异步存储中设置身份，并在操作结束时自动移除。它不会切换 Token 的租户，不会写入浏览器登录状态；外部 API 组合会拒绝 `X-Project-Id`。
+外部服务集成把低代码原始 Token、`X-Tenant-Id` 指定的租户与 `X-JDCloud-Base-Url` 指定的服务地址传给 `runExternalRequest()`。controller 会规范化调用方选择的地址，校验租户列表与当前用户响应均指向该租户，只在请求级异步存储中设置包含地址的身份，并在操作结束时自动移除。外部请求不会读取 `defaultBaseUrl`，不会切换 Token 的租户，也不会写入浏览器登录状态；外部 API 组合会拒绝 `X-Project-Id`。
 
 <a id="configuration"></a>
 ## 配置
 
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
-| `defaultBaseUrl` | 空 | 尚未保存登录时显示的初始服务地址 |
+| `defaultBaseUrl` | 空 | 尚未保存浏览器登录时显示的初始服务地址；外部 API 请求不使用该值 |
 | `requestTimeoutMs` | `15,000` | 登录、租户、当前用户、租户切换与 Host 已认证请求的截止时间 |
 | `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | 用户独立目录与共享内置 skill 的持久化父目录；Docker bundle 可以使用 `/workspace/jdcloud-users` |
 
@@ -69,7 +69,7 @@ Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartF
 <a id="known-limitations-and-deferred-work"></a>
 
 - `requestAuthenticated()` 仅供 Host 使用，并接受 JSON 或一个 multipart `file` part；它不是浏览器代理或通用 multipart 客户端。
-- 中转服务地址在通过 HTTP(S) URL 校验后不受限制，因此链接可以让 Host 向任意服务器披露其携带的 Token，并请求私有网络地址。
+- 中转登录与外部 API 的服务地址在通过 HTTP(S) URL 校验后不受限制，因此调用方可以让 Host 向任意服务器披露其携带的 Token，并请求私有网络地址。
 - 登录接口沿用 JDCloud 上游要求的 MD5 wire 行为；它不是密码存储方案。
 
 <a id="dev-note"></a>

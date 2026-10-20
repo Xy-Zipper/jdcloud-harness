@@ -20,6 +20,7 @@ function request(
     headers: {
       authorization: 'Bearer provider-token',
       'x-tenant-id': 'tenant-a',
+      'x-jdcloud-base-url': 'https://mi.kindoucloud.com',
       ...headers,
     },
   })
@@ -44,6 +45,7 @@ function context(services: {
   readonly authenticate?: (
     token: string,
     scopeId: string,
+    serviceBaseUrl: string | undefined,
     signal: AbortSignal,
     operation: () => unknown,
   ) => Promise<unknown>
@@ -59,6 +61,7 @@ function context(services: {
     runExternalRequest: services.authenticate ?? (async (
       _token: string,
       _scopeId: string,
+      _serviceBaseUrl: string | undefined,
       _signal: AbortSignal,
       operation: () => unknown,
     ) => await operation()),
@@ -77,7 +80,7 @@ function context(services: {
 }
 
 describe('external API authentication', () => {
-  it('requires a provider Bearer token and the JDCloud tenant scope', async () => {
+  it('requires a provider Bearer token, JDCloud tenant scope, and service address', async () => {
     const ctx = context()
     const missingToken = await fetchExternalApi(ctx, request('/api/external/v1/skills', {}, {
       authorization: '',
@@ -88,6 +91,11 @@ describe('external API authentication', () => {
       'x-tenant-id': '',
     }))
     expect(missingScope.status).toBe(400)
+
+    const missingServiceAddress = await fetchExternalApi(ctx, request('/api/external/v1/skills', {}, {
+      'x-jdcloud-base-url': '',
+    }))
+    expect(missingServiceAddress.status).toBe(400)
   })
 
   it('accepts only the scope header selected by the active authentication controller', async () => {
@@ -100,15 +108,21 @@ describe('external API authentication', () => {
     const accepted = await fetchExternalApi(ontology, request('/api/external/v1/skills', {}, {
       'x-tenant-id': '',
       'x-project-id': 'project-a',
+      'x-jdcloud-base-url': '',
     }))
     expect(accepted.status).toBe(200)
     expect((await fetchExternalApi(ontology, request('/api/external/v1/skills'))).status).toBe(400)
+    expect((await fetchExternalApi(ontology, request('/api/external/v1/skills', {}, {
+      'x-tenant-id': '',
+      'x-project-id': 'project-a',
+    }))).status).toBe(400)
   })
 
   it('passes the raw token and scope to the active authentication controller', async () => {
     const authenticate = vi.fn(async (
       _token: string,
       _scopeId: string,
+      _serviceBaseUrl: string | undefined,
       _signal: AbortSignal,
       operation: () => unknown,
     ) => await operation())
@@ -120,6 +134,7 @@ describe('external API authentication', () => {
     expect(authenticate).toHaveBeenCalledWith(
       'provider-token',
       'tenant-a',
+      'https://mi.kindoucloud.com',
       expect.any(AbortSignal),
       expect.any(Function),
     )

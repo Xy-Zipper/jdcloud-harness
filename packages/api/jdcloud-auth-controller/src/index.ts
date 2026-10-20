@@ -360,6 +360,7 @@ export class JdcloudAuthController extends TypertRemoteService {
    * Validate one raw JDCloud token for its current tenant and run an external API operation as that account.
    * @param token - Raw JDCloud token supplied by the external caller.
    * @param tenantId - Tenant that the token must already have selected.
+   * @param serviceBaseUrl - Caller-selected absolute HTTP(S) service address.
    * @param signal - Caller cancellation for JDCloud validation requests.
    * @param operation - Request-local operation that consumes the authenticated account scope.
    * @returns The operation result.
@@ -367,6 +368,7 @@ export class JdcloudAuthController extends TypertRemoteService {
   async runExternalRequest<Value>(
     token: string,
     tenantId: string,
+    serviceBaseUrl: string | undefined,
     signal: AbortSignal,
     operation: () => Value,
   ): Promise<Awaited<Value>> {
@@ -375,10 +377,13 @@ export class JdcloudAuthController extends TypertRemoteService {
     if (normalizedToken === '' || normalizedTenantId === '') {
       throw new RemoteError('gateway/bad-request', 'JDCloud token and tenantId are required', {})
     }
-    if (this.defaultBaseUrl === '') {
-      throw new RemoteError('gateway/internal', 'JDCloud external API requires defaultBaseUrl', {})
+    let baseUrl: string
+    try {
+      baseUrl = normalizeJdcloudBaseUrl(serviceBaseUrl ?? '')
+    } catch (error) {
+      throw new RemoteError('gateway/bad-request', (error as Error).message, {})
     }
-    const client = new JdcloudClient(this.defaultBaseUrl, this.fetcher)
+    const client = new JdcloudClient(baseUrl, this.fetcher)
     const operationSignal = this.operationSignal(signal)
     let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
     let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
@@ -400,7 +405,7 @@ export class JdcloudAuthController extends TypertRemoteService {
     }
     const auth: AuthPayload = {
       version: 4,
-      baseUrl: this.defaultBaseUrl,
+      baseUrl,
       token: normalizedToken,
       username: currentUser.username,
       userId: currentUser.userId,
