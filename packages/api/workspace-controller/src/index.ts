@@ -25,6 +25,7 @@ import type {
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
+  WorkspaceView,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -46,6 +47,11 @@ declare module '@deepseek-ai/cordis' {
     /** Host Workspace business API and Remote namespace owner. */
     workspaceController: WorkspaceController
   }
+}
+
+interface ScopeOwner {
+  currentScopeKey(): Promise<string | undefined>
+  owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
 }
 
 /** Host service backing the generated `ctx.remote.workspace` namespace. */
@@ -86,6 +92,22 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('create')
   create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
     return this.commands.create(request)
+  }
+
+  /**
+   * Read the Workspaces owned by the current authenticated account scope.
+   * @returns Detached Workspace projections in durable registry order.
+   */
+  async listVisible(): Promise<readonly WorkspaceView[]> {
+    const owner = scopeOwner(this.ctx)
+    if (owner === undefined) return this.ctx.workspaceRegistry.list().map(workspaceView)
+    const scopeKey = await owner.currentScopeKey()
+    if (scopeKey === undefined) return []
+    const visible: WorkspaceView[] = []
+    for (const workspace of this.ctx.workspaceRegistry.list()) {
+      if (await owner.owns('workspace', String(workspace.id), scopeKey)) visible.push(workspaceView(workspace))
+    }
+    return visible
   }
 
   /**
@@ -202,6 +224,16 @@ export class WorkspaceController extends TypertRemoteService {
   follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
     return this.feed.follow(signal)
   }
+}
+
+/** Resolve either supported account authentication controller. */
+function scopeOwner(ctx: Context): ScopeOwner | undefined {
+  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
+  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
+  if (candidate === undefined
+    || typeof Reflect.get(candidate, 'currentScopeKey') !== 'function'
+    || typeof Reflect.get(candidate, 'owns') !== 'function') return undefined
+  return candidate as ScopeOwner
 }
 
 export default WorkspaceController

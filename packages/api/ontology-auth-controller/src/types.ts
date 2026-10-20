@@ -8,6 +8,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'ontology/validation-failed': { readonly code: string | null; readonly status: number | null }
     'ontology/logout-failed': { readonly code: string | null; readonly status: number | null }
     'ontology/administrator-required': { readonly capability: 'danger-full-access' }
+    'ontology/external-project-forbidden': { readonly projectId: string }
   }
 }
 

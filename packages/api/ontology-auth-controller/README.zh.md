@@ -51,7 +51,9 @@ kind: "package-reference"
 
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
-Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。`currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。Session、Workspace、文件、引用与个人 skill 消费方使用该归属。Controller 默认使用 `$DSH_HOME/account-workspaces` 作为父目录；部署需要把账号数据放到其他持久卷时，可用 `userWorkspaceDirectory` 覆盖。`currentSkillAccess()` 另外把该父目录的 `.dsh/skills` 作为内置 skill 目录，并且只有管理员账号可以向其中安装。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
+外部服务集成把 Go Runtime Access Token 与 `X-Project-Id` 的值传给 `runExternalRequest()`。Controller 通过 `/api/runtime/auth/current` 校验 Token，确认 `/api/runtime/projects` 中包含该 Project，并且只在请求级异步存储中设置身份。它不会保存或刷新外部 Token，并拒绝用户不可见的 Project。
+
+Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。浏览器 `currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。外部请求会额外包含 Project id，从而按 Project 与用户隔离个人 Skill、Workspace、Session、文件和引用。Controller 默认使用 `$DSH_HOME/account-workspaces` 作为父目录；部署需要把账号数据放到其他持久卷时，可用 `userWorkspaceDirectory` 覆盖。`currentSkillAccess()` 另外把该父目录的 `.dsh/skills` 作为内置 skill 目录，并且只有管理员账号可以向其中安装。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
 
 -----
 

@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 `@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, account-scoped Workspace browsing, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the tab-scoped browser Bearer session, and installs the Ontology controller, model tools, login UI, and in-app directory picker. Ontology becomes the profile's application identity and authorization layer.
 
+The bundle also installs the external API. Those routes accept a Go Runtime Access Token and `X-Project-Id`, validate that the user can see the Project, and isolate personal Skills, Workspaces, and Sessions by Project and user without creating browser login state.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -101,4 +103,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. Loader validates all five inserted package rows, and each package validates its own state.
+**Runtime invariant:** No companion is published. Loader validates all six inserted package rows, and each package validates its own state.

@@ -59,6 +59,7 @@ export {
 export { HostConnectionService } from './rpc-host.ts'
 export { BrowserSessionService } from './browser-session.ts'
 export type { BrowserSessionTransport } from './browser-session-protocol.ts'
+export { bridge as bridgeFetchRequest, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 
 export { API_PATH } from './api-path.ts'
 

@@ -1,5 +1,6 @@
 /** Host owner of browser-scoped Ontology Runtime login state. */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
@@ -41,6 +42,12 @@ interface AuthPayload extends OntologyTokenPair {
   readonly baseUrl: string
 }
 
+interface ExternalAuthPayload {
+  readonly accessToken: string
+  readonly projectId: string
+  readonly user: OntologyRuntimeIdentity
+}
+
 type AuthenticationState =
   | { readonly kind: 'missing' }
   | { readonly kind: 'expired' }
@@ -80,6 +87,7 @@ export class OntologyAuthController extends TypertRemoteService {
   private readonly requestTimeoutMs: number
   private readonly userWorkspaceDirectory: string
   private readonly fetcher: typeof fetch
+  private readonly externalRequests = new AsyncLocalStorage<ExternalAuthPayload>()
 
   /** @param ctx - Host context carrying browser sessions and durable credentials. @param config - Runtime connection policy. */
   constructor(ctx: Context, config: Config) {
@@ -92,6 +100,10 @@ export class OntologyAuthController extends TypertRemoteService {
       : resolve(configuredWorkspaceDirectory)
     this.fetcher = globalThis.fetch
     ctx.on('api-session/prompt-admission', async (request, next) => {
+      if (this.externalRequests.getStore() !== undefined) {
+        await next()
+        return
+      }
       const state = await this.authentication(request.signal)
       if (state.kind !== 'authenticated') {
         throw new RemoteError(
@@ -207,18 +219,75 @@ export class OntologyAuthController extends TypertRemoteService {
   }
 
   /**
-   * Return the stable user owner key for the current browser login.
-   * @returns SHA-256 of service address and stable Ontology user id, or undefined while logged out.
+   * Select the request header that identifies the external Ontology Project scope.
+   * @returns The required external Project header.
+   */
+  externalScopeHeader(): 'x-project-id' {
+    return 'x-project-id'
+  }
+
+  /**
+   * Validate one Runtime Access Token and run an external API operation in one visible Project.
+   * @param token - Go Runtime Access Token supplied by the external caller.
+   * @param projectId - Project that the caller must be authorized to access.
+   * @param signal - Caller cancellation for Runtime validation requests.
+   * @param operation - Request-local operation that consumes the Project and user scope.
+   * @returns The operation result.
+   */
+  async runExternalRequest<Value>(
+    token: string,
+    projectId: string,
+    signal: AbortSignal,
+    operation: () => Value,
+  ): Promise<Awaited<Value>> {
+    const accessToken = token.trim()
+    const normalizedProjectId = projectId.trim()
+    if (accessToken === '' || normalizedProjectId === '') {
+      throw new RemoteError('gateway/bad-request', 'Ontology token and projectId are required', {})
+    }
+    const client = this.client()
+    const operationSignal = this.operationSignal(signal)
+    let user: OntologyRuntimeIdentity
+    let projectIds: readonly string[]
+    try {
+      user = await client.current(accessToken, operationSignal)
+      projectIds = readProjectIds(await client.requestAuthenticated(accessToken, {
+        method: 'GET', path: '/api/runtime/projects',
+      }, operationSignal))
+    } catch (error) {
+      if (error instanceof OntologyApiError && isUnauthenticated(error)) throw authRequired('expired', error)
+      throw this.remoteError('validate', error)
+    }
+    if (!projectIds.includes(normalizedProjectId)) {
+      throw new RemoteError(
+        'ontology/external-project-forbidden',
+        'Ontology user cannot access the requested Project',
+        { projectId: normalizedProjectId },
+      )
+    }
+    return await this.externalRequests.run({ accessToken, projectId: normalizedProjectId, user }, operation)
+  }
+
+  /**
+   * Return the stable owner key for the current browser login or external Project request.
+   * @returns SHA-256 of the active deployment, optional Project, and stable Ontology user id.
    */
   async currentScopeKey(): Promise<string | undefined> {
+    const external = this.externalRequests.getStore()
+    if (external !== undefined) {
+      return createHash('sha256')
+        .update(this.baseUrl).update('\0')
+        .update(external.projectId).update('\0')
+        .update(external.user.userId).digest('hex')
+    }
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     if (state.kind !== 'authenticated') return undefined
     return createHash('sha256').update(this.baseUrl).update('\0').update(state.auth.user.userId).digest('hex')
   }
 
   /**
-   * Create and return the current Ontology user's persistent directory.
-   * @returns Canonical user directory under the configured or default account-workspace parent.
+   * Create and return the current browser-user or external Project-user persistent directory.
+   * @returns Canonical scope directory under the configured or default account-workspace parent.
    */
   async workspaceRoot(): Promise<string | undefined> {
     const scopeKey = await this.currentScopeKey()
@@ -256,13 +325,15 @@ export class OntologyAuthController extends TypertRemoteService {
    * @returns Whether the authenticated account is an Ontology administrator.
    */
   async isCurrentAdministrator(): Promise<boolean> {
+    const external = this.externalRequests.getStore()
+    if (external !== undefined) return external.user.accountType === 'admin'
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     return state.kind === 'authenticated' && state.auth.user.accountType === 'admin'
   }
 
   /**
-   * Resolve the authenticated user's personal Skill directory and the shared administrator-managed directory.
-   * @returns User-id-backed Skill access, or undefined without login.
+   * Resolve the authenticated scope's personal Skill directory and the shared administrator-managed directory.
+   * @returns Browser-user or external Project-user Skill access, or undefined without authentication.
    */
   async currentSkillAccess(): Promise<{
     readonly userId: string
@@ -271,15 +342,22 @@ export class OntologyAuthController extends TypertRemoteService {
     readonly personalSkillDirectory: string
     readonly managedSkillDirectory: string
   } | undefined> {
-    const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
-    if (state.kind !== 'authenticated') return undefined
+    const external = this.externalRequests.getStore()
+    let user: OntologyRuntimeIdentity
+    if (external === undefined) {
+      const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
+      if (state.kind !== 'authenticated') return undefined
+      user = state.auth.user
+    } else {
+      user = external.user
+    }
     const workspaceRoot = await this.workspaceRoot()
     if (workspaceRoot === undefined) return undefined
     await mkdir(this.userWorkspaceDirectory, { recursive: true })
     const parent = await realpath(this.userWorkspaceDirectory)
     return {
-      userId: state.auth.user.userId,
-      administrator: state.auth.user.accountType === 'admin',
+      userId: user.userId,
+      administrator: user.accountType === 'admin',
       workspaceRoot,
       personalSkillDirectory: join(workspaceRoot, '.dsh', 'skills'),
       managedSkillDirectory: join(parent, '.dsh', 'skills'),
@@ -287,7 +365,7 @@ export class OntologyAuthController extends TypertRemoteService {
   }
 
   /**
-   * Claim a newly created Session or Workspace for the current Ontology user.
+   * Claim a newly created Session or Workspace for the current Ontology account scope.
    * @param kind - Durable resource kind.
    * @param id - Durable resource identifier.
    */
@@ -325,6 +403,15 @@ export class OntologyAuthController extends TypertRemoteService {
    */
   async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown> {
     const operationSignal = this.operationSignal(signal)
+    const external = this.externalRequests.getStore()
+    if (external !== undefined) {
+      try {
+        return await this.client().requestAuthenticated(external.accessToken, request, operationSignal)
+      } catch (error) {
+        if (error instanceof OntologyApiError && isUnauthenticated(error)) throw authRequired('expired', error)
+        throw error
+      }
+    }
     let state = await this.authentication(operationSignal)
     if (state.kind !== 'authenticated') throw authRequired(state.kind)
     try {
@@ -462,12 +549,30 @@ function isUnauthenticated(error: OntologyApiError): boolean {
   return error.status === 401 && error.code === 'runtime_unauthenticated'
 }
 
-function authRequired(reason: 'missing' | 'expired'): RemoteError {
+function authRequired(reason: 'missing' | 'expired', cause?: unknown): RemoteError {
   return new RemoteError(
     'ontology/auth-required',
     reason === 'expired' ? 'Ontology login has expired' : 'Ontology login is required',
     { reason },
+    cause === undefined ? undefined : { cause },
   )
+}
+
+/** Validate the visible Project list before using it for external request authorization. */
+function readProjectIds(value: unknown): readonly string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Ontology Project list is invalid')
+  }
+  const projects: unknown = Reflect.get(value, 'projects')
+  if (!Array.isArray(projects)) throw new Error('Ontology Project list is invalid')
+  return projects.map((project) => {
+    if (typeof project !== 'object' || project === null || Array.isArray(project)) {
+      throw new Error('Ontology Project list is invalid')
+    }
+    const id: unknown = Reflect.get(project, 'id')
+    if (typeof id !== 'string' || id.length === 0) throw new Error('Ontology Project list is invalid')
+    return id
+  })
 }
 
 /** Reject empty or malformed Runtime Session fields before they enter the credential store. */

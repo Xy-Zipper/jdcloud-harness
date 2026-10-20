@@ -11,6 +11,8 @@ kind: "package-bundle"
 
 `@deepseek-ai/dsh-ontology-login` 为 Web profile 添加按浏览器隔离的 Ontology Runtime 登录、受权 Object 与 Link 读取、经确认的预备 Action 执行、账号范围 Workspace 浏览以及账号呈现。它会关闭共享 Harness 启动鉴权、启用标签页级 browser Bearer session，并安装 Ontology controller、模型工具、登录 UI 与应用内目录选择器。Ontology 会成为该 profile 的应用身份与授权层。
 
+该 bundle 同时安装外部 API。这些路由接受 Go Runtime Access Token 与 `X-Project-Id`，校验用户可见该 Project，并按 Project 与用户隔离个人 Skill、Workspace 和 Session，不会创建浏览器登录状态。
+
 ## 目录
 
 - [使用本包](#use-this-package)
@@ -101,4 +103,4 @@ bundle 本身不增加请求前缀；插入的工具包负责 Prompt 与工具 s
 
 </details>
 
-**运行时不变式：** 不发布伴生入口。Loader 校验五个插入的 package row，各 package 校验自身状态。
+**运行时不变式：** 不发布伴生入口。Loader 校验六个插入的 package row，各 package 校验自身状态。

@@ -28,6 +28,10 @@
         allowInsecureLoopback: !!js process.env.ONTOLOGY_ALLOW_INSECURE_LOOPBACK === 'true'
         userWorkspaceDirectory: !!js process.env.ONTOLOGY_USER_WORKSPACE_DIR
 
+    # External callers authenticate with a Go Runtime Access Token and Project id.
+    - id: external-api
+      name: '@deepseek-ai/dsh-api-external'
+
     - id: tool-ontology
       name: '@deepseek-ai/dsh-tool-ontology'
 

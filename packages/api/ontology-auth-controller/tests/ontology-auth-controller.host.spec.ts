@@ -179,6 +179,80 @@ describe('Ontology Runtime HTTP client', () => {
 })
 
 describe('Ontology authentication controller', () => {
+  it('uses a Go Runtime Access Token only for the request-local Project and user scope', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-ontology-external-'))
+    temporaryRoots.push(root)
+    const server = runtimeServer()
+    const transfer = server.transferFor('alice')
+    const { ctx } = await boot(server.fetcher, join(root, 'users'))
+    const admitted = vi.fn(() => Promise.resolve())
+
+    const result = await ctx.ontologyAuthController.runExternalRequest(
+      transfer.accessToken,
+      'project-sales',
+      AbortSignal.timeout(1_000),
+      async () => {
+        await ctx.waterfall('api-session/prompt-admission', {
+          sessionId: 'external-session' as never,
+          signal: AbortSignal.timeout(1_000),
+        }, admitted)
+        return {
+          scopeKey: await ctx.ontologyAuthController.currentScopeKey(),
+          access: await ctx.ontologyAuthController.currentSkillAccess(),
+          projects: await ctx.ontologyAuthController.requestAuthenticated({
+            method: 'GET', path: '/api/runtime/projects',
+          }, AbortSignal.timeout(1_000)),
+        }
+      },
+    )
+
+    const scopeKey = createHash('sha256')
+      .update('https://ontology.example.com').update('\0')
+      .update('project-sales').update('\0')
+      .update('user-alice').digest('hex')
+    expect(result).toMatchObject({
+      scopeKey,
+      access: { userId: 'user-alice', administrator: true, workspaceRoot: join(root, 'users', scopeKey) },
+      projects: { projects: [{ id: 'project-sales', name: 'Sales' }] },
+    })
+    expect(admitted).toHaveBeenCalledOnce()
+    await expect(ctx.ontologyAuthController.currentScopeKey()).rejects.toThrow('requires a browser request')
+  })
+
+  it('keeps external Project identity for stream work and rejects an inaccessible Project', async () => {
+    const server = runtimeServer()
+    const transfer = server.transferFor('bob')
+    const { ctx } = await boot(server.fetcher)
+    const encoder = new TextEncoder()
+
+    const response = await ctx.ontologyAuthController.runExternalRequest(
+      transfer.accessToken,
+      'project-sales',
+      AbortSignal.timeout(1_000),
+      () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          setTimeout(() => {
+            void ctx.ontologyAuthController.currentScopeKey().then((scopeKey) => {
+              controller.enqueue(encoder.encode(scopeKey ?? 'missing'))
+              controller.close()
+            })
+          }, 0)
+        },
+      })),
+    )
+
+    expect(await response.text()).not.toBe('missing')
+    await expect(ctx.ontologyAuthController.runExternalRequest(
+      transfer.accessToken,
+      'project-private',
+      AbortSignal.timeout(1_000),
+      () => Promise.resolve('unreachable'),
+    )).rejects.toMatchObject({
+      code: 'ontology/external-project-forbidden',
+      details: { projectId: 'project-private' },
+    })
+  })
+
   it('imports one transferred Runtime Session into only the current browser and keeps refresh working', async () => {
     const server = runtimeServer()
     const { ctx, browserSession } = await boot(server.fetcher)

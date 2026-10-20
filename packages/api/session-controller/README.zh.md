@@ -56,6 +56,8 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 
 `skills/create` 接受一个以 `SKILL.md` 为根入口的完整文件夹，校验元数据、调用标记、有界文件集合与相对路径，并拒绝替换已存在的 skill。账号感知的鉴权控制器把个人 skill 存入当前用户工作区，并向管理员提供所有用户共享的受管目录；没有该适配器的组合仍在 Session 最近的 `.git` 项目根目录或 cwd 下安装项目 skill。`skills/delete` 只删除当前用户的个人文件夹，或允许管理员删除共享受管目录中的一个文件夹。Host 在两种变更前都校验 Session 所有权与范围授权，安装时使用显式文件系统执行策略，并把导入文件夹限制为 128 个文件、单文件 5 MiB、总计 20 MiB，以及 256 KiB 的 UTF-8 `SKILL.md` 内容。
 
+经过认证的 Host 集成可使用 `listAccount()`、`createAccount()` 和 `deleteAccount()` 管理相同的个人与内置 Skill 目录，无需创建 Session。这些方法要求账号 Skill 权限，沿用相同的文件夹校验与大小限制，并且只允许管理员修改内置 Skill。
+
 正常在线时，transcript 与 steering 回显在 Inbox 接受与领取期间留在 Chat，直到持久消息到达。本地 Chat 消息入档后，其身份保留到 Inbox 水位覆盖 next-turn 或 next-step 领取序号：Chat 已显示真实 Node，而 Chat 与 QueueDock 排除匹配的旧 Inbox 行。其他排队消息照常显示。新的 follow 基线会将已有接收回执的回显按 observed 撤去，使用已接受的附件引用完成结算；尚未确认接收的提交继续保留。待处理或已入档的消息随后由 Host 数据呈现。在领取与入档之间重连时，气泡可能短暂消失；撤去回显只确认接收，不代表执行或失败。
 
 面向用户调用的 `skills/list` 元数据包含胜出提供方可选的指令文件 `path`。输入框可据此预览文件，无需加载每个 skill 的正文或激活冷态 Agent。

@@ -15,13 +15,16 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import * as yaml from 'js-yaml'
+import * as ExternalApi from '../../../api/external-api/src/index.ts'
+import OntologyAuthController from '../../../api/ontology-auth-controller/src/index.ts'
 import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
-import OntologyAuthController from '../../../api/ontology-auth-controller/src/index.ts'
+import WebServer from '../../../host/webserver/src/index.ts'
 import * as ontologyTool from '../../../ontology/tool-ontology/src/index.ts'
 
 let directory: string | undefined
 let ctx: Context | undefined
+const socketFetch = globalThis.fetch
 
 afterEach(async () => {
   await ctx?.fiber.dispose()
@@ -46,6 +49,11 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
   await writeFile(configPath, [
     "- name: '@fixture/memory-credentials'",
     "- name: '@fixture/browser-session'",
+    "- name: '@fixture/external-services'",
+    "- name: '@deepseek-ai/dsh-host-webserver'",
+    '  config:',
+    "    host: '127.0.0.1'",
+    '    port: 0',
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-user-approval'",
     "- name: '@deepseek-ai/dsh-tools'",
@@ -53,6 +61,7 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     '  config:',
     '    ontologyBaseUrl: https://ontology.example.com',
     '    requestTimeoutMs: 15000',
+    "- name: '@deepseek-ai/dsh-api-external'",
     "- name: '@deepseek-ai/dsh-tool-ontology'",
     "- name: '@deepseek-ai/dsh-client-ui-ontology-login'",
     '',
@@ -68,13 +77,30 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
       await BrowserSessionService.create(context, context.credentials)
     },
   }
+  // The external API is loaded through its production dependency names while this test owns only their data.
+  const externalServicesModule = {
+    apply(context: Context) {
+      context.provide('sessionController', {} as never)
+      context.provide('sessionSkillCatalog', {
+        listAccount: async () => ({
+          skills: [{ name: 'global-skill', scope: 'built-in' }],
+          canManageBuiltIn: true,
+        }),
+      } as never)
+      context.provide('workspaceController', {} as never)
+      context.provide('workspaceFiles', {} as never)
+    },
+  }
   const modules = new Map<string, unknown>([
     ['@fixture/memory-credentials', MemoryCredentials],
     ['@fixture/browser-session', browserSessionModule],
+    ['@fixture/external-services', externalServicesModule],
+    ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-user-approval', ApprovalService],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-api-ontology-auth-controller', OntologyAuthController],
+    ['@deepseek-ai/dsh-api-external', ExternalApi],
     ['@deepseek-ai/dsh-tool-ontology', ontologyTool],
     ['@deepseek-ai/dsh-client-ui-ontology-login', loginUiModule],
   ])
@@ -141,6 +167,8 @@ describe('Ontology login through a real Loader composition', () => {
       .toBe('@deepseek-ai/dsh-client-ui-directory-picker-browse')
     expect(rows.find(row => row.id === 'ontology-auth-controller')?.name)
       .toBe('@deepseek-ai/dsh-api-ontology-auth-controller')
+    expect(rows.find(row => row.id === 'external-api')?.name)
+      .toBe('@deepseek-ai/dsh-api-external')
     expect(rows.find(row => row.id === 'tool-ontology')?.name)
       .toBe('@deepseek-ai/dsh-tool-ontology')
     expect(rows.find(row => row.id === 'ui-ontology-login')?.name)
@@ -171,6 +199,13 @@ describe('Ontology login through a real Loader composition', () => {
           accountType: 'admin', authorizationVersion: '1',
         })
       }
+      if (url.pathname.endsWith('/api/runtime/projects')) {
+        return Response.json({
+          projects: [{
+            id: 'project-sales', name: 'Sales', description: 'Sales project', releaseVersion: 'release-1',
+          }],
+        })
+      }
       throw new Error(`unexpected Ontology request: ${url.pathname}`)
     })
     const context = await bootComposition(fetcher)
@@ -189,6 +224,20 @@ describe('Ontology login through a real Loader composition', () => {
       'ontology_prepare_action',
       'ontology_execute_action',
     ])
+    const externalResponse = await socketFetch(
+      `http://127.0.0.1:${String(context.webServer.port)}/api/external/v1/skills`,
+      {
+        headers: {
+          authorization: 'Bearer go-runtime-access-token',
+          'x-project-id': 'project-sales',
+        },
+      },
+    )
+    expect(externalResponse.status).toBe(200)
+    await expect(externalResponse.json()).resolves.toEqual({
+      skills: [{ name: 'global-skill', scope: 'built-in' }],
+      canManageBuiltIn: true,
+    })
     const cookie = browserCookie(browserSession)
     const request = { headers: { host: 'harness.example', cookie } }
 
