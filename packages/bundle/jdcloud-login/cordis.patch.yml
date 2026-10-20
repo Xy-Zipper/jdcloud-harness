@@ -8,6 +8,11 @@
     browserSessionTransport: bearer
     trustedHosts: !!js ctx.webRuntime.trustedHosts
 
+# JDCloud workspaces stay inside the authenticated user's private directory.
+# The in-app browser starts at that directory and cannot navigate above it.
+- id: directory-picker
+  disabled: true
+
 # Account skills are discovered on the Host plane because preset-local
 # providers do not know the JDCloud user workspace parent.
 - id: skill-filesystem
@@ -17,6 +22,12 @@
     scopedUserWorkspaceDir: !!js process.env.JDCLOUD_USER_WORKSPACE_DIR ?? process.getBuiltinModule('node:path').join(process.env.DSH_HOME ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'account-workspaces')
 
 - insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+
+    - id: ui-directory-picker-browse
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
     - id: jdcloud-auth-controller
       name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'
       config:

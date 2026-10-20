@@ -34,8 +34,10 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-api-jdcloud-auth-controller": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-directory-picker-browse": "workspace:*",
     "@deepseek-ai/dsh-client-ui-jdcloud-login": "workspace:^",
     "@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions": "workspace:^",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:*",
     "@deepseek-ai/dsh-skill-filesystem": "workspace:^",
     "@deepseek-ai/dsh-tool-jdcloud-lowcode": "workspace:^"
   },

@@ -40,7 +40,7 @@ JDCLOUD_IFRAME_PARENT_ORIGIN=https://portal.example
 
 Docker Compose 部署可通过 `JDCLOUD_PRODUCT_NAME` 设置浏览器标题、侧栏产品名、PWA 名称及模型可见的 Web 品牌；默认值为 `LSY-Agent`。浏览器资源会在构建时嵌入标题，因此修改后需要重新构建镜像。
 
-该 bundle 会关闭 Harness 浏览器启动 token，并启用绑定 authority 的 Bearer 浏览器会话。Client 将 token 保存到当前标签页的 `sessionStorage`，把它添加到同源 HTTP 请求，并在 WebSocket 升级时使用短期单次 ticket。因此登录记录按浏览器标签页隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。该 bundle 将每个租户用户的新文件和个人 skill 放在 `/workspace/jdcloud-users/<归属哈希>` 下；`JDCLOUD_USER_WORKSPACE_DIR` 可覆盖持久化父目录。管理员在该父目录的 `.dsh/skills` 中管理所有账号都能发现的内置 skill。旧的 Host 主目录不迁移。目录浏览、工作区登记、会话创建和 skill 变更限制在各自获准的目录内，但终端命令和通过完整路径读取文件仍不受此限制。该 bundle 不显示内测声明及首次运行自动弹出的 API Key 对话框；模型设置页与手动填写 API Key 的入口保持可用。
+该 bundle 会关闭 Harness 浏览器启动 token，并启用绑定 authority 的 Bearer 浏览器会话。Client 将 token 保存到当前标签页的 `sessionStorage`，把它添加到同源 HTTP 请求，并在 WebSocket 升级时使用短期单次 ticket。因此登录记录按浏览器标签页隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。该 bundle 将每个租户用户的新文件和个人 skill 放在 `/workspace/jdcloud-users/<归属哈希>` 下；`JDCLOUD_USER_WORKSPACE_DIR` 可覆盖持久化父目录。管理员在该父目录的 `.dsh/skills` 中管理所有账号都能发现的内置 skill。旧的 Host 主目录不迁移。工作区选择使用页面内置目录浏览器，从获准的账号目录开始且不能向上越界；工作区登记、会话创建和 skill 变更执行相同的目录限制，但终端命令和通过完整路径读取文件仍不受此限制。该 bundle 不显示内测声明及首次运行自动弹出的 API Key 对话框；模型设置页与手动填写 API Key 的入口保持可用。
 
 对于空白新对话，可写功能 row 会展示至少拥有一项数据写权限的 type `3` 表单与 type `4` 流程。点击一次会插入一个结构化功能标签并关闭面板；删除标签后面板恢复。对于每个已提交用户 Prompt，低代码工具 row 会注入能力快照，并提供由 Host 执行时强制校验当前权限的数据工具。
 
