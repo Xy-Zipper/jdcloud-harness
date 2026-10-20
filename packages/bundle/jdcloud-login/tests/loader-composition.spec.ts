@@ -254,7 +254,7 @@ describe('JDCloud login through a real Loader composition', () => {
   })
 
   it('loads the external API with a low-code Bearer token and current tenant header', async () => {
-    const fetcher = vi.fn((input: string | URL | Request): Promise<Response> => {
+    const fetcher = vi.fn((input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : String(input))
       switch (url.pathname) {
         case '/api/system/corp/getCorpList':
@@ -283,7 +283,7 @@ describe('JDCloud login through a real Loader composition', () => {
       skills: [{ name: 'global-skill', scope: 'built-in' }],
       canManageBuiltIn: true,
     })
-    expect(fetcher.mock.calls.map(call => (call[1] as RequestInit).headers)).toEqual([
+    expect(fetcher.mock.calls.map(call => call[1]?.headers)).toEqual([
       { authorization: 'low-code-token' },
       { authorization: 'low-code-token' },
     ])
