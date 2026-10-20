@@ -190,6 +190,7 @@ describe('Ontology authentication controller', () => {
     const result = await ctx.ontologyAuthController.runExternalRequest(
       transfer.accessToken,
       'project-sales',
+      undefined,
       AbortSignal.timeout(1_000),
       async () => {
         await ctx.waterfall('api-session/prompt-admission', {
@@ -228,6 +229,7 @@ describe('Ontology authentication controller', () => {
     const response = await ctx.ontologyAuthController.runExternalRequest(
       transfer.accessToken,
       'project-sales',
+      undefined,
       AbortSignal.timeout(1_000),
       () => new Response(new ReadableStream<Uint8Array>({
         start(controller) {
@@ -245,6 +247,7 @@ describe('Ontology authentication controller', () => {
     await expect(ctx.ontologyAuthController.runExternalRequest(
       transfer.accessToken,
       'project-private',
+      undefined,
       AbortSignal.timeout(1_000),
       () => Promise.resolve('unreachable'),
     )).rejects.toMatchObject({

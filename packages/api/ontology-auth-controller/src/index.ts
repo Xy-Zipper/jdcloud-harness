@@ -230,6 +230,7 @@ export class OntologyAuthController extends TypertRemoteService {
    * Validate one Runtime Access Token and run an external API operation in one visible Project.
    * @param token - Go Runtime Access Token supplied by the external caller.
    * @param projectId - Project that the caller must be authorized to access.
+   * @param _serviceBaseUrl - Unused because Ontology rejects JDCloud service-address headers.
    * @param signal - Caller cancellation for Runtime validation requests.
    * @param operation - Request-local operation that consumes the Project and user scope.
    * @returns The operation result.
@@ -237,6 +238,7 @@ export class OntologyAuthController extends TypertRemoteService {
   async runExternalRequest<Value>(
     token: string,
     projectId: string,
+    _serviceBaseUrl: string | undefined,
     signal: AbortSignal,
     operation: () => Value,
   ): Promise<Awaited<Value>> {
