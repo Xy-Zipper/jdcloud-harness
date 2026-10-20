@@ -11,6 +11,8 @@ English | [中文](README.zh.md)
 
 `@deepseek-ai/dsh-jdcloud-login` is an optional patch-only bundle for the Web profile. It installs the JDCloud Host authentication controller, browser login page, sidebar account summary, writable-function picker, low-code conversation tools, and JDCloud Harness Web branding as one deployable layer.
 
+The bundle also installs the external API. Those routes authenticate the raw JDCloud token against `JDCLOUD_DEFAULT_BASE_URL` and require the token's current tenant to match `X-Tenant-Id`; they do not reuse or mutate browser login state.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)

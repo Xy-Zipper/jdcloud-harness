@@ -367,6 +367,24 @@ export interface SkillDeleteValue {
   readonly name: string
 }
 
+/** Account Skill catalog used by authenticated non-Session API consumers. */
+export interface AccountSkillListValue {
+  readonly skills: readonly SkillManagedEntry[]
+  readonly installScopes: readonly SkillManagedScope[]
+}
+
+/** Account Skill folder installation independent of a Session workspace. */
+export interface AccountSkillInstallRequest {
+  readonly scope: SkillManagedScope
+  readonly files: readonly SkillInstallFile[]
+}
+
+/** Account Skill deletion independent of a Session workspace. */
+export interface AccountSkillDeleteRequest {
+  readonly scope: SkillManagedScope
+  readonly name: string
+}
+
 /** Session list request. */
 export interface SessionListRequest {
   readonly cursor?: string

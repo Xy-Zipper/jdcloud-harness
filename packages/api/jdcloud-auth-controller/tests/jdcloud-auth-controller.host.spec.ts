@@ -138,6 +138,87 @@ describe('JDCloud user directories', () => {
   })
 })
 
+describe('JDCloud external request authentication', () => {
+  it('uses a validated raw token only for the request-local tenant scope', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'dsh-jdcloud-external-'))
+    tempDirs.push(parent)
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant') }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', true, 'external') }))
+    const ctx = await boot(fetcher as typeof fetch, {
+      defaultBaseUrl: 'https://kindoucloud.com',
+      userWorkspaceDirectory: parent,
+    })
+
+    const result = await ctx.jdcloudAuthController.runExternalRequest(
+      ' raw-token ',
+      'corp-current',
+      AbortSignal.timeout(1000),
+      async () => ({
+        status: await ctx.jdcloudAuthController.status(),
+        access: await ctx.jdcloudAuthController.currentSkillAccess(),
+      }),
+    )
+
+    expect(result.status).toMatchObject({
+      authenticated: true,
+      username: 'external',
+      corpId: 'corp-current',
+      systemAdministrator: true,
+    })
+    expect(result.access).toMatchObject({ userId: 'id-external', administrator: true })
+    await expect(ctx.jdcloudAuthController.status()).resolves.toEqual({
+      authenticated: false,
+      baseUrl: 'https://kindoucloud.com',
+    })
+    expect(fetcher.mock.calls.map(call => (call[1] as RequestInit).headers)).toEqual([
+      { authorization: 'raw-token' },
+      { authorization: 'raw-token' },
+    ])
+  })
+
+  it('keeps the request identity for stream work created before the external operation returns', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant') }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current', false, 'stream') }))
+    const ctx = await boot(fetcher as typeof fetch)
+    const encoder = new TextEncoder()
+
+    const response = await ctx.jdcloudAuthController.runExternalRequest(
+      'raw-token',
+      'corp-current',
+      AbortSignal.timeout(1000),
+      () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          setTimeout(() => {
+            void ctx.jdcloudAuthController.currentScopeKey().then((scopeKey) => {
+              controller.enqueue(encoder.encode(scopeKey ?? 'missing'))
+              controller.close()
+            })
+          }, 0)
+        },
+      })),
+    )
+
+    expect(await response.text()).not.toBe('missing')
+    await expect(ctx.jdcloudAuthController.currentScopeKey()).resolves.toBeUndefined()
+  })
+
+  it('rejects a raw token whose current tenant differs from the requested tenant', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: corpData('corp-current', 'Current Tenant') }))
+      .mockResolvedValueOnce(json({ code: 200, msg: 'ok', data: currentUserData('corp-current') }))
+    const ctx = await boot(fetcher as typeof fetch)
+
+    await expect(ctx.jdcloudAuthController.runExternalRequest(
+      'raw-token',
+      'corp-other',
+      AbortSignal.timeout(1000),
+      () => Promise.resolve('unreachable'),
+    )).rejects.toMatchObject({ code: 'jdcloud/external-tenant-forbidden' })
+  })
+})
+
 async function bootWithBrowserSession(fetcher: typeof fetch, transport: BrowserSessionTransport = 'cookie') {
   vi.stubGlobal('fetch', fetcher)
   const ctx = new Context()

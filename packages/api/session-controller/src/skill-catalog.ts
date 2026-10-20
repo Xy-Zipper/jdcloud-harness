@@ -15,6 +15,9 @@ import {
   SKILL_INSTALL_MAX_FILES,
   SKILL_INSTALL_MAX_FILE_BYTES,
   SKILL_INSTALL_MAX_TOTAL_BYTES,
+  type AccountSkillDeleteRequest,
+  type AccountSkillInstallRequest,
+  type AccountSkillListValue,
   type SkillInstallFile,
   type SkillInstallInvalidReason,
   type SkillInstallRequest,
@@ -71,6 +74,57 @@ export class SessionSkillCatalog extends TypertRemoteService {
   /** @param ctx - Host context carrying Session reads and optional skill/preset services. */
   constructor(ctx: Context) {
     super(ctx, 'sessionSkillCatalog', { namespace: 'skills' })
+  }
+
+  /**
+   * List the current account's personal Skills and every shared built-in Skill without requiring a Session.
+   * @param signal - Caller cancellation for directory reads.
+   * @returns Account Skill metadata and the scopes this account may mutate.
+   */
+  async listAccount(signal: AbortSignal): Promise<AccountSkillListValue> {
+    this.throwIfCancelled(signal, 'listing')
+    const owner = scopeOwner(this.ctx)
+    const access = await owner?.currentSkillAccess?.()
+    if (owner === undefined || access === undefined) {
+      throw new RemoteError('skill/forbidden', 'authenticated Skill access is unavailable', { scope: 'personal' })
+    }
+    return {
+      skills: await listManagedSkills(this.ctx, access, ['personal', 'built-in'], signal),
+      installScopes: allowedInstallScopes(owner, access).filter(
+        (scope): scope is SkillManagedScope => scope !== 'project',
+      ),
+    }
+  }
+
+  /**
+   * Install one personal or shared built-in Skill for an authenticated account without requiring a Session.
+   * @param request - Managed scope and bounded Skill folder files.
+   * @param signal - Caller cancellation checked before each file publication.
+   * @returns Installed Skill metadata.
+   */
+  async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue> {
+    this.throwIfCancelled(signal, 'installation')
+    const owner = scopeOwner(this.ctx)
+    const access = await owner?.currentSkillAccess?.()
+    if (owner === undefined || access === undefined || !allowedInstallScopes(owner, access).includes(request.scope)) {
+      throw new RemoteError(
+        'skill/forbidden',
+        `skill install scope "${request.scope}" is not authorized`,
+        { scope: request.scope },
+      )
+    }
+    const parsed = parseInstallFolder(request.files)
+    return this.install(request.scope, parsed, access.workspaceRoot, access, undefined, signal)
+  }
+
+  /**
+   * Delete one personal or administrator-managed built-in Skill without requiring a Session.
+   * @param request - Managed scope and Skill name.
+   * @param signal - Caller cancellation checked before removal.
+   * @returns Deletion confirmation.
+   */
+  async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue> {
+    return this.deleteManaged(request, undefined, signal)
   }
 
   /**
@@ -167,8 +221,8 @@ export class SessionSkillCatalog extends TypertRemoteService {
       )
     }
     this.throwIfCancelled(signal, 'installation')
-
     const parsed = parseInstallFolder(request.files)
+
     const access = await owner?.currentSkillAccess?.()
     const scope = request.scope ?? (access === undefined ? 'project' : 'personal')
     if (!allowedInstallScopes(owner, access).includes(scope)) {
@@ -193,8 +247,19 @@ export class SessionSkillCatalog extends TypertRemoteService {
       )
     }
     if (cwd === undefined) throw invalidSkill('project-cwd', 'the Session has no project cwd')
-    this.throwIfCancelled(signal, 'installation')
+    return this.install(scope, parsed, cwd, access, request.sessionId, signal)
+  }
 
+  private async install(
+    scope: SkillInstallScope,
+    parsed: PreparedInstallFolder,
+    cwd: string,
+    access: SkillAccess | undefined,
+    sessionId: SkillInstallRequest['sessionId'] | undefined,
+    signal: AbortSignal,
+  ): Promise<SkillInstallValue> {
+    this.throwIfCancelled(signal, 'installation')
+    const owner = scopeOwner(this.ctx)
     const fs = this.ctx.fs
     const root = await installRoot(scope, cwd, access, fs, signal)
     const rootTarget = await fs.resolve(root.containmentRoot, { signal })
@@ -233,8 +298,8 @@ export class SessionSkillCatalog extends TypertRemoteService {
           { kind: 'createIfAbsent' },
           signal,
           scope === 'built-in'
-            ? { mode: 'danger-full-access', workspaceRoot: canonicalRoot, sessionId: request.sessionId }
-            : { mode: 'workspace-write', workspaceRoot: canonicalRoot, sessionId: request.sessionId },
+            ? { mode: 'danger-full-access', workspaceRoot: canonicalRoot, ...sessionId === undefined ? {} : { sessionId } }
+            : { mode: 'workspace-write', workspaceRoot: canonicalRoot, ...sessionId === undefined ? {} : { sessionId } },
         )
       }
     } catch (error: unknown) {
@@ -281,13 +346,29 @@ export class SessionSkillCatalog extends TypertRemoteService {
         { sessionId: request.sessionId },
       )
     }
+    return this.deleteManaged(request, request.sessionId, signal)
+  }
+
+  private async deleteManaged(
+    request: AccountSkillDeleteRequest,
+    sessionId: SkillDeleteRequest['sessionId'] | undefined,
+    signal: AbortSignal,
+  ): Promise<SkillDeleteValue> {
     if (!isSkillName(request.name)) throw invalidSkill('name', 'skill name must use lowercase kebab-case')
-    const access = await owner.currentSkillAccess?.()
-    if (access === undefined || !allowedInstallScopes(owner, access).includes(request.scope)) {
+    const owner = scopeOwner(this.ctx)
+    const access = await owner?.currentSkillAccess?.()
+    if (owner === undefined || access === undefined || !allowedInstallScopes(owner, access).includes(request.scope)) {
       throw new RemoteError(
         'skill/forbidden',
         `skill delete scope "${request.scope}" is not authorized`,
         { scope: request.scope },
+      )
+    }
+    if (sessionId !== undefined && !(await owner.owns('session', String(sessionId)))) {
+      throw new RemoteError(
+        'session/not-found',
+        `session "${sessionId}" not found`,
+        { sessionId },
       )
     }
     this.throwIfCancelled(signal, 'deletion')

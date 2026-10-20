@@ -11,6 +11,8 @@ kind: "package-bundle"
 
 `@deepseek-ai/dsh-jdcloud-login` 是面向 Web profile 的可选纯 patch bundle。它把 JDCloud Host 认证 controller、浏览器登录页、侧边栏账号摘要、可写功能选择器、低代码对话工具和 JDCloud Harness Web 品牌作为一个可部署 layer 安装。
 
+该 bundle 同时安装外部 API。这些路由会针对 `JDCLOUD_DEFAULT_BASE_URL` 校验低代码原始 Token，并要求 Token 当前租户与 `X-Tenant-Id` 一致；它们不会复用或修改浏览器登录状态。
+
 ## 目录
 
 - [使用本包](#use-this-package)

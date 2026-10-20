@@ -44,6 +44,8 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 
 Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` 请求固定的 `/api/...` 路径。controller 会在内部读取当前 credential、添加 authorization header、应用 `requestTimeoutMs`，并只返回成功响应中的 `data`，不会返回 Token。该方法接受 JSON `GET`、`POST`、`PUT` 和 `DELETE` 请求，或在 `file` 字段中携带一个文件的 `POST` multipart 请求；multipart 文件可以携带 Host 持有的字节，也可以携带长度明确的异步字节流，controller 转发后者时不会缓冲完整文件。JSON 与 multipart body 互斥，`GET` 会绕过缓存。业务码 `600`、`601`、`602` 会删除登录并转换为 `jdcloud/auth-required`，其他业务错误保留登录状态。
 
+外部服务集成把低代码原始 Token 与 `X-Tenant-Id` 指定的租户传给 `runExternalRequest()`。controller 会校验租户列表与当前用户响应均指向该租户，只在请求级异步存储中设置身份，并在操作结束时自动移除。它不会切换 Token 的租户，不会写入浏览器登录状态；外部 API 组合会拒绝 `X-Project-Id`。
+
 <a id="configuration"></a>
 ## 配置
 

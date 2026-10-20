@@ -44,6 +44,8 @@ The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and r
 
 Host plugins can call `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests, or one `POST` multipart file under the `file` field; a multipart file can carry Host-owned bytes or an exact-length asynchronous byte stream, which the controller forwards without complete-file buffering. JSON and multipart bodies are mutually exclusive, and `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
 
+External server integrations pass their original low-code Token to `runExternalRequest()` together with the tenant from `X-Tenant-Id`. The controller validates both tenant-list and current-user responses against that tenant, installs the identity only in request-local asynchronous storage, and removes it when the operation settles. It never switches the Token's tenant, never writes browser login state, and refuses `X-Project-Id` through the external API composition.
+
 <a id="configuration"></a>
 ## Configuration
 

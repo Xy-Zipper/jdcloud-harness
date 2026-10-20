@@ -1,0 +1,448 @@
+/** Token-authenticated external HTTP and SSE facade over existing Host business services. */
+
+import { randomUUID } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
+import type {
+  AccountSkillDeleteRequest,
+  AccountSkillInstallRequest,
+  SessionFollowFrame,
+  SessionRequestId,
+} from '@deepseek-ai/dsh-api-session-controller/types'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller'
+import type {} from '@deepseek-ai/dsh-api-workspace-files'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { bridgeFetchRequest, type ConnectionFetchHandler } from '@deepseek-ai/dsh-client-connection'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+
+export const name = 'external-api'
+export const inject = [
+  'sessionController',
+  'sessionSkillCatalog',
+  'webServer',
+  'workspaceController',
+  'workspaceFiles',
+]
+
+const API_PREFIX = '/api/external/v1'
+const MAX_REQUEST_BODY_BYTES = 30 * 1024 * 1024
+const JSON_HEADERS = {
+  'cache-control': 'no-store',
+  'content-type': 'application/json; charset=utf-8',
+  'x-content-type-options': 'nosniff',
+}
+
+interface ExternalAuthenticator {
+  externalScopeHeader(): 'x-tenant-id' | 'x-project-id'
+  runExternalRequest<Value>(
+    token: string,
+    scopeId: string,
+    signal: AbortSignal,
+    operation: () => Value,
+  ): Promise<Awaited<Value>>
+  workspaceRoot(): Promise<string | undefined>
+}
+
+interface ExternalRequestCredentials {
+  readonly token: string
+  readonly scopeId: string
+}
+
+interface ChatRequest {
+  readonly message: string
+  readonly sessionId?: string
+  readonly workspaceId?: string
+  readonly skillNames: readonly string[]
+}
+
+const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Response>>([
+  [`${API_PREFIX}/skills`, skillsList],
+  [`${API_PREFIX}/skills/upload`, skillsUpload],
+  [`${API_PREFIX}/skills/delete`, skillsDelete],
+  [`${API_PREFIX}/workspaces`, workspacesList],
+  [`${API_PREFIX}/workspaces/create`, workspacesCreate],
+  [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
+  [`${API_PREFIX}/chat`, chat],
+])
+
+/** Register the external API routes directly so provider tokens are not mistaken for browser-session tokens. */
+export function apply(ctx: Context): void {
+  for (const path of ROUTES.keys()) register(ctx, path)
+}
+
+function register(ctx: Context, path: string): void {
+  const fetchHandler: ConnectionFetchHandler = {
+    requestBodyMode: () => 'buffered',
+    fetch: request => fetchExternalApi(ctx, request),
+  }
+  const route: WebRoute = {
+    kind: 'exact',
+    path,
+    handler: (request, response) => bridgeFetchRequest(
+      request,
+      response,
+      fetchHandler,
+      MAX_REQUEST_BODY_BYTES,
+    ),
+  }
+  ctx.effect(() => ctx.webServer.register(route), `external-api: ${path}`)
+}
+
+/**
+ * Dispatch one fetch-shaped request to an exact external API route.
+ * @param ctx - Host context containing the authentication and business services.
+ * @param request - Provider-token-authenticated request candidate.
+ * @returns Route response, or 404 for an unowned path.
+ */
+export function fetchExternalApi(ctx: Context, request: Request): Promise<Response> {
+  const handler = ROUTES.get(new URL(request.url).pathname)
+  return handler === undefined ? Promise.resolve(new Response('not found', { status: 404 })) : handler(ctx, request)
+}
+
+async function skillsList(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, () => ctx.sessionSkillCatalog.listAccount(request.signal))
+}
+
+async function skillsUpload(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    const body = await jsonBody(request)
+    const scope = managedSkillScope(body['scope'])
+    const rawFiles = body['files']
+    if (!Array.isArray(rawFiles)) throw badRequest('files must be an array')
+    const files = rawFiles.map((value, index) => {
+      const file = record(value, `files[${String(index)}]`)
+      return {
+        path: requiredString(file['path'], `files[${String(index)}].path`),
+        contentBase64: stringValue(file['contentBase64'], `files[${String(index)}].contentBase64`),
+      }
+    })
+    const input: AccountSkillInstallRequest = { scope, files }
+    return ctx.sessionSkillCatalog.createAccount(input, request.signal)
+  })
+}
+
+async function skillsDelete(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    const body = await jsonBody(request)
+    const input: AccountSkillDeleteRequest = {
+      scope: managedSkillScope(body['scope']),
+      name: requiredString(body['name'], 'name'),
+    }
+    return ctx.sessionSkillCatalog.deleteAccount(input, request.signal)
+  })
+}
+
+async function workspacesList(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, async () => ({ workspaces: await ctx.workspaceController.listVisible() }))
+}
+
+async function workspacesCreate(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async (authenticator) => {
+    const body = await jsonBody(request)
+    const directoryName = requiredString(body['name'], 'name')
+    if (directoryName !== directoryName.trim()
+      || directoryName === '.' || directoryName === '..'
+      || directoryName.endsWith('.') || /[/\\:\0]/u.test(directoryName)) {
+      throw badRequest('name must be one valid directory segment')
+    }
+    const root = await authenticator.workspaceRoot()
+    if (root === undefined) throw badRequest('authenticated workspace root is unavailable')
+    const path = join(root, directoryName)
+    await mkdir(path, { recursive: true })
+    return ctx.workspaceController.create({ path })
+  })
+}
+
+async function workspaceFilesList(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, async () => {
+    const url = new URL(request.url)
+    const workspaceId = url.searchParams.get('workspaceId')
+    if (workspaceId === null || workspaceId === '') throw badRequest('workspaceId query parameter is required')
+    const path = url.searchParams.get('path') ?? ''
+    return ctx.workspaceFiles.listWorkspace(workspaceId, path, request.signal)
+  })
+}
+
+async function chat(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  const authenticator = externalAuthenticator(ctx)
+  if (authenticator === undefined) return jsonResponse({ code: 'external_api_unavailable' }, 503)
+  const credentials = requestCredentials(request, authenticator.externalScopeHeader())
+  if (credentials instanceof Response) return credentials
+  try {
+    return await authenticator.runExternalRequest(credentials.token, credentials.scopeId, request.signal, async () => {
+      const input = parseChatRequest(await jsonBody(request))
+      const sessionId = input.sessionId === undefined
+        ? (await ctx.sessionController.create({
+          workspaceId: brandString<WorkspaceId>(requiredValue(input.workspaceId, 'workspaceId is required for a new chat')),
+        })).sessionId
+        : brandString<SessionId>(input.sessionId)
+      const catalog = await ctx.sessionSkillCatalog.list({ sessionId }, request.signal)
+      const available = new Set(catalog.skills.map(skill => skill.name))
+      for (const skillName of input.skillNames) {
+        if (!available.has(skillName)) throw badRequest(`skill "${skillName}" is unavailable in this Session`)
+      }
+      return chatStream(ctx, request, sessionId, input)
+    })
+  } catch (error: unknown) {
+    return errorResponse(error)
+  }
+}
+
+function chatStream(ctx: Context, request: Request, sessionId: SessionId, input: ChatRequest): Response {
+  const localAbort = new AbortController()
+  const signal = AbortSignal.any([request.signal, localAbort.signal])
+  const requestId = brandString<SessionRequestId>(`external-${randomUUID()}`)
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      void pumpChat(ctx, controller, encoder, sessionId, requestId, input, signal)
+    },
+    cancel() {
+      localAbort.abort()
+    },
+  })
+  return new Response(body, {
+    headers: {
+      'cache-control': 'no-cache, no-store',
+      connection: 'keep-alive',
+      'content-type': 'text/event-stream; charset=utf-8',
+      'x-accel-buffering': 'no',
+      'x-content-type-options': 'nosniff',
+    },
+  })
+}
+
+async function pumpChat(
+  ctx: Context,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  sessionId: SessionId,
+  requestId: SessionRequestId,
+  input: ChatRequest,
+  signal: AbortSignal,
+): Promise<void> {
+  const iterator = ctx.sessionController.follow({
+    address: { kind: 'session', sessionId },
+    assistantStream: true,
+  }, signal)[Symbol.asyncIterator]()
+  let submittedMessageSeen = false
+  try {
+    const opening = await iterator.next()
+    if (opening.done || opening.value.type !== 'snapshot') throw new Error('Session follow did not open with a snapshot')
+    sendEvent(controller, encoder, 'session', { sessionId })
+    sendEvent(controller, encoder, 'snapshot', opening.value)
+    const skillPrefix = input.skillNames.map(name => `/${name}`).join(' ')
+    const text = skillPrefix === '' ? input.message : `${skillPrefix}\n${input.message}`
+    await ctx.sessionController.prompt({
+      requestId,
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text }],
+    }, signal)
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done) throw new Error('Session follow ended before the submitted turn completed')
+      const frame = next.value
+      sendEvent(controller, encoder, frame.type === 'assistant-stream' ? 'assistant' : 'event', frame)
+      if (frame.type !== 'event') continue
+      if (isSubmittedUserMessage(frame, requestId)) submittedMessageSeen = true
+      if (submittedMessageSeen && frame.event.type === 'turn/end') {
+        sendEvent(controller, encoder, 'done', { sessionId })
+        controller.close()
+        return
+      }
+    }
+  } catch (error: unknown) {
+    if (!signal.aborted) {
+      sendEvent(controller, encoder, 'error', responseError(error))
+      controller.close()
+    }
+  } finally {
+    await iterator.return?.()
+  }
+}
+
+function isSubmittedUserMessage(frame: Extract<SessionFollowFrame, { type: 'event' }>, requestId: SessionRequestId): boolean {
+  if (frame.event.type !== 'user/message') return false
+  const data = frame.event.data
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false
+  const source = Reflect.get(data, 'source')
+  return typeof source === 'object' && source !== null && Reflect.get(source, 'rpcId') === requestId
+}
+
+function sendEvent(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  event: string,
+  value: unknown,
+): void {
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`))
+}
+
+async function authenticated(
+  ctx: Context,
+  request: Request,
+  operation: (authenticator: ExternalAuthenticator) => Promise<unknown>,
+): Promise<Response> {
+  const authenticator = externalAuthenticator(ctx)
+  if (authenticator === undefined) return jsonResponse({ code: 'external_api_unavailable' }, 503)
+  const credentials = requestCredentials(request, authenticator.externalScopeHeader())
+  if (credentials instanceof Response) return credentials
+  try {
+    const value = await authenticator.runExternalRequest(
+      credentials.token,
+      credentials.scopeId,
+      request.signal,
+      () => operation(authenticator),
+    )
+    return jsonResponse(value)
+  } catch (error: unknown) {
+    return errorResponse(error)
+  }
+}
+
+function externalAuthenticator(ctx: Context): ExternalAuthenticator | undefined {
+  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
+  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
+  if (candidate === undefined
+    || typeof Reflect.get(candidate, 'externalScopeHeader') !== 'function'
+    || typeof Reflect.get(candidate, 'runExternalRequest') !== 'function'
+    || typeof Reflect.get(candidate, 'workspaceRoot') !== 'function') return undefined
+  return candidate as ExternalAuthenticator
+}
+
+function requestCredentials(
+  request: Request,
+  scopeHeader: 'x-tenant-id' | 'x-project-id',
+): ExternalRequestCredentials | Response {
+  const authorization = request.headers.get('authorization')
+  const match = authorization === null ? null : /^Bearer\s+(.+)$/iu.exec(authorization)
+  if (match?.[1] === undefined || match[1].trim() === '') {
+    return jsonResponse({ code: 'unauthorized', message: 'Bearer token is required' }, 401)
+  }
+  const otherHeader = scopeHeader === 'x-tenant-id' ? 'x-project-id' : 'x-tenant-id'
+  if ((request.headers.get(otherHeader)?.trim() ?? '') !== '') {
+    return jsonResponse({
+      code: 'invalid_scope',
+      message: `${headerName(otherHeader)} is not accepted by this deployment`,
+    }, 400)
+  }
+  const scopeId = request.headers.get(scopeHeader)?.trim()
+  if (scopeId === undefined || scopeId === '') {
+    return jsonResponse({ code: 'invalid_scope', message: `${headerName(scopeHeader)} is required` }, 400)
+  }
+  return { token: match[1].trim(), scopeId }
+}
+
+function headerName(header: 'x-tenant-id' | 'x-project-id'): 'X-Tenant-Id' | 'X-Project-Id' {
+  return header === 'x-tenant-id' ? 'X-Tenant-Id' : 'X-Project-Id'
+}
+
+async function jsonBody(request: Request): Promise<Record<string, unknown>> {
+  const mediaType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  if (mediaType !== 'application/json') throw badRequest('content type must be application/json')
+  let value: unknown
+  try {
+    value = await request.json()
+  } catch (error: unknown) {
+    throw badRequest('body is not valid JSON', error)
+  }
+  return record(value, 'body')
+}
+
+function parseChatRequest(body: Record<string, unknown>): ChatRequest {
+  const message = requiredString(body['message'], 'message')
+  if (message.trim() === '') throw badRequest('message must not be blank')
+  const sessionId = optionalString(body['sessionId'], 'sessionId')
+  const workspaceId = optionalString(body['workspaceId'], 'workspaceId')
+  const rawSkills = body['skillNames'] ?? []
+  if (!Array.isArray(rawSkills)) throw badRequest('skillNames must be an array')
+  const skillNames = rawSkills.map((value, index) => requiredString(value, `skillNames[${String(index)}]`))
+  if (new Set(skillNames).size !== skillNames.length) throw badRequest('skillNames must not contain duplicates')
+  return {
+    message,
+    ...sessionId === undefined ? {} : { sessionId },
+    ...workspaceId === undefined ? {} : { workspaceId },
+    skillNames,
+  }
+}
+
+function managedSkillScope(value: unknown): AccountSkillInstallRequest['scope'] {
+  if (value !== 'personal' && value !== 'built-in') throw badRequest('scope must be personal or built-in')
+  return value
+}
+
+function record(value: unknown, name: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw badRequest(`${name} must be an object`)
+  return value as Record<string, unknown>
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length === 0) throw badRequest(`${name} must be a non-empty string`)
+  return value
+}
+
+function stringValue(value: unknown, name: string): string {
+  if (typeof value !== 'string') throw badRequest(`${name} must be a string`)
+  return value
+}
+
+function optionalString(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined
+  return requiredString(value, name)
+}
+
+function requiredValue<Value>(value: Value | undefined, message: string): Value {
+  if (value === undefined) throw badRequest(message)
+  return value
+}
+
+function badRequest(message: string, cause?: unknown): RemoteError {
+  return new RemoteError(
+    'gateway/bad-request',
+    message,
+    {},
+    cause === undefined ? undefined : { cause },
+  )
+}
+
+function methodNotAllowed(allowed: 'GET' | 'POST'): Response {
+  return new Response(null, { status: 405, headers: { allow: allowed } })
+}
+
+function errorResponse(error: unknown): Response {
+  const value = responseError(error)
+  return jsonResponse(value, errorStatus(value.code))
+}
+
+function responseError(error: unknown): { code: string; message: string; details?: unknown } {
+  const remote = remoteErrorOf(error)
+  if (remote !== undefined) return { code: remote.code, message: remote.message, details: remote.details }
+  return { code: 'internal_error', message: 'External API request failed' }
+}
+
+function errorStatus(code: string): number {
+  if (code === 'jdcloud/auth-required' || code === 'ontology/auth-required') return 401
+  if (code.includes('forbidden') || code === 'skill/forbidden') return 403
+  if (code.includes('not-found')) return 404
+  if (code === 'skill/already-exists') return 409
+  if (code === 'gateway/bad-request' || code === 'skill/invalid') return 400
+  if (code === 'gateway/cancelled') return 499
+  return 500
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: JSON_HEADERS })
+}

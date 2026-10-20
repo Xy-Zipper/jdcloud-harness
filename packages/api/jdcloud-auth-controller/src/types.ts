@@ -7,6 +7,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'jdcloud/auth-failed': { readonly code: number | null }
     'jdcloud/switch-failed': { readonly code: number | null }
     'jdcloud/validation-failed': { readonly code: number | null }
+    'jdcloud/external-tenant-forbidden': { readonly tenantId: string }
   }
 }
 

@@ -17,11 +17,14 @@ import { Session, SessionId } from '../../../core/session/src/index.ts'
 import SessionProjectionRegistry from '../../../session/session-projection/src/index.ts'
 import SystemPrompt from '../../../core/system-prompt/src/index.ts'
 import ToolRuntime from '../../../core/tools/src/index.ts'
-import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
+import * as ExternalApi from '../../../api/external-api/src/index.ts'
 import JdcloudAuthController from '../../../api/jdcloud-auth-controller/src/index.ts'
+import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
+import WebServer from '../../../host/webserver/src/index.ts'
 
 let directory: string | undefined
 let ctx: Context | undefined
+const socketFetch = globalThis.fetch
 
 afterEach(async () => {
   await ctx?.fiber.dispose()
@@ -46,7 +49,7 @@ function corpData(): Record<string, unknown> {
 }
 
 /** Create the real Loader tree used by both composition assertions. */
-async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
+async function bootComposition(fetcher?: typeof fetch, externalApi = false): Promise<Context> {
   if (fetcher !== undefined) vi.stubGlobal('fetch', fetcher)
   const lowcodeEntry = pathToFileURL(join(
     import.meta.dirname,
@@ -69,8 +72,18 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
 
   directory = await mkdtemp(join(tmpdir(), 'dsh-jdcloud-login-loader-'))
   const configPath = join(directory, 'cordis.yml')
+  const externalEntries = externalApi
+    ? [
+      "- name: '@fixture/external-services'",
+      "- name: '@deepseek-ai/dsh-host-webserver'",
+      '  config:',
+      "    host: '127.0.0.1'",
+      '    port: 0',
+    ]
+    : []
   await writeFile(configPath, [
     "- name: '@fixture/memory-credentials'",
+    ...externalEntries,
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     '  config:',
@@ -81,6 +94,7 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
     '  config:',
     '    defaultBaseUrl: https://kindoucloud.com',
     '    requestTimeoutMs: 15000',
+    ...externalApi ? ["- name: '@deepseek-ai/dsh-api-external'"] : [],
     "- name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'",
     "- name: '@deepseek-ai/dsh-client-ui-jdcloud-login'",
     "- name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'",
@@ -90,17 +104,34 @@ async function bootComposition(fetcher?: typeof fetch): Promise<Context> {
   ctx = new Context()
   ctx.baseUrl = pathToFileURL(directory).href + '/'
   ctx.provide('attachments', { readImage: () => Promise.reject(new Error('unused')) } as never)
-  // The optional UI Host half owns `/login/transfer`; this composition needs only its route registry contract.
-  ctx.provide('webServer', { register: () => () => {} } as never)
+  // The existing UI composition needs only a route registry; the external API test uses a real listener.
+  if (!externalApi) ctx.provide('webServer', { register: () => () => {} } as never)
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
+  // The external API is loaded through its production dependency names while this test owns only their data.
+  const externalServicesModule = {
+    apply(context: Context) {
+      context.provide('sessionController', {} as never)
+      context.provide('sessionSkillCatalog', {
+        listAccount: async () => ({
+          skills: [{ name: 'global-skill', scope: 'built-in' }],
+          canManageBuiltIn: true,
+        }),
+      } as never)
+      context.provide('workspaceController', {} as never)
+      context.provide('workspaceFiles', {} as never)
+    },
+  }
   const modules = new Map<string, unknown>([
     ['@fixture/memory-credentials', MemoryCredentials],
+    ['@fixture/external-services', externalServicesModule],
+    ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-api-jdcloud-auth-controller', JdcloudAuthController],
+    ['@deepseek-ai/dsh-api-external', ExternalApi],
     ['@deepseek-ai/dsh-tool-jdcloud-lowcode', lowcodeModule],
     ['@deepseek-ai/dsh-client-ui-jdcloud-login', loginUiModule],
     ['@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions', lowcodeActionsUiModule],
@@ -171,6 +202,8 @@ describe('JDCloud login through a real Loader composition', () => {
       .toBe('@deepseek-ai/dsh-host-directory-picker-browse')
     expect(rows.find(row => row.id === 'ui-directory-picker-browse')?.name)
       .toBe('@deepseek-ai/dsh-client-ui-directory-picker-browse')
+    expect(rows.find(row => row.id === 'external-api')?.name)
+      .toBe('@deepseek-ai/dsh-api-external')
     expect(jdcloud.find(row => row.id === 'skill-filesystem')).toMatchObject({
       disabled: false,
       config: {
@@ -218,6 +251,42 @@ describe('JDCloud login through a real Loader composition', () => {
       authenticated: false,
       baseUrl: 'https://kindoucloud.com',
     })
+  })
+
+  it('loads the external API with a low-code Bearer token and current tenant header', async () => {
+    const fetcher = vi.fn((input: string | URL | Request): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      switch (url.pathname) {
+        case '/api/system/corp/getCorpList':
+          return Promise.resolve(json(corpData()))
+        case '/api/oauth/currentUser':
+          return Promise.resolve(json({
+            userInfo: { id: 'external-user-id', userName: 'external-user', corpId: 'corp-current' },
+            userPermission: { systemAdministrator: true },
+          }))
+        default:
+          throw new Error(`unexpected JDCloud request: ${url.pathname}`)
+      }
+    })
+    const context = await bootComposition(fetcher, true)
+    const externalResponse = await socketFetch(
+      `http://127.0.0.1:${String(context.webServer.port)}/api/external/v1/skills`,
+      {
+        headers: {
+          authorization: 'Bearer low-code-token',
+          'x-tenant-id': 'corp-current',
+        },
+      },
+    )
+    expect(externalResponse.status).toBe(200)
+    await expect(externalResponse.json()).resolves.toEqual({
+      skills: [{ name: 'global-skill', scope: 'built-in' }],
+      canManageBuiltIn: true,
+    })
+    expect(fetcher.mock.calls.map(call => (call[1] as RequestInit).headers)).toEqual([
+      { authorization: 'low-code-token' },
+      { authorization: 'low-code-token' },
+    ])
   })
 
   it('synchronizes a transferred token to the tenant reported by the real controller composition', async () => {

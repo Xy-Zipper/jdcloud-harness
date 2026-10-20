@@ -256,6 +256,7 @@
     { "path": "./packages/core/scope" },
     { "path": "./packages/typert/protocol" },
     { "path": "./packages/typert/registry" },
+    { "path": "./packages/api/external-api" },
     { "path": "./packages/api/gateway/tsconfig.host.json" },
     { "path": "./packages/api/jdcloud-auth-controller" },
     { "path": "./packages/api/remotes/tsconfig.host.json" },

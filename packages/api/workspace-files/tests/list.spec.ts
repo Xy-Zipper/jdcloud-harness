@@ -21,6 +21,24 @@ afterEach(async () => {
 const endpoint = (caps?: { maxEntries?: number }): ReturnType<Harness['endpoint']> => harness.endpoint(caps)
 
 describe('workspaceFiles.list — the happy path', () => {
+  it('lists an owned Workspace without requiring a Session', async () => {
+    await writeFile(join(workspace, 'notes.txt'), 'hello', 'utf8')
+    harness.ctx.provide('workspaceRegistry', {
+      get: (id: string) => id === 'workspace-a' ? { id, path: workspace } : undefined,
+    } as never)
+    harness.ctx.provide('jdcloudAuthController', {
+      owns: (_kind: 'session' | 'workspace', id: string) => Promise.resolve(id === 'workspace-a'),
+    } as never)
+
+    await expect(endpoint().listWorkspace('workspace-a', '', signal())).resolves.toMatchObject({
+      path: '',
+      entries: [{ name: 'notes.txt', type: 'file', size: 5 }],
+      truncated: false,
+    })
+    await expect(endpoint().listWorkspace('workspace-b', '', signal()))
+      .rejects.toMatchObject({ code: 'workspace-file/not-found' })
+  })
+
   it('lists the root as the empty workspace path, with types and file sizes', async () => {
     await mkdir(join(workspace, 'src'))
     await writeFile(join(workspace, 'notes.txt'), 'hello', 'utf8')

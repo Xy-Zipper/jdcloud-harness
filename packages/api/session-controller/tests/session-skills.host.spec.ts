@@ -438,6 +438,69 @@ describe('SessionSkillCatalog', () => {
     })
   })
 
+  it('manages personal and shared Skills without requiring a Session', async () => {
+    const member = await installFixture({ owner: { owns: false, role: 'member' } })
+    if (member.access === undefined) throw new Error('member fixture did not create Skill access')
+    await mkdir(join(member.access.managedSkillDirectory, 'shared-helper'), { recursive: true })
+    await writeFile(
+      join(member.access.managedSkillDirectory, 'shared-helper', 'SKILL.md'),
+      skillDocument('shared-helper', 'Shared administrator helper.'),
+      'utf8',
+    )
+
+    await expect(member.catalog.createAccount({
+      scope: 'personal',
+      files: skillFiles(skillDocument('personal-helper', 'Private account helper.')),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      skill: { name: 'personal-helper' },
+    })
+    await expect(member.catalog.listAccount(new AbortController().signal)).resolves.toMatchObject({
+      skills: [
+        { name: 'personal-helper', scope: 'personal' },
+        { name: 'shared-helper', scope: 'built-in' },
+      ],
+      installScopes: ['personal'],
+    })
+    await expect(member.catalog.createAccount({
+      scope: 'built-in',
+      files: skillFiles(skillDocument('member-shared-helper')),
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'skill/forbidden',
+      details: { scope: 'built-in' },
+    })
+    await expect(member.catalog.deleteAccount({
+      scope: 'built-in',
+      name: 'shared-helper',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'skill/forbidden',
+      details: { scope: 'built-in' },
+    })
+    await expect(member.catalog.deleteAccount({
+      scope: 'personal',
+      name: 'personal-helper',
+    }, new AbortController().signal)).resolves.toEqual({
+      deleted: true,
+      name: 'personal-helper',
+      scope: 'personal',
+    })
+
+    const administrator = await installFixture({ owner: { owns: false, role: 'admin' } })
+    await expect(administrator.catalog.createAccount({
+      scope: 'built-in',
+      files: skillFiles(skillDocument('administrator-helper')),
+    }, new AbortController().signal)).resolves.toMatchObject({
+      skill: { name: 'administrator-helper' },
+    })
+    await expect(administrator.catalog.deleteAccount({
+      scope: 'built-in',
+      name: 'administrator-helper',
+    }, new AbortController().signal)).resolves.toEqual({
+      deleted: true,
+      name: 'administrator-helper',
+      scope: 'built-in',
+    })
+  })
+
   it('installs personal Skills under the authenticated user workspace', async () => {
     const b = await installFixture({ owner: { owns: true, role: 'member' } })
     if (b.access === undefined) throw new Error('member fixture did not create Skill access')

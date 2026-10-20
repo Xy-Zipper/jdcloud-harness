@@ -1,5 +1,6 @@
 /** Host owner of JDCloud login state and prompt admission validation. */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
@@ -92,6 +93,7 @@ export class JdcloudAuthController extends TypertRemoteService {
   private readonly requestTimeoutMs: number
   private readonly userWorkspaceDirectory: string
   private readonly fetcher: typeof fetch
+  private readonly externalRequests = new AsyncLocalStorage<AuthPayload>()
 
   /** @param ctx - Host context carrying durable credentials. @param config - service address and timeout policy. */
   constructor(ctx: Context, config: Config = {}) {
@@ -347,6 +349,70 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   /**
+   * Select the request header that identifies the external JDCloud tenant scope.
+   * @returns The required external tenant header.
+   */
+  externalScopeHeader(): 'x-tenant-id' {
+    return 'x-tenant-id'
+  }
+
+  /**
+   * Validate one raw JDCloud token for its current tenant and run an external API operation as that account.
+   * @param token - Raw JDCloud token supplied by the external caller.
+   * @param tenantId - Tenant that the token must already have selected.
+   * @param signal - Caller cancellation for JDCloud validation requests.
+   * @param operation - Request-local operation that consumes the authenticated account scope.
+   * @returns The operation result.
+   */
+  async runExternalRequest<Value>(
+    token: string,
+    tenantId: string,
+    signal: AbortSignal,
+    operation: () => Value,
+  ): Promise<Awaited<Value>> {
+    const normalizedToken = token.trim()
+    const normalizedTenantId = tenantId.trim()
+    if (normalizedToken === '' || normalizedTenantId === '') {
+      throw new RemoteError('gateway/bad-request', 'JDCloud token and tenantId are required', {})
+    }
+    if (this.defaultBaseUrl === '') {
+      throw new RemoteError('gateway/internal', 'JDCloud external API requires defaultBaseUrl', {})
+    }
+    const client = new JdcloudClient(this.defaultBaseUrl, this.fetcher)
+    const operationSignal = this.operationSignal(signal)
+    let corp: Awaited<ReturnType<JdcloudClient['getCorpList']>>
+    let currentUser: Awaited<ReturnType<JdcloudClient['getCurrentUser']>>
+    try {
+      corp = await client.getCorpList(normalizedToken, operationSignal)
+      currentUser = await client.getCurrentUser(normalizedToken, operationSignal)
+    } catch (error) {
+      if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
+        throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' }, { cause: error })
+      }
+      throw this.requestError('validate', error)
+    }
+    if (corp.corpId !== normalizedTenantId || currentUser.corpId !== normalizedTenantId) {
+      throw new RemoteError(
+        'jdcloud/external-tenant-forbidden',
+        'JDCloud token is not currently scoped to the requested tenant',
+        { tenantId: normalizedTenantId },
+      )
+    }
+    const auth: AuthPayload = {
+      version: 4,
+      baseUrl: this.defaultBaseUrl,
+      token: normalizedToken,
+      username: currentUser.username,
+      userId: currentUser.userId,
+      corpId: corp.corpId,
+      corpName: corp.corpName,
+      corps: corp.corps,
+      systemAdministrator: currentUser.systemAdministrator,
+    }
+    return await this.externalRequests.run(auth, operation)
+  }
+
+  /**
    * Return the deterministic tenant-user owner key for the current browser login.
    * @returns The owner key, or undefined when no user login is active.
    */
@@ -470,7 +536,9 @@ export class JdcloudAuthController extends TypertRemoteService {
         .requestAuthenticated<T>(auth.token, request, this.operationSignal(signal))
     } catch (error) {
       if (error instanceof JdcloudApiError && isJdcloudAuthError(error.code)) {
-        await this.ctx.credentials.deleteRecord(this.authKey())
+        if (this.externalRequests.getStore() === undefined) {
+          await this.ctx.credentials.deleteRecord(this.authKey())
+        }
         throw new RemoteError('jdcloud/auth-required', error.message, { reason: 'expired' })
       }
       throw error
@@ -478,6 +546,7 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   private async validateStoredLogin(callerSignal: AbortSignal): Promise<void> {
+    if (this.externalRequests.getStore() !== undefined) return
     const auth = await this.readAuth()
     if (auth === undefined) {
       throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
@@ -556,6 +625,8 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   private async readAuth(): Promise<AuthPayload | undefined> {
+    const external = this.externalRequests.getStore()
+    if (external !== undefined) return external
     const record = await this.ctx.credentials.readRecord(this.authKey())
     if (record === undefined) return undefined
     const auth = parseAuthRecord(record)

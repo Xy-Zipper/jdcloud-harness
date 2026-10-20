@@ -86,6 +86,25 @@ async function nextFrame(
 }
 
 describe('WorkspaceController commands', () => {
+  it('lists only Workspaces owned by the current authenticated scope', async () => {
+    const { controller, ctx, root } = await harness()
+    const owned = await ctx.workspaceRegistry.create(stageDir(root, 'owned'))
+    await ctx.workspaceRegistry.create(stageDir(root, 'foreign'))
+    const checkedScopes: (string | undefined)[] = []
+    ctx.provide('jdcloudAuthController', {
+      currentScopeKey: () => Promise.resolve('tenant-user'),
+      owns: (_kind: 'session' | 'workspace', id: string, scopeKey?: string) => {
+        checkedScopes.push(scopeKey)
+        return Promise.resolve(id === owned.id)
+      },
+    } as never)
+
+    await expect(controller.listVisible()).resolves.toMatchObject([
+      { workspaceId: owned.id, title: 'owned' },
+    ])
+    expect(checkedScopes).toEqual(['tenant-user', 'tenant-user'])
+  })
+
   it('creates a tenant-scoped registration when another tenant already owns the path', async () => {
     const { controller, ctx, root } = await harness()
     const path = stageDir(root, 'shared-path')

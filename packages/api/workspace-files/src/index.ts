@@ -28,6 +28,7 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { Remote, RemoteError, TypertRemoteService, type TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceChangeFeed } from './changes.ts'
 import type {
@@ -185,7 +186,7 @@ function directoryEntry(child: FsDirEntry): WorkspaceDirectoryEntry {
 
 /** Host Remote file reads and workspace directory observations over the composed filesystem. */
 export class WorkspaceFiles extends TypertRemoteService {
-  static inject = ['fs', 'sandboxPolicy', 'sessions', 'typert']
+  static inject = ['fs', 'sandboxPolicy', 'sessions', 'typert', 'workspaceRegistry']
 
   static Config: z<Config> = z.object({
     maxBytes: z.number().step(1).min(1).default(2 * 1024 * 1024),
@@ -323,6 +324,44 @@ export class WorkspaceFiles extends TypertRemoteService {
   }
 
   /**
+   * List one directory through an authenticated Workspace identity without requiring a Session.
+   * @param workspaceId - Workspace registration owned by the current account scope.
+   * @param path - Workspace-relative directory path; an empty path selects the root.
+   * @param signal - Caller cancellation for filesystem reads.
+   * @returns Bounded direct children of the requested Workspace directory.
+   */
+  async listWorkspace(workspaceId: string, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing> {
+    const owner = scopeOwner(this.ctx)
+    if (owner !== undefined && !(await owner.owns('workspace', workspaceId))) {
+      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+    }
+    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
+    if (workspace === undefined) {
+      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+    }
+    const requestedPath = path === '' ? '.' : path
+    const root = await this.ctx.fs.resolve(workspace.path, { signal })
+    const entry = await this.ctx.fs.lstat(requestedPath, { cwd: workspace.path }, signal)
+    if (entry === undefined) {
+      throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })
+    }
+    if (entry.type !== 'directory') {
+      throw new RemoteError(
+        'workspace-file/not-directory',
+        `"${path}" is a ${entry.type}`,
+        { path, kind: entry.type },
+      )
+    }
+    const target = await this.confine(root, workspace.path, requestedPath, signal)
+    const children = await this.ctx.fs.listDir(target, signal)
+    return {
+      path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)),
+      entries: children.slice(0, this.config.maxEntries).map(directoryEntry),
+      truncated: children.length > this.config.maxEntries,
+    }
+  }
+
+  /**
    * Watch one file or a directory's direct entries in the Session's filesystem.
    * Files use the backend's read authority; directories remain workspace-scoped.
    * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
@@ -383,7 +422,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = scopeOwner(this.ctx)
     if (owner !== undefined && !(await owner.owns('session', String(workspaceFileScope.sessionId)))) {
       throw new RemoteError('workspace-file/not-found', `session "${workspaceFileScope.sessionId}" not found`, { path })
     }
@@ -420,7 +459,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const owner = scopeOwner(this.ctx)
     const target = owner === undefined
       ? await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
       : await this.confine(root, workspaceRoot, path, signal)
@@ -453,6 +492,14 @@ export class WorkspaceFiles extends TypertRemoteService {
       throw error
     }
   }
+}
+
+/** Resolve either supported account authentication controller. */
+function scopeOwner(ctx: Context): ScopeOwner | undefined {
+  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
+  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
+  if (candidate === undefined || typeof Reflect.get(candidate, 'owns') !== 'function') return undefined
+  return candidate as ScopeOwner
 }
 
 /**

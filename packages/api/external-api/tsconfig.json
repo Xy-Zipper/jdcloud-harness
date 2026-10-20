@@ -1,0 +1,22 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../util/brand" },
+    { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../../host/webserver" },
+    { "path": "../../core/session" },
+    { "path": "../../workspace/workspace" },
+    { "path": "../../typert/protocol" },
+    { "path": "../session-controller/tsconfig.host.json" },
+    { "path": "../workspace-controller/tsconfig.host.json" },
+    { "path": "../workspace-files/tsconfig.host.json" }
+  ]
+}

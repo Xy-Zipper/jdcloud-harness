@@ -35,6 +35,10 @@
         requestTimeoutMs: 15000
         userWorkspaceDirectory: !!js process.env.JDCLOUD_USER_WORKSPACE_DIR
 
+    # External callers authenticate with the raw JDCloud token and current tenant id.
+    - id: external-api
+      name: '@deepseek-ai/dsh-api-external'
+
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
 
