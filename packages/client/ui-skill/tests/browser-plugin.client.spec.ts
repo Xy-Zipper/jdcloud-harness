@@ -21,15 +21,42 @@ import { InputTriggerService } from '@deepseek-ai/dsh-client-ui-input-trigger/cl
 import { RemoteError, TestRemote, TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionFixture } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  SkillInstallFile,
+  SkillInstallScope,
+  SkillManagedScope,
+} from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ClientSessionContext, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SkillRow as SkillToolRow } from '../src/client/SkillRow.tsx'
+import {
+  SkillPicker,
+  SkillSettingsSection,
+  type SkillPickerInjected,
+} from '../src/client/SkillPicker.tsx'
+import { en, zh } from '../src/client/locales.ts'
 
 type SkillRow = { name: string; description: string; whenToUse?: string; path?: string; modelInvocable?: boolean }
+type ManagedSkillRow = SkillRow & { scope: SkillManagedScope }
 type ListResult =
-  | { ok: true; value: { skills: SkillRow[] } }
+  | {
+    ok: true
+    value: {
+      skills: SkillRow[]
+      installScopes: SkillInstallScope[]
+      managedSkills: ManagedSkillRow[]
+    }
+  }
   | { ok: false; error: RemoteFailure }
 type ListFn = (payload: object, signal?: AbortSignal) => Promise<ListResult>
+type InstallResult =
+  | { ok: true; value: { skill: SkillRow } }
+  | { ok: false; error: RemoteFailure }
+type InstallFn = (payload: object, signal?: AbortSignal) => Promise<InstallResult>
+type DeleteResult =
+  | { ok: true; value: { deleted: true; scope: SkillManagedScope; name: string } }
+  | { ok: false; error: RemoteFailure }
+type DeleteFn = (payload: object, signal?: AbortSignal) => Promise<DeleteResult>
 
 interface PresentationCapture {
   slots: SlotRegistry
@@ -41,8 +68,11 @@ interface PresentationCapture {
 function providePresentation(ctx: Context): PresentationCapture {
   const slots = new SlotRegistry(ctx)
   slots.register({
-    name: 'root',
-    children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
+    name: 'root', children: {
+      'tool.call.toolview': { kind: 'keyed', scope: 'session' },
+      'conversation.input.left': { kind: 'list', scope: 'session' },
+      'settings.section': { kind: 'list', scope: 'root' },
+    },
   } as never, () => null)
   const capture: PresentationCapture = {
     slots,
@@ -61,7 +91,13 @@ function providePresentation(ctx: Context): PresentationCapture {
 }
 
 /** Boot the plugin over fake slash/connection faces; returns the captured source and its ctx. */
-async function bench(list: ListFn, addressed?: SessionId, opening: Pick<SessionFixture, 'initialOpen' | 'snapshot'> = {}) {
+async function bench(
+  list: ListFn,
+  addressed?: SessionId,
+  opening: Pick<SessionFixture, 'initialOpen' | 'snapshot'> = {},
+  create: InstallFn = () => Promise.reject(new Error('unexpected skills/create call')),
+  remove: DeleteFn = () => Promise.reject(new Error('unexpected skills/delete call')),
+) {
   const ctx = new Context()
   const openResource = vi.fn()
   ctx.provide('sidebarRight', { openResource })
@@ -79,12 +115,12 @@ async function bench(list: ListFn, addressed?: SessionId, opening: Pick<SessionF
       ? { parentSessionId: sid('parent'), childSessionId: addressed, mode: 'continuable' }
       : sid(id))
   }
-  const remote = new TestRemote(ctx, { skills: { list } })
-  providePresentation(ctx)
+  const remote = new TestRemote(ctx, { skills: { create, delete: remove, list } })
+  const presentation = providePresentation(ctx)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   onTestFinished(async () => { await fiber.dispose() })
   await fiber.await()
-  return { ctx, source: captured!, remote, fiber, openResource, sessions }
+  return { ctx, source: captured!, remote, fiber, openResource, presentation, sessions }
 }
 
 const CATALOG: SkillRow[] = [
@@ -93,7 +129,10 @@ const CATALOG: SkillRow[] = [
   { name: 'deploy', description: 'deploy flow', modelInvocable: true },
 ]
 
-const listOk = (skills: SkillRow[]): ListFn => () => Promise.resolve({ ok: true as const, value: { skills } })
+const listOk = (skills: SkillRow[]): ListFn => () => Promise.resolve({
+  ok: true as const,
+  value: { skills, installScopes: ['project'], managedSkills: [] },
+})
 
 /** Counting fake: records payloads, resolves the shared catalog. */
 function countingList(skills: SkillRow[] = CATALOG) {
@@ -129,28 +168,85 @@ describe('apply', () => {
     expect(entry?.options).toMatchObject({ key: 'skill' })
     expect(entry?.locale).toBe('skill')
     expect(entry?.component).toBe(SkillToolRow)
+    const picker = presentation.slots.entries('conversation.input.left')[0]
+    expect(picker?.options).toMatchObject({ id: '@deepseek-ai/dsh-client-ui-skill' })
+    expect(picker?.locale).toBe('skill')
+    expect(picker?.component).toBe(SkillPicker)
+    const settings = presentation.slots.entries('settings.section')[0]
+    expect(settings?.options).toMatchObject({ id: 'skills', order: 30 })
+    expect(settings?.locale).toBe('skill')
+    expect(settings?.component).toBe(SkillSettingsSection)
     expect(presentation.dictionaries).toEqual([{
-      namespace: 'skill', dictionaries: {
-        zh: {
-          'row.title': '加载技能',
-          'row.running': '正在加载 skill',
-          'row.failed': 'skill 加载失败',
-          'row.stopped': 'skill 加载已中止',
-          'row.instructions': '说明',
-          'row.inspect': '查看',
-          'menu.userOnly': '仅用户',
-        },
-        en: {
-          'row.title': 'Skill',
-          'row.running': 'Loading skill',
-          'row.failed': 'Skill load failed',
-          'row.stopped': 'Skill load stopped',
-          'row.instructions': 'Instructions',
-          'row.inspect': 'Inspect',
-          'menu.userOnly': 'user-only',
-        },
-      },
+      namespace: 'skill', dictionaries: { zh, en },
     }])
+  })
+
+  it('injects a session-bound picker face and refreshes its cached catalog after installation', async () => {
+    const installed = { name: 'workspace-helper', description: 'workspace flow', modelInvocable: true }
+    const install = vi.fn<InstallFn>(() => Promise.resolve({ ok: true, value: { skill: installed } }))
+    const b = await bench(listOk(CATALOG), sid('child'), {}, install)
+    const picker = b.presentation.slots.entries('conversation.input.left')[0]
+    const injectPicker = picker?.inject as ((sessionId: SessionId) => SkillPickerInjected) | undefined
+    expect(injectPicker).toBeDefined()
+
+    const face = injectPicker!(sid('s1'))
+    expect(face.available).toBe(true)
+    expect(injectPicker!(sid('child')).available).toBe(false)
+    await expect(face.loadCatalog()).resolves.toEqual({
+      skills: CATALOG,
+      installScopes: ['project'],
+      managedSkills: [],
+    })
+
+    const files: readonly SkillInstallFile[] = [{
+      path: 'SKILL.md',
+      contentBase64: Buffer.from('---\nname: workspace-helper\ndescription: workspace flow\n---\n\nRun it.\n').toString('base64'),
+    }]
+    await expect(face.installSkill('project', files)).resolves.toEqual({ ok: true, skill: installed })
+    expect(install).toHaveBeenCalledWith({ sessionId: sid('s1'), scope: 'project', files })
+    await expect(face.loadCatalog()).resolves.toEqual({
+      skills: [...CATALOG, installed].sort((left, right) => left.name.localeCompare(right.name)),
+      installScopes: ['project'],
+      managedSkills: [],
+    })
+  })
+
+  it('invalidates the catalog after deletion so a same-name built-in Skill can become visible', async () => {
+    const managed = {
+      name: 'personal-helper',
+      description: 'private helper',
+      modelInvocable: true,
+      scope: 'personal' as const,
+    }
+    const builtIn = {
+      name: managed.name,
+      description: 'shared fallback',
+      modelInvocable: true,
+    }
+    let deleted = false
+    const list = vi.fn<ListFn>(() => Promise.resolve({
+      ok: true,
+      value: deleted
+        ? { skills: [builtIn], installScopes: ['personal'], managedSkills: [] }
+        : { skills: [managed], installScopes: ['personal'], managedSkills: [managed] },
+    }))
+    const remove = vi.fn<DeleteFn>(() => {
+      deleted = true
+      return Promise.resolve({
+        ok: true,
+        value: { deleted: true, scope: 'personal', name: managed.name },
+      })
+    })
+    const b = await bench(list, undefined, {}, undefined, remove)
+    const picker = b.presentation.slots.entries('conversation.input.left')[0]
+    const injectPicker = picker?.inject as ((sessionId: SessionId) => SkillPickerInjected) | undefined
+    const face = injectPicker!(sid('s1'))
+
+    await expect(face.loadCatalog()).resolves.toMatchObject({ managedSkills: [managed] })
+    await expect(face.deleteSkill('personal', managed.name)).resolves.toEqual({ ok: true })
+    expect(remove).toHaveBeenCalledWith({ sessionId: sid('s1'), scope: 'personal', name: managed.name })
+    await expect(face.loadCatalog()).resolves.toMatchObject({ skills: [builtIn], managedSkills: [] })
+    expect(list).toHaveBeenCalledTimes(2)
   })
 
   it('registers the "/" skill source; disposal frees the name (HMR safety)', async () => {
@@ -176,6 +272,8 @@ describe('apply', () => {
     await fiber.dispose()
     expect(() => inputTriggers.registerSource(rival)).not.toThrow()
     expect(presentation.slots.entries('tool.call.toolview')).toHaveLength(0)
+    expect(presentation.slots.entries('conversation.input.left')).toHaveLength(0)
+    expect(presentation.slots.entries('settings.section')).toHaveLength(0)
     expect(presentation.localeDisposed).toBe(true)
   })
 })
@@ -193,12 +291,12 @@ describe('candidates: sessionId addressing', () => {
       opened.resolve(undefined)
       await vi.waitFor(() => { expect(list).toHaveBeenCalledOnce() })
       expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(2)
-      response.resolve({ ok: true, value: { skills: CATALOG } })
+      response.resolve({ ok: true, value: { skills: CATALOG, installScopes: ['project'], managedSkills: [] } })
       await pending
       expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(1)
     } finally {
       opened.resolve(undefined)
-      response.resolve({ ok: true, value: { skills: CATALOG } })
+      response.resolve({ ok: true, value: { skills: CATALOG, installScopes: ['project'], managedSkills: [] } })
     }
   })
 
@@ -468,7 +566,7 @@ describe('reference preview', () => {
     const candidates = source.candidates(session, req(''))
     expect(openResource).not.toHaveBeenCalled()
     await vi.waitFor(() => { expect(list).toHaveBeenCalledTimes(1) })
-    gate.resolve({ ok: true, value: { skills: rows } })
+    gate.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
     await candidates
     expect(openResource).toHaveBeenCalledExactlyOnceWith('dsh-resource://file/session/preview//skills/review/SKILL.md')
     expect(source.openReference!(session, { ref: '/virtual' })).toBe(false)
@@ -490,10 +588,17 @@ describe('reference preview', () => {
     const firstDone = source.candidates(proj('first'), req(''))
     source.openReference!(proj('second'), { ref: '/review' })
     const secondDone = source.candidates(proj('second'), req(''))
-    second.resolve({ ok: true, value: { skills: [{ ...rows[0]!, path: '/second/SKILL.md' }] } })
+    second.resolve({
+      ok: true,
+      value: {
+        skills: [{ ...rows[0]!, path: '/second/SKILL.md' }],
+        installScopes: ['project'],
+        managedSkills: [],
+      },
+    })
     await secondDone
     expect(openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/second//second/SKILL.md')
-    first.resolve({ ok: true, value: { skills: rows } })
+    first.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
     await firstDone
     expect(openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/first//skills/review/SKILL.md')
     expect(list.mock.calls.map(([payload]) => payload)).toEqual([{ sessionId: 'first' }, { sessionId: 'second' }])
@@ -511,7 +616,7 @@ describe('reference preview', () => {
     else if (reason === 'preset') remote.emit('agent-preset/selected', [session.sessionId, 'minimal'])
     else await fiber.dispose()
     expect(listener).toHaveBeenCalledTimes(1)
-    gate.resolve({ ok: true, value: { skills: rows } })
+    gate.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
     await completion
     expect(source.lexicon!(session)).toBeUndefined()
     expect(listener).toHaveBeenCalledTimes(1)

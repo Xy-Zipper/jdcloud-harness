@@ -30,7 +30,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import type { Config as LocalConfig } from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
-import type { FsEditOutcome, FsEditRequest, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
+import type { FsByteWriteOutcome, FsEditOutcome, FsEditRequest, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import { writableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
@@ -85,6 +85,17 @@ export class SandboxedFileSystem extends LocalFileSystem {
     sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {
     return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
+  }
+
+  /** Fence a raw-byte write by the same per-call policy as text writes. */
+  override async writeBytes(
+    target: FsTarget,
+    content: Uint8Array,
+    expected?: FsWriteIntent,
+    signal?: AbortSignal,
+    sandboxPolicy?: SandboxExecutionPolicy,
+  ): Promise<FsByteWriteOutcome> {
+    return super.writeBytes(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
   }
 
   /**

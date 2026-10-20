@@ -51,12 +51,14 @@
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-api-session-controller": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
     "@deepseek-ai/dsh-api-session-controller": "workspace:^",
     "@deepseek-ai/dsh-credentials": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-typert-protocol": "workspace:^"
   }
 }

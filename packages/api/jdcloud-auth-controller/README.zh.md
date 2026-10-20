@@ -36,7 +36,7 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 
 在 JDCloud 部署中，登录记录按不透明的浏览器会话键保存。稳定归属由外部 `userInfo.id`、规范化服务地址和当前租户 ID 共同决定；用户名只用于显示。每台浏览器必须独立登录，同一租户和用户在不同电脑登录后可共享新创建的 Session 与 Workspace；没有归属记录的旧数据会被忽略。
 
-配置 `userWorkspaceDirectory` 时，`workspaceRoot()` 在其下按 SHA-256 归属键创建用户目录。`assertWorkspacePath()` 解析已有路径和符号链接，仅接受该用户目录内的路径。这些检查用于工作区和会话创建以及目录选择器，不限制终端命令或通过完整路径读取文件。
+`workspaceRoot()` 在 `userWorkspaceDirectory` 下按 SHA-256 归属键创建用户目录，该配置默认是 `$DSH_HOME/account-workspaces`。`assertWorkspacePath()` 解析已有路径和符号链接，仅接受该用户目录内的路径。`currentSkillAccess()` 公开用户自己的 `.dsh/skills` 目录和父目录下共享的 `.dsh/skills` 目录；只有系统管理员可以管理共享目录。这些检查用于工作区和会话创建、目录选择器和 skill 管理，不限制终端命令或通过完整路径读取文件。
 
 登录后，浏览器可以读取 `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }`；Token 永不经过 Remote wire。版本 3 record 会在使用前通过一次 `currentUser` 升级。`logout()` 会删除完整 credential record。密码只在登录调用期间存在，本包不会保存密码。
 
@@ -51,7 +51,7 @@ Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartF
 |---|---:|---|
 | `defaultBaseUrl` | 空 | 尚未保存登录时显示的初始服务地址 |
 | `requestTimeoutMs` | `15,000` | 登录、租户、当前用户、租户切换与 Host 已认证请求的截止时间 |
-| `userWorkspaceDirectory` | 未设置 | 用户独立目录的持久化父目录；共享部署中应设置该项，Docker bundle 使用 `/workspace/jdcloud-users` |
+| `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | 用户独立目录与共享内置 skill 的持久化父目录；Docker bundle 可以使用 `/workspace/jdcloud-users` |
 
 <a id="model-experience"></a>
 ## 模型体验

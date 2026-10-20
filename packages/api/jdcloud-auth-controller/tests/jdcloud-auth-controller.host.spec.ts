@@ -25,6 +25,7 @@ const tempDirs: string[] = []
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true })
+  vi.unstubAllEnvs()
   vi.unstubAllGlobals()
 })
 
@@ -74,10 +75,30 @@ async function boot(fetcher: typeof fetch, config: {
 }
 
 describe('JDCloud user directories', () => {
-  it('leaves local directory selection unrestricted without a configured user-directory parent', async () => {
+  it('uses the Harness home account-workspaces directory by default', async () => {
+    const dshHome = mkdtempSync(join(tmpdir(), 'dsh-jdcloud-home-'))
+    tempDirs.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
     const ctx = await boot(fetch)
-    await expect(ctx.jdcloudAuthController.workspaceRoot()).resolves.toBeUndefined()
-    await expect(ctx.jdcloudAuthController.assertWorkspacePath('D:\\local-project')).resolves.toBeUndefined()
+    await expect(ctx.jdcloudAuthController.workspaceRoot()).rejects.toMatchObject({ code: 'jdcloud/auth-required' })
+    await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+      kind: 'grant',
+      payload: {
+        version: 4, baseUrl: 'https://example.com', token: 'token', username: 'admin', userId: 'user-admin',
+        corpId: 'corp-a', corpName: 'Tenant', corps: [{ corpId: 'corp-a', corpName: 'Tenant' }],
+        systemAdministrator: true,
+      },
+    }))
+
+    const workspaceRoot = await ctx.jdcloudAuthController.workspaceRoot()
+    if (workspaceRoot === undefined) throw new Error('default JDCloud user workspace was not created')
+    await expect(ctx.jdcloudAuthController.currentSkillAccess()).resolves.toEqual({
+      userId: 'user-admin',
+      administrator: true,
+      workspaceRoot,
+      personalSkillDirectory: join(workspaceRoot, '.dsh', 'skills'),
+      managedSkillDirectory: join(dshHome, 'account-workspaces', '.dsh', 'skills'),
+    })
   })
 
   it('assigns distinct roots for users, tenants, and service addresses, rejecting sibling and symlink paths', async () => {

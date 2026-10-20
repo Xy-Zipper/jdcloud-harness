@@ -36,7 +36,7 @@ Before Session Controller changes a Session model, the controller reads the stor
 
 In the JDCloud deployment, login records are keyed by an opaque browser session. The stable owner identity is the external `userInfo.id` together with the normalized service address and current tenant id; usernames are display labels only. A browser must log in independently, while browsers using the same tenant and user share newly-owned Sessions and Workspaces. Records without an owner are ignored.
 
-When `userWorkspaceDirectory` is configured, `workspaceRoot()` creates a directory named by the SHA-256 owner key under it. `assertWorkspacePath()` resolves existing paths and symlinks before accepting paths inside that user's directory. These checks apply to Workspace and Session creation and the directory picker, not to terminal commands or unrestricted file reads by absolute path.
+`workspaceRoot()` creates a directory named by the SHA-256 owner key under `userWorkspaceDirectory`, which defaults to `$DSH_HOME/account-workspaces`. `assertWorkspacePath()` resolves existing paths and symlinks before accepting paths inside that user's directory. `currentSkillAccess()` exposes the user's `.dsh/skills` directory and the parent's shared `.dsh/skills` directory; only a system administrator can manage the shared directory. These checks apply to Workspace and Session creation, the directory picker, and Skill management, not to terminal commands or unrestricted file reads by absolute path.
 
 The browser can read `{ authenticated, baseUrl, username, corpId, corpName, corps, systemAdministrator }` for an authenticated login; the token never crosses the Remote wire. Version-3 records are upgraded once through `currentUser` before use. `logout()` deletes the complete credential record. Passwords exist only for the duration of the login call and are never stored by this package.
 
@@ -51,7 +51,7 @@ Host plugins can call `requestAuthenticated({ path, method, body? | multipartFil
 |---|---:|---|
 | `defaultBaseUrl` | empty | Initial service address shown before a login is stored |
 | `requestTimeoutMs` | `15,000` | Deadline for login, tenant, current-user, tenant-switch, and Host authenticated requests |
-| `userWorkspaceDirectory` | unset | Persistent parent for per-user directories; set it in a shared deployment, where the Docker bundle selects `/workspace/jdcloud-users` |
+| `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | Persistent parent for per-user directories and shared built-in Skills; the Docker bundle can select `/workspace/jdcloud-users` |
 
 <a id="model-experience"></a>
 ## Model Experience

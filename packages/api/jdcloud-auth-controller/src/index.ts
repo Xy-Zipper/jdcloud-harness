@@ -8,6 +8,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -89,7 +90,7 @@ export class JdcloudAuthController extends TypertRemoteService {
 
   private readonly defaultBaseUrl: string
   private readonly requestTimeoutMs: number
-  private readonly userWorkspaceDirectory: string | undefined
+  private readonly userWorkspaceDirectory: string
   private readonly fetcher: typeof fetch
 
   /** @param ctx - Host context carrying durable credentials. @param config - service address and timeout policy. */
@@ -100,7 +101,7 @@ export class JdcloudAuthController extends TypertRemoteService {
       : normalizeJdcloudBaseUrl(config.defaultBaseUrl)
     this.requestTimeoutMs = config.requestTimeoutMs ?? 15_000
     this.userWorkspaceDirectory = config.userWorkspaceDirectory === undefined || config.userWorkspaceDirectory.trim() === ''
-      ? undefined
+      ? join(resolveDshHome(), 'account-workspaces')
       : resolve(config.userWorkspaceDirectory)
     this.fetcher = globalThis.fetch
     ctx.on('api-session/prompt-admission', async (request, next) => {
@@ -360,7 +361,6 @@ export class JdcloudAuthController extends TypertRemoteService {
    * @returns Canonical directory selected by service address, tenant id, and user id.
    */
   async workspaceRoot(): Promise<string | undefined> {
-    if (this.userWorkspaceDirectory === undefined) return undefined
     const scopeKey = await this.currentScopeKey()
     if (scopeKey === undefined) {
       throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
@@ -400,6 +400,32 @@ export class JdcloudAuthController extends TypertRemoteService {
   async isCurrentAdministrator(): Promise<boolean> {
     const auth = await this.readAuth()
     return auth?.systemAdministrator === true
+  }
+
+  /**
+   * Resolve the current tenant-user's private Skill directory and the administrator-managed shared directory.
+   * @returns Account-backed Skill access, or undefined when no JDCloud login is active.
+   */
+  async currentSkillAccess(): Promise<{
+    readonly userId: string
+    readonly administrator: boolean
+    readonly workspaceRoot: string
+    readonly personalSkillDirectory: string
+    readonly managedSkillDirectory: string
+  } | undefined> {
+    const auth = await this.readAuth()
+    if (auth?.userId === undefined) return undefined
+    const workspaceRoot = await this.workspaceRoot()
+    if (workspaceRoot === undefined) return undefined
+    await mkdir(this.userWorkspaceDirectory, { recursive: true })
+    const parent = await realpath(this.userWorkspaceDirectory)
+    return {
+      userId: auth.userId,
+      administrator: auth.systemAdministrator,
+      workspaceRoot,
+      personalSkillDirectory: join(workspaceRoot, '.dsh', 'skills'),
+      managedSkillDirectory: join(parent, '.dsh', 'skills'),
+    }
   }
 
   /**

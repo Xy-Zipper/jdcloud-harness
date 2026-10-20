@@ -128,6 +128,7 @@
     "tests/blank-writer-reuse.e2e.ts",
     "tests/queue-image.e2e.ts",
     "tests/skill-invocation-policy.e2e.ts",
+    "tests/skill-picker.e2e.ts",
     "tests/skill-user-invoke.e2e.ts",
     "tests/permission-policy-context.e2e.ts",
     "tests/access-confirmation.e2e.ts",

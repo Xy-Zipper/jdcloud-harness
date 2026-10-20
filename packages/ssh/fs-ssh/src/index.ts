@@ -2,12 +2,12 @@
 import { posix } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { FileSystem, FsError } from '@deepseek-ai/dsh-fs'
-import type { FsDirEntry, FsEditOutcome, FsEditRequest, FsErrorCode, FsInfo, FsPathInfo, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
+import type { FsByteWriteOutcome, FsDirEntry, FsEditOutcome, FsEditRequest, FsErrorCode, FsInfo, FsPathInfo, FsTarget, FsVersion, FsWriteIntent, FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-ssh'
 import { RemoteOperationError } from '@deepseek-ai/dsh-ssh/protocol'
-import { editResultSchema, entriesSchema, infoSchema, pathInfoSchema, targetSchema, textStreamIdSchema, writeResultSchema } from '@deepseek-ai/dsh-ssh/schemas'
+import { byteWriteResultSchema, editResultSchema, entriesSchema, infoSchema, pathInfoSchema, targetSchema, textStreamIdSchema, writeResultSchema } from '@deepseek-ai/dsh-ssh/schemas'
 import { z } from 'zod'
 
 const errorCodes: Record<FsErrorCode, true> = {
@@ -84,6 +84,18 @@ export class SshFileSystem extends FileSystem {
   ): Promise<FsWriteOutcome> {
     const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
     return await this.call('fs.write', { target, content, expected, policy }, writeResultSchema, signal) as FsWriteOutcome
+  }
+
+  override async writeBytes(
+    target: FsTarget, content: Uint8Array, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy,
+  ): Promise<FsByteWriteOutcome> {
+    const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve()
+    return await this.call(
+      'fs.writeBytes',
+      { target, content: Buffer.from(content).toString('base64'), expected, policy },
+      byteWriteResultSchema,
+      signal,
+    ) as FsByteWriteOutcome
   }
 
   override async editText(

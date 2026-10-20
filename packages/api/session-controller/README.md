@@ -8,7 +8,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, human background-job kill, workspace-path opening, user-invocable skill discovery, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.
+`@deepseek-ai/dsh-api-session-controller` owns the Host `ctx.sessionController` service and the generated Client `session`, `skills`, and `fileReferences` Remote namespaces. It serves Session lifecycle and history, the Host-generation model catalog, human background-job kill, workspace-path opening, user-invocable skill discovery and authorized folder installation, and Agent-scoped file references. Use it through API Gateway when a Client needs operations addressed by a Session.
 
 ## Table of Contents
 
@@ -35,7 +35,7 @@ Client list rows and resident Sessions use the current `sessionListMetadata` pro
 
 Explicit-id `session.create` adopts a live Session or resumes a persisted Session while retaining its writer lock. Writer contention returns `session/writer-held`; callers may try another blank without suppressing unrelated failures. `session.list` includes persisted blanks using cached metadata, without opening cold log bodies.
 
-With JDCloud ownership installed, `session.create` uses the current tenant-user directory when no location is supplied and refuses an explicit cwd or Workspace path outside it.
+With Ontology ownership installed, `session.create` uses the current user's directory when no location is supplied and refuses an explicit cwd or Workspace path outside it.
 
 Client list refreshes retain unchanged row objects and reuse the items array when order and values match. Each row's `retainedBy` contains positive local reference-source counts; Host metadata refreshes cannot overwrite them. Cache membership checks use a per-refresh ID set, so reconciliation grows linearly with the current list and retained cache sizes. Host summary updates replace running and Agent availability; local create/fork responses only fill missing metadata on existing rows. Removed ordinary Sessions retain projection stores only when their catalogs contain children.
 
@@ -52,7 +52,9 @@ The Session object also carries local submission echoes: `session.beginSubmissio
 
 During uninterrupted following, transcript and steering echoes stay in Chat through Inbox acceptance and claim until their durable messages arrive. After a local Chat message is admitted, its identity remains until the Inbox watermark reaches its next-turn or next-step claim seq: Chat already renders the durable Node, while Chat and QueueDock exclude matching stale Inbox rows. Other queued messages remain visible. A replacement follow baseline withdraws receipt-confirmed echoes as observed, using their accepted attachment references; unconfirmed submissions remain pending. Host data then supplies the pending or admitted rows. Reconnecting between claim and admission can briefly omit that bubble; withdrawal confirms acceptance, not execution or failure.
 
-The user-invocable `skills/list` metadata includes the winning provider’s optional instruction-file `path`. The composer can preview that file without loading every skill body or activating a cold Agent.
+The user-invocable `skills/list` metadata includes the winning provider’s optional instruction-file `path`, the install scopes authorized for the current account, and the personal or administrator-managed Skills that account may delete. The composer can preview the winning file and the manager can list removable folders without loading every skill body or activating a cold Agent.
+
+`skills/create` accepts one complete folder rooted by `SKILL.md`, validates its metadata, invocation flags, bounded file set, and relative paths, and refuses to replace an existing skill. An account-aware authentication controller stores personal skills under the current user workspace and exposes an administrator-only managed directory shared by every user; a composition without that adapter retains project installation under the Session’s nearest `.git` project root or cwd. `skills/delete` removes only the current user’s personal folder or, for an administrator, one folder from the shared managed directory. The Host verifies Session ownership and scope authorization before either mutation, uses an explicit filesystem execution policy for installation, and limits an imported folder to 128 files, 5 MiB per file, 20 MiB total, and 256 KiB of UTF-8 `SKILL.md` content.
 
 Fork copies the exact inclusive event prefix selected by `atSeq`, including a cut inside an open turn. The child records its inherited marker before synthetic fork results and closing events. Omitting `atSeq` selects the latest completed turn and its standalone tail, stopping before the next turn or queued input; a nonexistent event is rejected. The chat action selects a completed turn.
 
@@ -112,6 +114,7 @@ No direct effect; model requests remain owned by the Agent and LLM packages.
 - A failed follow resumption remains visible to the caller instead of retrying indefinitely.
 - The raw browser upload is one streaming HTTP request without resumable offsets; a retry sends the file again from byte zero.
 - File-reference completion uses the shared Agent lookup and can resume a cold Session; the `skills/list` catalog is the non-activating alternative for skill metadata.
+- Skill installation accepts a browser-selected directory tree; it does not accept an archive or replace an existing skill.
 - Accepted/running display memory lives only in Client memory and is lost on page reload.
 - That memory is not shared between tabs: one tab can show a converted row while another still shows `New Session` for the same Session.
 

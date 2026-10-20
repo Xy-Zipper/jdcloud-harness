@@ -8,7 +8,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-session-controller` 拥有 Host 的 `ctx.sessionController` 服务，以及生成的 Client `session`、`skills` 和 `fileReferences` Remote namespace。它提供 Session 生命周期与历史、Host generation 模型目录、人工后台任务终止、工作区路径打开、用户可调用 skill（技能）发现和 Agent（智能体）范围的文件引用。当 Client 需要按 Session 寻址的操作时，请通过 API Gateway 使用它。
+`@deepseek-ai/dsh-api-session-controller` 拥有 Host 的 `ctx.sessionController` 服务，以及生成的 Client `session`、`skills` 和 `fileReferences` Remote namespace。它提供 Session 生命周期与历史、Host generation 模型目录、人工后台任务终止、工作区路径打开、用户可调用 skill（技能）的发现与授权文件夹安装，以及 Agent（智能体）范围的文件引用。当 Client 需要按 Session 寻址的操作时，请通过 API Gateway 使用它。
 
 ## 目录
 
@@ -35,7 +35,7 @@ Client 列表行和驻留 Session 使用当前 `sessionListMetadata` 投影纠�
 
 显式 ID 的 `session.create` 会收养活动 Session，或恢复持久化 Session 并持续持有其写锁。写锁争用返回 `session/writer-held`；调用方可以尝试其他空白会话，同时保留其他失败。`session.list` 根据缓存元数据列出持久化空白会话，不打开冷日志正文。
 
-启用 JDCloud 所有权时，`session.create` 在未指定位置时使用当前租户用户目录；显式 cwd 或工作区路径不在该目录内时拒绝创建。
+启用 Ontology 所有权时，`session.create` 在未指定位置时使用当前用户目录；显式 cwd 或工作区路径不在该目录内时拒绝创建。
 
 Client 列表刷新保留未变化的行对象，并在顺序和值均相同时复用条目数组。每行的 `retainedBy` 包含正数的本地引用来源计数，Host 元数据刷新不能覆盖它们。缓存成员检查使用每次刷新构建的 ID 集合，因此对账成本随当前列表和保留缓存的规模线性增长。 Host 摘要更新会替换运行状态与 Agent 可用性；本地 create/fork 响应只补充已有行缺失的元数据。普通 Session 被移除后，仅在目录仍有子项时保留其投影 store。
 
@@ -52,7 +52,9 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 Session 对象还承载本地提交回显：`session.beginSubmission` 在调用方序列化与提示词之前，同步把一条回显写入 `SessionSnapshot.pendingSubmissions`，会话 UI 因此能在点击提交的当帧显示消息。回显按顺序存放图片预览与持久文件引用。Session 根据当前运行状态与请求的投递模式推导其 `transcript`、`queued` 或 `steering` 位置，并在序列化期间保留该位置。提示词的 `requestId` 是关联标识：Host 把它回显为 durable user source 的 `rpcId`，queue occurrence 也把它投影为 `SessionQueuedItem.rpcId`。回显在观察到其 durable event 或 queue occurrence 后延迟一个动画帧退休，带标识的提示词失败或被放弃时立即退休，销毁时按 failed 退休。每次退休恰好触发一次 `onRetire`；observed 退休还会携带有序的持久附件引用，让 composer 释放成功卡片并保留失败草稿。回显只存在于 Client 内存；刷新与重连只从持久事件重建会话。
 
 
-面向用户调用的 `skills/list` 元数据包含胜出提供方可选的指令文件 `path`。输入框可据此预览文件，无需加载每个 skill 的正文或激活冷态 Agent。
+面向用户调用的 `skills/list` 元数据包含胜出提供方可选的指令文件 `path`、当前账号获准使用的安装范围，以及该账号可以删除的个人 skill 或管理员受管 skill。输入框可以预览胜出文件，管理器可以列出可删除文件夹，无需加载每个 skill 的正文或激活冷态 Agent。
+
+`skills/create` 接受一个以 `SKILL.md` 为根入口的完整文件夹，校验元数据、调用标记、有界文件集合与相对路径，并拒绝替换已存在的 skill。账号感知的鉴权控制器把个人 skill 存入当前用户工作区，并向管理员提供所有用户共享的受管目录；没有该适配器的组合仍在 Session 最近的 `.git` 项目根目录或 cwd 下安装项目 skill。`skills/delete` 只删除当前用户的个人文件夹，或允许管理员删除共享受管目录中的一个文件夹。Host 在两种变更前都校验 Session 所有权与范围授权，安装时使用显式文件系统执行策略，并把导入文件夹限制为 128 个文件、单文件 5 MiB、总计 20 MiB，以及 256 KiB 的 UTF-8 `SKILL.md` 内容。
 
 正常在线时，transcript 与 steering 回显在 Inbox 接受与领取期间留在 Chat，直到持久消息到达。本地 Chat 消息入档后，其身份保留到 Inbox 水位覆盖 next-turn 或 next-step 领取序号：Chat 已显示真实 Node，而 Chat 与 QueueDock 排除匹配的旧 Inbox 行。其他排队消息照常显示。新的 follow 基线会将已有接收回执的回显按 observed 撤去，使用已接受的附件引用完成结算；尚未确认接收的提交继续保留。待处理或已入档的消息随后由 Host 数据呈现。在领取与入档之间重连时，气泡可能短暂消失；撤去回显只确认接收，不代表执行或失败。
 
@@ -116,6 +118,7 @@ Client 的首次 `follow`、重连首屏与 `loadOlder()` 至少请求 50 条以
 - follow 恢复失败会对调用方可见，而不会无限重试。
 - 浏览器原始字节上传使用一次不带断点续传偏移的流式 HTTP 请求；重试会从第零字节重新传输整个文件。
 - 文件引用补全使用共享 Agent lookup，因此可能恢复冷 Session；`skills/list` 目录是不激活 Agent 的 skill 元数据读取路径。
+- skill 安装接受浏览器选择的目录树；它不接受压缩包，也不会替换现有 skill。
 - 受理/运行的展示记忆只存在于客户端内存，页面重载后即丢失。
 - 该记忆不在 tab 之间共享：同一会话可能在一个 tab 中已转正，在另一个 tab 中仍显示为 `New Session`。
 

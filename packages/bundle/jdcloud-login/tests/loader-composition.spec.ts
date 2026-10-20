@@ -166,6 +166,15 @@ describe('JDCloud login through a real Loader composition', () => {
         browserSessionTransport: 'bearer',
       },
     })
+    expect(jdcloud.find(row => row.id === 'skill-filesystem')).toMatchObject({
+      disabled: false,
+      config: {
+        includeDefaultRoots: false,
+        scopedUserWorkspaceDir: {
+          __jsExpr: "process.env.JDCLOUD_USER_WORKSPACE_DIR ?? process.getBuiltinModule('node:path').join(process.env.DSH_HOME ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'account-workspaces')",
+        },
+      },
+    })
     expect(rows.find(row => row.id === 'ui-jdcloud-login')).toMatchObject({
       config: {
         transferFrameAncestorOrigin: { __jsExpr: 'process.env.JDCLOUD_IFRAME_PARENT_ORIGIN' },

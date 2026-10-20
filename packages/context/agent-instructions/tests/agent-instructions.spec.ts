@@ -187,6 +187,10 @@ class RecordingFileSystem extends FileSystem {
     return { operation: 'update', version: FsVersion('unused'), before: '', after: _content }
   }
 
+  override async writeBytes(): Promise<never> {
+    throw new Error('not needed in agent-instructions tests')
+  }
+
   override async editText(_target: FsTarget, _edit: FsEditRequest): Promise<FsEditOutcome> {
     return { version: FsVersion('unused'), before: '', after: '' }
   }

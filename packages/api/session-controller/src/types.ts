@@ -259,6 +259,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly childSessionId: SessionId
       readonly reason: 'corrupt' | 'unsupported' | 'unavailable'
     }
+    'skill/invalid': { readonly reason: SkillInstallInvalidReason }
+    'skill/already-exists': { readonly name: string }
+    'skill/forbidden': { readonly scope: SkillInstallScope }
+    'skill/not-found': { readonly name: string; readonly scope: SkillManagedScope }
   }
 }
 
@@ -284,6 +288,83 @@ export interface SkillEntry {
 /** Human-invocable skills visible through one Session's composition. */
 export interface SkillListValue {
   readonly skills: readonly SkillEntry[]
+  /** Install targets authorized for the current authenticated user and Session. */
+  readonly installScopes: readonly SkillInstallScope[]
+  /** Account-managed Skills that the current user may delete. */
+  readonly managedSkills: readonly SkillManagedEntry[]
+}
+
+/** Persistent target selected by the Skill manager. */
+export type SkillInstallScope = 'project' | 'personal' | 'built-in'
+
+/** Account-owned Skill scope with an authenticated deletion policy. */
+export type SkillManagedScope = Exclude<SkillInstallScope, 'project'>
+
+/** One installed account Skill shown by the management dialog. */
+export interface SkillManagedEntry extends SkillEntry {
+  readonly scope: SkillManagedScope
+}
+
+/** Security cap for the root SKILL.md document. */
+export const SKILL_INSTALL_MAX_BYTES = 256 * 1024
+/** Security cap for one imported Skill folder. */
+export const SKILL_INSTALL_MAX_FILES = 128
+/** Security cap for one file inside an imported Skill folder. */
+export const SKILL_INSTALL_MAX_FILE_BYTES = 5 * 1024 * 1024
+/** Security cap for all files inside one imported Skill folder. */
+export const SKILL_INSTALL_MAX_TOTAL_BYTES = 20 * 1024 * 1024
+
+/** Stable validation categories returned by the workspace skill installer. */
+export type SkillInstallInvalidReason =
+  | 'content-too-large'
+  | 'description'
+  | 'empty-folder'
+  | 'file-too-large'
+  | 'folder-too-large'
+  | 'frontmatter'
+  | 'invalid-file-content'
+  | 'invalid-file-path'
+  | 'missing-skill-file'
+  | 'name'
+  | 'path'
+  | 'project-cwd'
+  | 'skill-file-not-text'
+  | 'too-many-files'
+  | 'user-invocable'
+
+/** One relative file selected from a local Skill folder. */
+export interface SkillInstallFile {
+  /** Slash-separated path relative to the selected folder root. */
+  readonly path: string
+  /** Complete file bytes encoded as canonical padded Base64. */
+  readonly contentBase64: string
+}
+
+/** Session-addressed request to install one complete Skill folder. */
+export interface SkillInstallRequest {
+  readonly sessionId: SessionId
+  /** Omission preserves the project target for clients that predate account Skill management. */
+  readonly scope?: SkillInstallScope
+  readonly files: readonly SkillInstallFile[]
+}
+
+/** Installed skill metadata returned to the browser catalog. */
+export interface SkillInstallValue {
+  readonly skill: SkillEntry
+}
+
+/** Session-addressed request to delete one account-managed Skill folder. */
+export interface SkillDeleteRequest {
+  readonly sessionId: SessionId
+  readonly scope: SkillManagedScope
+  readonly name: string
+}
+
+/** Confirmation that one account-managed Skill folder was deleted. */
+export interface SkillDeleteValue {
+  readonly deleted: true
+  readonly scope: SkillManagedScope
+  readonly name: string
 }
 
 /** Session list request. */

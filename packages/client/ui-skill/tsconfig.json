@@ -36,6 +36,12 @@
       "path": "../ui-input-trigger"
     },
     {
+      "path": "../ui-conversation/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-settings/tsconfig.client.json"
+    },
+    {
       "path": "../ui-slots"
     },
     {

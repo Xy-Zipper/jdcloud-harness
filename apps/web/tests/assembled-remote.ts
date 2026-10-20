@@ -156,7 +156,7 @@ export function createAssembledRemote(options: AssembledRemoteOptions = {}): Ass
       'settings/openSettingsDocument': ok({ opened: true }),
       'subagents/list': ok({ entries: [], parentAvailable: true }),
       'terminal/list': ok([]),
-      'skills/list': ok({ skills: [] }),
+      'skills/list': ok({ skills: [], installScopes: ['project'], managedSkills: [] }),
       'session/canOpenWorkspacePath': ok(true),
       'session/openWorkspacePath': ok({ opened: true }),
       'session/updateQueue': {

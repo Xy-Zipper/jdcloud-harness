@@ -27,6 +27,9 @@
  * with an aborted signal just returns early.
  * Catalog RPCs retain an existing Client Session through completion and
  * wait for its initial history open to succeed before contacting the Host.
+ * The composer also exposes the same catalog through a dedicated searchable
+ * skill button. Its manager installs a validated SKILL.md in the current
+ * project and updates this cache without changing the `/name` invocation wire.
  *
  * This browser half also owns the `skill` keyed toolview: a replay-stable
  * accent row derived only from each logged call/result slice.
@@ -35,7 +38,16 @@
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SkillEntry } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  SkillInstallFile,
+  SkillInstallInvalidReason,
+  SkillInstallScope,
+  SkillManagedEntry,
+  SkillManagedScope,
+} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
@@ -45,6 +57,14 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { SkillRow } from './SkillRow.tsx'
+import {
+  SkillPicker,
+  type SkillDeleteOutcome,
+  SkillSettingsSection,
+  type SkillInstallOutcome,
+  type SkillPickerCatalog,
+  type SkillPickerInjected,
+} from './SkillPicker.tsx'
 import { en, NS, zh, type SkillKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
@@ -63,13 +83,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** One session's catalog fetch: the shared promise plus its own abort handle. */
 interface CatalogFetch {
-  readonly promise: Promise<readonly SkillEntry[]>
+  readonly promise: Promise<SkillPickerCatalog>
   readonly abort: AbortController
   /** Settled catalog for synchronous lexicon reads (unset while in flight or on failure). */
-  settled?: readonly SkillEntry[]
+  settled?: SkillPickerCatalog
 }
 
-/** Required services: reference source faces plus the tool-row and locale registries. */
+/** Required services: reference source faces plus the tool-row, composer, and locale registries. */
 export const inject = ['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight']
 
 /**
@@ -121,15 +141,15 @@ export function apply(ctx: ClientContext): void {
         const result = await skills.list({ sessionId }, abort.signal)
         abort.signal.throwIfAborted()
         if (!result.ok) throw new Error(`skills/list failed: ${result.error.code}: ${result.error.message}`)
-        return result.value.skills
+        return result.value
       })
     })()
     const entry: CatalogFetch = { promise, abort }
     fetches.set(sessionId, entry)
     promise.then(
       // Settled snapshot backs the synchronous lexicon reads.
-      (skills) => {
-        entry.settled = skills
+      (catalog) => {
+        entry.settled = catalog
         notifyLexicon(sessionId)
       },
       // A failed fetch must not poison the key: the next consumer retries.
@@ -148,6 +168,18 @@ export function apply(ctx: ClientContext): void {
     notifyLexicon(key)
   }
 
+  const replaceCatalog = (key: SessionId, catalog: SkillPickerCatalog): void => {
+    const previous = fetches.get(key)
+    previous?.abort.abort()
+    const entry: CatalogFetch = {
+      promise: Promise.resolve(catalog),
+      abort: new AbortController(),
+      settled: catalog,
+    }
+    fetches.set(key, entry)
+    notifyLexicon(key)
+  }
+
   const clearAll = (): void => {
     for (const key of [...fetches.keys()]) invalidate(key)
   }
@@ -156,13 +188,114 @@ export function apply(ctx: ClientContext): void {
   // locale service's own fallback ladder; candidate-time reads stay plain text.
   const t = ctx.locale.bind(NS)
 
+  const injectedFor = (sessionId: SessionId): SkillPickerInjected => ({
+    available: sessions.subagentAddress(sessionId) === undefined,
+    loadCatalog: () => fetchCatalog(sessionId).promise,
+    installSkill: async (
+      scope: SkillInstallScope,
+      files: readonly SkillInstallFile[],
+    ): Promise<SkillInstallOutcome> => {
+      let result: Awaited<ReturnType<typeof skills.create>>
+      try {
+        result = await skills.create({ sessionId, scope, files })
+      } catch (error: unknown) {
+        // Transport failures do not carry a RemoteResult for the dialog to classify.
+        console.error('[ui-skill] skill installation transport failed:', error)
+        return { ok: false, error: { code: 'transport/failure' } }
+      }
+      if (!result.ok) {
+        // Keep the localized dialog concise while preserving the Remote diagnostic for operators.
+        console.error('[ui-skill] skill installation failed:', result.error)
+        const reason: SkillInstallInvalidReason | undefined = result.error.code === 'skill/invalid'
+          ? result.error.details.reason
+          : undefined
+        return {
+          ok: false,
+          error: {
+            code: result.error.code,
+            ...reason === undefined ? {} : { reason },
+          },
+        }
+      }
+      const current = fetches.get(sessionId)?.settled ?? {
+        skills: [],
+        installScopes: [scope],
+        managedSkills: [],
+      }
+      const managedSkill: SkillManagedEntry | undefined = scope === 'project'
+        ? undefined
+        : { ...result.value.skill, scope }
+      replaceCatalog(sessionId, {
+        ...current,
+        skills: [
+          ...current.skills.filter(skill => skill.name !== result.value.skill.name),
+          result.value.skill,
+        ].sort((left, right) => left.name.localeCompare(right.name)),
+        managedSkills: managedSkill === undefined
+          ? current.managedSkills
+          : [
+            ...current.managedSkills.filter(skill => (
+              skill.name !== managedSkill.name || skill.scope !== managedSkill.scope
+            )),
+            managedSkill,
+          ].sort((left, right) => left.name.localeCompare(right.name)),
+      })
+      return { ok: true, skill: result.value.skill }
+    },
+    deleteSkill: async (scope: SkillManagedScope, name: string): Promise<SkillDeleteOutcome> => {
+      let result: Awaited<ReturnType<typeof skills.delete>>
+      try {
+        result = await skills.delete({ sessionId, scope, name })
+      } catch (error: unknown) {
+        console.error('[ui-skill] skill deletion transport failed:', error)
+        return { ok: false, error: { code: 'transport/failure' } }
+      }
+      if (!result.ok) {
+        console.error('[ui-skill] skill deletion failed:', result.error)
+        return { ok: false, error: { code: result.error.code } }
+      }
+      // The next read must rediscover a lower-priority Skill with the same name.
+      invalidate(sessionId)
+      return { ok: true }
+    },
+  })
+
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
+    name: 'conversation.input.left',
+    id: '@deepseek-ai/dsh-client-ui-skill',
+    locale: NS,
+    inject: injectedFor,
+  }, SkillPicker))
+
+  const settingsInjected = (): SkillPickerInjected => {
+    const session = Object.values(sessions.list.getSnapshot().byId)
+      .find(row => (row.retainedBy.mainView ?? 0) > 0
+        && sessions.subagentAddress(row.id) === undefined)
+    if (session !== undefined) return injectedFor(session.id)
+    return {
+      available: false,
+      loadCatalog: () => Promise.reject(new Error('skill settings require an open main Session')),
+      installSkill: () => Promise.resolve({ ok: false, error: { code: 'session/not-found' } }),
+      deleteSkill: () => Promise.resolve({ ok: false, error: { code: 'session/not-found' } }),
+    }
+  }
+
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section',
+    id: 'skills',
+    order: 30,
+    label: () => t('settings.nav'),
+    locale: NS,
+    inject: settingsInjected,
+  }, SkillSettingsSection))
+
   const source: InputTriggerSource = {
     trigger: '/',
     name: 'skill',
     order: 2,
     async candidates(session, { query, signal }) {
       if (sessions.subagentAddress(session.sessionId) !== undefined) return []
-      const skills = await fetchCatalog(session.sessionId).promise
+      const { skills } = await fetchCatalog(session.sessionId).promise
       // Superseded keystroke: the shared fetch stays warm, this caller yields.
       if (signal.aborted) return []
       // The same ranking as the command group of this menu: case-insensitive
@@ -182,7 +315,7 @@ export function apply(ctx: ClientContext): void {
       fetchCatalog(session.sessionId).promise.catch(() => {})
     },
     lexicon(session) {
-      return fetches.get(session.sessionId)?.settled?.map(skill => skill.name)
+      return fetches.get(session.sessionId)?.settled?.skills.map(skill => skill.name)
     },
     subscribeLexicon(session, listener) {
       const key = session.sessionId
@@ -204,10 +337,10 @@ export function apply(ctx: ClientContext): void {
         return true
       }
       const settled = fetches.get(session.sessionId)?.settled
-      if (settled !== undefined) return open(settled)
+      if (settled !== undefined) return open(settled.skills)
       const entry = fetchCatalog(session.sessionId)
       void entry.promise.then((catalog) => {
-        if (!entry.abort.signal.aborted) open(catalog)
+        if (!entry.abort.signal.aborted) open(catalog.skills)
       }).catch((error: unknown) => {
         if (!entry.abort.signal.aborted) console.error('[ui-skill] reference preview failed:', error)
       })

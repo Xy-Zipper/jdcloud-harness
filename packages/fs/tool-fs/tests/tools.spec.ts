@@ -98,6 +98,9 @@ class FakeFs extends FileSystem {
     this.files.set(target.targetKey, content)
     return { operation: before !== null ? 'update' : 'create', version: FsVersion('v2'), before, after: content }
   }
+  override async writeBytes(): Promise<never> {
+    throw new Error('not needed in tool-fs tests')
+  }
   override async editText(target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }): Promise<FsEditOutcome> {
     this.throwIfArmed()
     this.editIntents.push(expected)
@@ -1099,7 +1102,7 @@ describe('scope-aware filesystem guidance', () => {
 
 /** Preserve the default persona and exact section separators in the oracle. */
 function withPersona(...sections: string[]): string {
-  return ['You are an AI agent powered by JDCloud Harness.', ...sections].join('\n\n')
+  return ['You are an AI agent powered by DeepSeek Harness.', ...sections].join('\n\n')
 }
 
 /** Schema assembly only: these cases never execute user code. */

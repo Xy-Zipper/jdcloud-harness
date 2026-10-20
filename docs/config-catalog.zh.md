@@ -216,7 +216,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/api/jdcloud-auth-controller/src/index.ts:64`](../packages/api/jdcloud-auth-controller/src/index.ts)
+来源：[`packages/api/jdcloud-auth-controller/src/index.ts:65`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-job-controller"></a>
 
@@ -1178,7 +1178,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/fs/fs-local/src/index.ts:45`](../packages/fs/fs-local/src/index.ts)
+来源： [`packages/fs/fs-local/src/index.ts:46`](../packages/fs/fs-local/src/index.ts)
 
 <a id="deepseek-aidsh-fs-sandbox"></a>
 
@@ -2783,6 +2783,10 @@ export interface Config {
   agentsHome?: string
   /** Additional skill roots scanned after project roots and before user roots. */
   customSkillDirs?: string[]
+  /** Shared administrator-managed skill root scanned for every workspace. */
+  managedSkillDir?: string
+  /** Parent whose direct user-scope child contributes a private `.dsh/skills` root selected from `cwd`. */
+  scopedUserWorkspaceDir?: string
   /** Whether host-local skill roots are watched for catalog changes. */
   watch?: boolean
   /** Whether Chokidar uses polling instead of native filesystem events. */
@@ -2800,7 +2804,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/skill/skill-filesystem/src/index.ts:49`](../packages/skill/skill-filesystem/src/index.ts)
+来源： [`packages/skill/skill-filesystem/src/index.ts:50`](../packages/skill/skill-filesystem/src/index.ts)
 
 <a id="deepseek-aidsh-skill-office"></a>
 

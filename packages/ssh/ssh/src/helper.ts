@@ -218,13 +218,17 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
         }, signal)
       return Buffer.from(bytes).toString('base64')
     }
-    if (method === 'fs.write' || method === 'fs.edit') {
+    if (method === 'fs.write' || method === 'fs.writeBytes' || method === 'fs.edit') {
       const input = z.object({
         target: targetSchema, content: z.string().optional(), edit: editSchema.optional(),
         expected: z.union([intentSchema, z.object({ version: z.string() }).strict()]).optional(), policy: policySchema,
       }).strict().parse(raw)
       const target = asTarget(input.target)
       const resolved = await policy(input.policy, signal)
+      if (method === 'fs.writeBytes') return ctx.fs.writeBytes(
+        target, Buffer.from(z.base64().parse(input.content), 'base64'),
+        input.expected === undefined ? undefined : intentSchema.parse(input.expected) as FsWriteIntent, signal, resolved,
+      )
       if (method === 'fs.write') return ctx.fs.writeText(
         target, z.string().parse(input.content),
         input.expected === undefined ? undefined : intentSchema.parse(input.expected) as FsWriteIntent, signal, resolved,
