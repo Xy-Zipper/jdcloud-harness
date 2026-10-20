@@ -18,6 +18,8 @@ overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # Keep micromark extensions and the mdast parser on one declaration version.
+  'micromark-util-types': '2.0.2'
 
 peerDependencyRules:
   allowedVersions:
