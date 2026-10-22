@@ -7,8 +7,21 @@ function isBuildFaceClient(value: unknown): boolean {
   throw new Error(`tsdown: --env.DSH_BUILD_FACE must be host or client, received ${String(value)}`)
 }
 
-// Exclude manifest-less directories left by packages that moved to new groups.
-const workspaceExcludes = ['!packages/fs/tool-present', '!packages/identity/browser-user-scope']
+/**
+ * Exclude manifest-less directories left by renamed or moved packages. A stale
+ * checkout can still carry them with only generated residue (lib, node_modules);
+ * once that residue is ignored — as .dockerignore does for image builds — the
+ * empty directory still matches the package glob, inherits this root config, and
+ * fails entry resolution as `@deepseek-ai/dsh-root`.
+ */
+const workspaceExcludes = [
+  '!packages/api/ontology-auth-controller',
+  '!packages/bundle/ontology-login',
+  '!packages/client/ui-ontology-login',
+  '!packages/fs/tool-present',
+  '!packages/identity/browser-user-scope',
+  '!packages/ontology/tool-ontology',
+]
 
 /**
  * The ordinary workspace build consumes JavaScript emitted by the Host

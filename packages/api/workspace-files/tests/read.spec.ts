@@ -272,3 +272,68 @@ describe('workspaceFiles.read — the file changing under its gate', () => {
     await expect(endpoint().read(harness.scope, 'notes.txt', {}, signal())).rejects.toMatchObject({ code: 'FS_IO_ERROR' })
   })
 })
+
+/** Install a fake account owner whose login owns every Session and holds the given account directories. */
+function provideAccountAccess(access: {
+  workspaceRoot: string
+  personalSkillDirectory: string
+  managedSkillDirectory: string
+}): void {
+  harness.ctx.provide('jdcloudAuthController', {
+    owns: () => Promise.resolve(true),
+    currentSkillAccess: () => Promise.resolve({ userId: 'user-1', administrator: false, ...access }),
+  } as never)
+}
+
+describe('workspaceFiles.read — account skill access', () => {
+  it('reads a personal account Skill from a Session whose workspace is below the account root', async () => {
+    const account = join(outside, 'account')
+    const personal = join(account, '.dsh', 'skills')
+    const skill = join(personal, 'ref-video-contract', 'SKILL.md')
+    await mkdir(join(personal, 'ref-video-contract'), { recursive: true })
+    await writeFile(skill, '# ref-video-contract\n', 'utf8')
+    provideAccountAccess({
+      workspaceRoot: account,
+      personalSkillDirectory: personal,
+      managedSkillDirectory: join(outside, 'shared', '.dsh', 'skills'),
+    })
+    await expect(endpoint().read(harness.scope, skill, {}, signal()))
+      .resolves.toMatchObject({ text: '# ref-video-contract' })
+  })
+
+  it('reads a managed Skill from the shared directory above the account root', async () => {
+    const managed = join(outside, 'shared', '.dsh', 'skills')
+    const skill = join(managed, 'common-skill', 'SKILL.md')
+    await mkdir(join(managed, 'common-skill'), { recursive: true })
+    await writeFile(skill, 'shared\n', 'utf8')
+    provideAccountAccess({
+      workspaceRoot: join(outside, 'account'),
+      personalSkillDirectory: join(outside, 'account', '.dsh', 'skills'),
+      managedSkillDirectory: managed,
+    })
+    await expect(endpoint().read(harness.scope, skill, {}, signal()))
+      .resolves.toMatchObject({ text: 'shared' })
+  })
+
+  it('still rejects an outside file that no account directory contains', async () => {
+    await writeFile(join(outside, 'secret.txt'), 'nope', 'utf8')
+    provideAccountAccess({
+      workspaceRoot: join(outside, 'account'),
+      personalSkillDirectory: join(outside, 'account', '.dsh', 'skills'),
+      managedSkillDirectory: join(outside, 'shared', '.dsh', 'skills'),
+    })
+    const failure = await failureOf(endpoint().read(harness.scope, join(outside, 'secret.txt'), {}, signal()))
+    expect(failure.code).toBe('workspace-file/outside-workspace')
+  })
+
+  it('keeps the workspace itself readable when account access is installed', async () => {
+    await writeFile(join(workspace, 'notes.txt'), 'hello', 'utf8')
+    provideAccountAccess({
+      workspaceRoot: join(outside, 'account'),
+      personalSkillDirectory: join(outside, 'account', '.dsh', 'skills'),
+      managedSkillDirectory: join(outside, 'shared', '.dsh', 'skills'),
+    })
+    await expect(endpoint().read(harness.scope, 'notes.txt', {}, signal()))
+      .resolves.toMatchObject({ text: 'hello' })
+  })
+})

@@ -6,7 +6,9 @@
  * File reads use the selected Session header as the base for relative paths.
  * Deployments without JDCloud ownership checks retain the composed filesystem
  * read policy; an authenticated JDCloud browser is confined to its owned
- * Session and Workspace roots. Directory listings and change observations
+ * Session and Workspace roots, plus the account directories of its own login
+ * (the account root and its Skill directories), which carry account-scoped
+ * Skills into Workspace Sessions. Directory listings and change observations
  * remain workspace-scoped. File-kind checks and configured read caps apply to
  * every preview; this service exposes no mutations.
  *
@@ -62,6 +64,12 @@ export interface WorkspaceFileScope {
 
 interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+  /** The login's own account directories, when the deployment offers account-scoped Skills. */
+  currentSkillAccess?(): Promise<{
+    readonly workspaceRoot: string
+    readonly personalSkillDirectory: string
+    readonly managedSkillDirectory: string
+  } | undefined>
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -229,7 +237,8 @@ export class WorkspaceFiles extends TypertRemoteService {
   /**
    * Read one page of lines from a UTF-8 file readable by the filesystem backend.
    * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+   * @param path - absolute path or path relative to the workspace root; outside files are allowed
+   * without account ownership, and from the login's account directories otherwise.
    * @param range - the line window; omitted fields take the page defaults.
    * @param signal - caller cancellation.
    * @returns the page, the file's version at the stat before it, and whether it reaches the last line.
@@ -287,7 +296,8 @@ export class WorkspaceFiles extends TypertRemoteService {
   /**
    * Report one regular file's identity, version, and size without its content.
    * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+   * @param path - absolute path or path relative to the workspace root; outside files are allowed
+   * without account ownership, and from the login's account directories otherwise.
    * @param signal - caller cancellation.
    * @returns the file's absolute path, current version, and byte size.
    */
@@ -446,6 +456,33 @@ export class WorkspaceFiles extends TypertRemoteService {
   }
 
   /**
+   * Confine a file preview to the Session workspace, or to the authenticated
+   * owner's own account directories. Account-scoped Skills live under the
+   * login's account root, which a Workspace Session's cwd does not contain, so
+   * the file gates also accept the account root and its Skill directories.
+   * Tenant isolation is unchanged: every allowance belongs to the current
+   * login, and directory scopes stay workspace-confined.
+   */
+  private async confineOwnedFile(
+    owner: ScopeOwner,
+    root: FsTarget,
+    workspaceRoot: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<FsTarget> {
+    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    if (this.ctx.fs.contains(root, target)) return target
+    const access = await owner.currentSkillAccess?.()
+    if (access !== undefined) {
+      for (const dir of [access.workspaceRoot, access.personalSkillDirectory, access.managedSkillDirectory]) {
+        const accountRoot = await this.ctx.fs.resolve(dir, { signal }).catch(() => undefined)
+        if (accountRoot !== undefined && this.ctx.fs.contains(accountRoot, target)) return target
+      }
+    }
+    throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside the workspace`, { path })
+  }
+
+  /**
    * All gates for a regular file, ending in the one stat that names its version
    * and size. The stat re-checks what `lstat` saw: the file may have gone or
    * changed kind in between.
@@ -462,7 +499,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     const owner = scopeOwner(this.ctx)
     const target = owner === undefined
       ? await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
-      : await this.confine(root, workspaceRoot, path, signal)
+      : await this.confineOwnedFile(owner, root, workspaceRoot, path, signal)
     const info = await this.ctx.fs.stat(target, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })

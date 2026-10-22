@@ -33,3 +33,7 @@ worktrees
 tmp
 .tmp
 *.log
+
+# Local image export and assistant workspace data; never build inputs.
+jdcloud-harness.tar
+.workbuddy-ai

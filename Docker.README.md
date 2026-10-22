@@ -24,9 +24,10 @@ docker pull caddy:2-alpine
 
 
 
+ docker load -i jdcloud-harness.tar
 
 
-
+docker compose up -d --no-build --force-recreate
 
 
 
