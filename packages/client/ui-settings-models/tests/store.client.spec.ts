@@ -277,7 +277,16 @@ describe('edge joins', () => {
     const store = new ModelsSettingsStore(
       ctx,
       settingsSchema,
-      new SettingsDescribeMirror(ctx, 'memory'),
+      {
+        getSnapshot: () => ({
+          status: 'idle' as const,
+          view: undefined,
+          error: 'settings are unavailable in this browser',
+        }),
+        subscribe: () => () => {},
+        ensure: () => Promise.resolve(),
+        acceptView: () => {},
+      },
     )
     await store.load()
     expect(store.store.getSnapshot()).toMatchObject({

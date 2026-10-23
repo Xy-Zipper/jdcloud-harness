@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-jdcloud-login/README.md
-README.md: 279b4577a3029ca4c83a1abaed38bf64112f1beb
-README.zh.md: f55d7a8edf629eea872a76210971f392712e4308
+/:
+  en: 9cbb9f45c0f722df
+  zh: 2dfbbbdde5bda897
+/jdcloud-login-ui:
+  en: 2179aaba76561024
+  zh: 518d77268e665774
+/jdcloud-login-ui/summary:
+  en: 865e9bddd4d71fb0
+  zh: dd5d3cd5c839abcd
+/jdcloud-login-ui/table-of-contents:
+  en: 2e89ddb1e73218cb
+  zh: 5b9aa0e046408356
+/jdcloud-login-ui/use-this-package:
+  en: 4f4fd9a7170cb28d
+  zh: 3bbef71b8f605e5e
+/jdcloud-login-ui/model-experience:
+  en: bc8ce3c3198b8bbd
+  zh: aab5153f9debfce4
+/jdcloud-login-ui/model-experience/kv-cache-effect:
+  en: 4f0eadf94828e66e
+  zh: 4f8a6ec170ebbfb6
+/jdcloud-login-ui/known-limitations-and-deferred-work:
+  en: 8989e946f657858e
+  zh: e1d3c068dd7d6f07
+/jdcloud-login-ui/known-limitations-and-deferred-work/dev-note:
+  en: f46b1161841b7a51
+  zh: 3e662278dec5d470

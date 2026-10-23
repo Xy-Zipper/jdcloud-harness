@@ -1,11 +1,14 @@
+import { queryObjects } from 'node:v8'
 import { RemoteError, typertOwnedValue } from '@deepseek-ai/dsh-typert-protocol'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Fiber } from '@deepseek-ai/cordis'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { z } from 'zod'
 import { RemoteMock } from '@deepseek-ai/dsh-remote-mock'
+import { openConnectionWebSocket } from '@deepseek-ai/dsh-client-connection/src/client/socket.ts'
 import {
   apply as applyConnection,
+  installConnection,
   type ClientTransportHooks,
   type ConnectionGeneration,
   type ConnectionGenerationSource,
@@ -347,10 +350,16 @@ async function benchFiber(
   const generation = new GenerationHarness()
   const start = vi.fn<ConnectionHandle['start']>(() => ({ stop: () => {} }))
   ctx.provide('connection', {
+    interactions: 'answer',
+    openWebSocket: openConnectionWebSocket,
+    isLoopback: true,
+    generation: { getSnapshot: () => undefined, subscribe: () => () => {} },
+    state: { getSnapshot: () => undefined, subscribe: () => () => {} },
+    reconnect: () => {},
     rpc,
     registerGenerationSource: generation.register,
     start,
-  } as unknown as ConnectionHandle)
+  } satisfies ConnectionHandle)
   const client = ctx.plugin({ inject, apply })
   await client
   return { ctx, client, generation, start }
@@ -450,10 +459,16 @@ async function loaderReadinessBench(
   const start = vi.fn<ConnectionHandle['start']>(() => ({ stop }))
   const call = vi.fn<ConnectionHandle['rpc']['call']>()
   ctx.provide('connection', {
+    interactions: 'answer',
+    openWebSocket: openConnectionWebSocket,
+    isLoopback: true,
+    generation: { getSnapshot: () => undefined, subscribe: () => () => {} },
+    state: { getSnapshot: () => undefined, subscribe: () => () => {} },
+    reconnect: () => {},
     rpc: carrier === 'web' ? { call } : { call, open: () => unexpectedInProcessStream() },
     registerGenerationSource: generation.register,
     start,
-  } as unknown as ConnectionHandle)
+  } satisfies ConnectionHandle)
   ctx.provide('loader', { await: () => readiness })
   const client = ctx.plugin({ inject, apply })
   await client
@@ -586,16 +601,20 @@ describe('Client Remote transport readiness', () => {
     await ctx.plugin(TypertRegistry)
     const generation = new GenerationHarness()
     const live: { snapshot: ConnectionGeneration | undefined } = { snapshot: undefined }
-    const handle = {
+    const handle: ConnectionHandle = {
+      interactions: 'answer',
+      openWebSocket: openConnectionWebSocket,
       isLoopback: true,
       generation: { getSnapshot: () => live.snapshot, subscribe: () => () => {} },
+      state: { getSnapshot: () => undefined, subscribe: () => () => {} },
+      reconnect: () => {},
       rpc: {
         call: vi.fn<ConnectionHandle['rpc']['call']>(),
         open: () => unexpectedInProcessStream(),
       },
       registerGenerationSource: generation.register,
       start: () => ({ stop: () => {} }),
-    } as unknown as ConnectionHandle
+    }
     const withdraw = ctx.provide('connection', handle)
     const client = ctx.plugin({ inject, apply })
     await client
@@ -2804,17 +2823,162 @@ describe('Client Typert API', () => {
 })
 
 describe('Remote stream client carrier lifecycle', () => {
-  it('authorizes each physical WebSocket URL before connecting', async () => {
-    await withFakeWebSocket('http://harness.example', async () => {
-      const authorize = vi.fn(async (url: string) => `${url}?ticket=one-shot`)
-      const client = new RemoteStreamMuxClient(authorize)
+  it('keeps answering streams pending while event cleanup delays Connection recovery', async () => {
+    await withFakeWebSocket('https://harness.example/', async () => {
+      const ctx = new Context()
+      installConnection(ctx, { interactions: 'answer', location: { hostname: 'harness.example' } })
+      const connection = ctx.get('connection') as ConnectionHandle
+      const mux = new RemoteStreamMuxClient(undefined, true)
+      const cleanup = Promise.withResolvers<undefined>()
+      const carrierFailed = vi.fn()
+      let openings = 0
+      const sibling = new RemoteStream(connection, {
+        name: 'fixture follow',
+        open: (signal) => {
+          openings++
+          return mux.open('fixture/follow', {}, signal)
+        },
+        ended: () => new RemoteStreamCarrierError('follow ended'),
+        carrierFailed,
+      })
+      mux.start()
+      const unregister = connection.registerGenerationSource(async (signal, ready) => {
+        try {
+          for await (const _value of mux.open('$events', { args: {} }, signal)) {
+            ready({ home: '/home/fixture' })
+          }
+        } finally {
+          // An in-flight forwarded answer may settle after the event stream fails.
+          await cleanup.promise
+        }
+      })
+      const loop = connection.start({ onReconnectRequested: () => { mux.reconnect() } }, { backoffBaseMs: 1 })
+      const iterator = sibling[Symbol.asyncIterator]()
       try {
-        client.start()
-        await vi.waitFor(() => { expect(FakeWebSocket.sockets).toHaveLength(1) })
-        expect(authorize).toHaveBeenCalledWith('ws://harness.example/api/remote.mux')
-        expect(FakeWebSocket.sockets[0]?.url).toBe('ws://harness.example/api/remote.mux?ticket=one-shot')
+        const firstSocket = FakeWebSocket.sockets[0]!
+        await vi.waitFor(() => { expect(firstSocket.sent).toHaveLength(1) })
+        const eventOpen = parseRemoteStreamClientMessage(firstSocket.sent[0]!)
+        if (eventOpen.type !== 'open') throw new Error('fixture expected event open')
+        firstSocket.receive({ type: 'item', streamId: eventOpen.streamId, value: 'ready' })
+        await vi.waitFor(() => { expect(connection.generation.getSnapshot()).toBeDefined() })
+        const opening = iterator.next()
+        await vi.waitFor(() => { expect(firstSocket.sent).toHaveLength(2) })
+        const firstFollow = parseRemoteStreamClientMessage(firstSocket.sent[1]!)
+        if (firstFollow.type !== 'open') throw new Error('fixture expected follow open')
+        firstSocket.receive({ type: 'item', streamId: firstFollow.streamId, value: 'initial' })
+        const initial = await opening
+        if (initial.done) throw new Error('fixture follow ended before opening')
+        initial.value.accept()
+        const continued = iterator.next()
+        void continued.catch(() => undefined)
+        firstSocket.drop()
+        await vi.waitFor(() => { expect(openings).toBe(2) })
+        // Settle the second open's promise reactions while event cleanup is still held.
+        await new Promise<void>((resolve) => { setImmediate(resolve) })
+        expect(connection.generation.getSnapshot()).toBeDefined()
+        expect(carrierFailed).toHaveBeenCalledTimes(1)
+        expect(FakeWebSocket.sockets).toHaveLength(1)
+        const cancelled = new AbortController()
+        const awaiting = mux.open('fixture/abandoned', {}, cancelled.signal)[Symbol.asyncIterator]().next()
+        const reason = new Error('caller cancelled while offline')
+        cancelled.abort(reason)
+        await expect(awaiting).rejects.toBe(reason)
+
+        cleanup.resolve(undefined)
+        await vi.waitFor(() => { expect(FakeWebSocket.sockets).toHaveLength(2) })
+        const replacement = FakeWebSocket.sockets[1]!
+        await vi.waitFor(() => { expect(replacement.sent).toHaveLength(2) })
+        const replacementEvents = replacement.sent.map(parseRemoteStreamClientMessage)
+        for (const frame of replacementEvents) {
+          if (frame.type !== 'open') throw new Error('fixture expected replacement open')
+          replacement.receive({
+            type: 'item', streamId: frame.streamId,
+            value: frame.endpoint === '$events' ? 'ready' : 'replacement',
+          })
+        }
+        await expect(continued).resolves.toMatchObject({ value: { generation: 2, value: 'replacement' } })
+      } finally {
+        cleanup.resolve(undefined)
+        loop.stop()
+        unregister()
+        await sibling.dispose()
+        await mux.close()
+        await ctx.fiber.dispose()
+      }
+    })
+  })
+
+  it('does not pull another uplink item when sending ends the stream', async () => {
+    await withFakeWebSocket('https://harness.example', async () => {
+      const client = new RemoteStreamMuxClient()
+      client.start()
+      const socket = FakeWebSocket.sockets[0]!
+      const send = socket.send.bind(socket)
+      const sent = vi.spyOn(socket, 'send').mockImplementation((text) => {
+        send(text)
+        const frame = parseRemoteStreamClientMessage(text)
+        if (frame.type === 'item') socket.receive({ type: 'end', streamId: frame.streamId })
+      })
+      const next = vi.fn(async (): Promise<IteratorResult<string>> => ({ done: false, value: 'item' }))
+      const returned = vi.fn(async (): Promise<IteratorResult<string>> => ({ done: true, value: undefined }))
+      try {
+        const iterator = client.open('probe/attach', {}, new AbortController().signal, {
+          [Symbol.asyncIterator]: () => ({ next, return: returned }),
+        })[Symbol.asyncIterator]()
+        await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+        expect(next).toHaveBeenCalledOnce()
+        expect(returned).toHaveBeenCalledOnce()
       } finally {
         await client.close()
+        sent.mockRestore()
+      }
+    })
+  })
+
+  it('releases sent uplink read results while the stream stays open', async () => {
+    await withFakeWebSocket('https://harness.example', async () => {
+      class ReadResult implements IteratorYieldResult<string> {
+        readonly done = false
+        readonly value = 'item'
+      }
+      const blocked = Promise.withResolvers<undefined>()
+      const lastRead = Promise.withResolvers<IteratorResult<string>>()
+      let reads = 0
+      const uplink: AsyncIterable<string> = {
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            if (reads++ < 256) return Promise.resolve(new ReadResult())
+            blocked.resolve(undefined)
+            return lastRead.promise
+          },
+          return: async () => {
+            lastRead.resolve({ done: true, value: undefined })
+            return { done: true, value: undefined }
+          },
+        }),
+      }
+      const client = new RemoteStreamMuxClient()
+      client.start()
+      const iterator = client.open('probe/attach', {}, new AbortController().signal, uplink)[Symbol.asyncIterator]()
+      const first = iterator.next()
+      // Closing the carrier during failed assertions can reject this pending read.
+      void first.catch(() => undefined)
+      try {
+        await blocked.promise
+        const socket = FakeWebSocket.sockets[0]!
+        expect(socket.sent).toHaveLength(257)
+        const opened = parseRemoteStreamClientMessage(socket.sent[0]!)
+        if (opened.type !== 'open') throw new Error('fixture expected an open frame')
+        socket.receive({ type: 'item', streamId: opened.streamId, value: 'ready' })
+        await expect(first).resolves.toEqual({ done: false, value: 'ready' })
+        // A full GC runs while the uplink pump is still waiting for its next item.
+        expect(queryObjects(ReadResult, { format: 'count' })).toBeLessThanOrEqual(2)
+        socket.receive({ type: 'end', streamId: opened.streamId })
+        await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+      } finally {
+        await client.close()
+        await first.catch(() => undefined)
+        await iterator.return?.(undefined)
       }
     })
   })
@@ -2919,6 +3083,33 @@ describe('Remote stream client carrier lifecycle', () => {
       racing.drop()
       await stopping.close()
       expect(FakeWebSocket.sockets).toHaveLength(4)
+    })
+  })
+
+  it('rejects a stream waiting on an established socket when its close completes', async () => {
+    await withFakeWebSocket('https://harness.example', async () => {
+      FakeWebSocket.autoOpen = false
+      FakeWebSocket.dispatchClose = false
+      const client = new RemoteStreamMuxClient()
+      client.start()
+      const socket = FakeWebSocket.sockets[0]!
+      socket.open()
+      socket.close()
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSING)
+      const pending = client.open('feed/follow', {}, new AbortController().signal)
+        [Symbol.asyncIterator]().next()
+      const rejected = expect(pending).rejects.toMatchObject({
+        name: 'RemoteStreamCarrierError', message: 'api gateway: Remote stream WebSocket closed',
+      })
+      try {
+        socket.drop()
+        await rejected
+        expect(socket.sent).toEqual([])
+        expect(FakeWebSocket.sockets).toHaveLength(1)
+      } finally {
+        socket.drop()
+        await client.close()
+      }
     })
   })
 
@@ -3028,6 +3219,21 @@ describe('Remote stream client carrier lifecycle', () => {
     })
   })
 
+  it('rejects an answering stream when its initial socket never opens', async () => {
+    await withFakeWebSocket('http://harness.example/', async () => {
+      FakeWebSocket.autoOpen = false
+      const client = new RemoteStreamMuxClient(undefined, true)
+      client.start()
+      try {
+        const pending = client.open('$events', {}, new AbortController().signal)[Symbol.asyncIterator]().next()
+        FakeWebSocket.sockets[0]!.drop()
+        await expect(pending).rejects.toThrow('Remote stream WebSocket closed before opening')
+      } finally {
+        await client.close()
+      }
+    })
+  })
+
   it('fails waiters with one socket attempt and lets the owner start the next attempt', async () => {
     await withFakeWebSocket('http://harness.example/', async () => {
       FakeWebSocket.autoOpen = false
@@ -3133,10 +3339,12 @@ describe('Remote stream client carrier lifecycle', () => {
         [Symbol.asyncIterator]().next()
       await vi.waitFor(() => { expect(FakeWebSocket.sockets[1]?.sent).toHaveLength(1) })
       const disposedSocket = FakeWebSocket.sockets[1]!
-      await disposedClient.close()
+      const closing = disposedClient.close()
+      const rejected = expect(disposed).rejects.toThrow('Remote stream client disposed')
       disposedSocket.receive({ type: 'end', streamId: 'stale' })
       disposedSocket.drop()
-      await expect(disposed).rejects.toThrow('Remote stream client disposed')
+      await closing
+      await rejected
     })
   })
 })

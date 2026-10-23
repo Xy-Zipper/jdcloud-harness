@@ -9,10 +9,15 @@ import {
   type ConnectionState,
 } from './connection.ts'
 import { createWebConnectionRpc, type RpcFetch, type RpcStreamOpen } from './rpc.ts'
-import { createBrowserBearerSession } from './browser-session.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
 import { resolveConnectionConfig } from '../recovery-config.ts'
+import type { ConnectionInteractions } from '../connect-protocol.ts'
+import { openConnectionWebSocket, type ConnectionWebSocket, type ConnectionWebSocketFactory } from './socket.ts'
+import { createBrowserBearerSession } from './browser-session.ts'
+
+export type { ConnectionInteractions } from '../connect-protocol.ts'
+export type { ConnectionWebSocket, ConnectionWebSocketFactory } from './socket.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -88,6 +93,10 @@ export interface ClientTransportHooks {
   fetch?: RpcFetch
   /** Worker-local Gateway stream carrier; absent when the page uses the Gateway WebSocket or `rpc` is present. */
   openStream?: RpcStreamOpen
+  /** Add transport authentication to one WebSocket URL immediately before opening it. */
+  authorizeWebSocketUrl?(url: string): string | Promise<string>
+  /** Current Authorization header for a background carrier that cannot use this realm's Fetch. */
+  authorizationHeader?(): Promise<string | undefined>
   /**
    * Bundle transport for the module system, present when the carrier also owns
    * bundle bytes (the worker tunnel). Absent in the served web app, whose
@@ -97,18 +106,16 @@ export interface ClientTransportHooks {
   /**
    * The transport owner declares the page owns the Host outright: the Host
    * runs inside a worker this page spawned, so no other party can reach it and
-   * the loopback stand-in for "the operator's own machine" is vacuous.
+   * the loopback stand-in for "the owner's own machine" is vacuous.
    * `ctx.connection.isLoopback` then reports the privileged surface reachable
    * regardless of the page authority. Only a shell that assembles its own
    * transport can set this; served pages never carry the global at all.
    */
   ownsHost?: boolean
-  /** HTTP origin of a shell-owned Host when its WebSocket uses a different page origin. */
+  /** Authenticated WebSocket factory; omission uses the browser API and its cookie jar. */
+  createWebSocket?: ConnectionWebSocketFactory
+  /** Host base URL for desktop or Node sockets; omission uses the document base. */
   streamBaseUrl?: string
-  /** Add transport authentication to one WebSocket URL immediately before opening it. */
-  authorizeWebSocketUrl?(url: string): string | Promise<string>
-  /** Current Authorization header for a background carrier that cannot use this realm's Fetch. */
-  authorizationHeader?(): Promise<string | undefined>
 }
 
 /** Page global carrying {@link ClientTransportHooks}; absent in the served web app. */
@@ -125,6 +132,8 @@ export interface ConnectionLocation {
 
 /** Instance-local inputs for installing a Connection service. */
 export interface ConnectionInstallOptions {
+  /** Forwarded-event participation; omission selects answer for a page and none otherwise. */
+  readonly interactions?: ConnectionInteractions
   /** Explicit physical carrier; omit for the browser HTTP + WebSocket carrier. */
   readonly transport?: ClientTransportHooks
   /** Reconnect timing overrides; omitted fields use controller defaults. */
@@ -138,6 +147,8 @@ export interface ConnectionInstallOptions {
  * and reset callbacks; Connection stays independent of downstream domain state.
  */
 export interface ConnectionHandle {
+  /** Forwarded-event participation selected at installation. */
+  readonly interactions: ConnectionInteractions
   /**
    * Whether the privileged surface is reachable: the page authority is
    * loopback, the transport declares the page owns the Host
@@ -150,12 +161,14 @@ export interface ConnectionHandle {
   readonly state: ConnectionStateSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
-  /** Fetch one Host route through the selected browser authentication carrier. */
-  readonly fetch: RpcFetch
-  /** Current Authorization header for a background carrier, or undefined for Cookie transports. */
-  authorizationHeader(): Promise<string | undefined>
-  /** Add transport authentication to one WebSocket URL. */
-  authorizeWebSocketUrl(url: string): string | Promise<string>
+  /** Current Authorization header for background carriers outside this realm's Fetch implementation. */
+  readonly authorizationHeader?: () => Promise<string | undefined>
+  /**
+   * Create a socket on the selected carrier; the channel owns framing and closing.
+   * @param path - absolute logical channel path, resolved beneath the Host mount.
+   * @returns a newly connecting socket using the installed authentication factory.
+   */
+  openWebSocket(path: string): ConnectionWebSocket
   /** Reset retry progression and replace the current attempt immediately. */
   reconnect(): void
   /**
@@ -212,14 +225,14 @@ function watchBrowserNetwork(controller: ConnectionController): () => void {
 /**
  * Install one Context-owned Connection service from explicit composition inputs.
  * @param ctx - client Cordis context.
- * @param options - physical carrier, reconnect timing, and page location.
+ * @param options - interaction participation, physical carrier, reconnect timing, and page location.
  */
 export function installConnection(ctx: Context, options: ConnectionInstallOptions = {}): void {
   const pageLocation = options.location
   const transport = options.transport
   const recovery = options.recovery ?? {}
-  const hostFetch: RpcFetch = transport?.fetch ?? ((input, init) => globalThis.fetch(input, init))
-  const rpc = transport?.rpc ?? createWebConnectionRpc(hostFetch, transport?.openStream)
+  const interactions = options.interactions ?? (pageLocation === undefined ? 'none' : 'answer')
+  const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
   let generationSource: ConnectionGenerationSource | undefined
   let owner: ConnectionOwner | undefined
   let generationId = 0
@@ -258,6 +271,11 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
     publishState(undefined)
   }
   const handle: ConnectionHandle = {
+    interactions,
+    ...(transport?.authorizationHeader === undefined ? {} : { authorizationHeader: transport.authorizationHeader }),
+    openWebSocket: path => openConnectionWebSocket(
+      path, transport?.createWebSocket, transport?.streamBaseUrl, transport?.authorizeWebSocketUrl?.bind(transport),
+    ),
     isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     generation: {
       getSnapshot: () => generation,
@@ -274,9 +292,6 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
       },
     },
     rpc,
-    fetch: hostFetch,
-    authorizationHeader: () => transport?.authorizationHeader?.() ?? Promise.resolve(undefined),
-    authorizeWebSocketUrl: url => transport?.authorizeWebSocketUrl?.(url) ?? url,
     reconnect() {
       owner?.controller.reconnect()
     },

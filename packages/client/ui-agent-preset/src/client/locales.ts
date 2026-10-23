@@ -12,6 +12,7 @@ export type AgentPresetSettingsKey =
   | 'nav'
   | 'sectionIntro'
   | 'setDefault'
+  | 'view'
   | 'presetStandardName'
   | 'presetStandardDescription'
   | 'presetPtcName'
@@ -21,17 +22,17 @@ export type AgentPresetSettingsKey =
   | 'presetCordisName'
   | 'presetCordisDescription'
   | 'inUse'
-  | 'selectionOffDefault'
   | 'noDescription'
   | 'brokenBadge'
   | 'switchRefused'
+  | 'standardUnavailable'
   | 'close'
   | 'creatorDraft'
-  | 'showPicker'
-  | 'showPickerBeta'
-  | 'showPickerDescription'
-  | 'enablePickerToSetDefault'
-  | 'enablePickerToCreate'
+  | 'createPlugin'
+  | 'createPluginDescription'
+  | 'createPluginChecking'
+  | 'createPluginUnavailable'
+  | 'createPluginMissing'
 
 /** English copy. */
 export const en: Record<AgentPresetSettingsKey, string> = {
@@ -44,6 +45,7 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   nav: 'Agent presets',
 
   setDefault: 'Set as new task default',
+  view: 'View configuration',
 
   presetStandardName: 'Standard mode',
   presetStandardDescription:
@@ -53,29 +55,28 @@ export const en: Record<AgentPresetSettingsKey, string> = {
     'Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.',
   presetMinimalName: 'Minimal mode',
   presetMinimalDescription:
-    'The agent works using only a terminal tool. Useful for testing and comparing its basic performance.',
+    'The agent uses a terminal and image reading, with context compaction. Useful for testing and comparing its basic performance.',
   presetCordisName: 'Creator mode',
   presetCordisDescription:
     'Customize DSH through conversation. Let the agent write plugins that add features or UI, or combine tools and prompts to create your own mode.',
 
   inUse: 'New task default',
-  selectionOffDefault: 'Application default',
 
   noDescription: 'No description.',
   brokenBadge: 'Failed to load',
 
   switchRefused: 'Could not switch to {name}: {reason}',
+  standardUnavailable: 'Standard mode is unavailable. Restore it or choose another available mode.',
 
   close: 'Close',
 
   creatorDraft: 'Let the agent help me create a preset',
+  createPlugin: 'Let the agent create a plugin',
+  createPluginDescription: 'Enter Creator mode and make your own DSH plugin',
+  createPluginChecking: 'Checking whether Creator mode is available',
+  createPluginUnavailable: 'Temporarily unavailable. Reopen this menu to retry',
+  createPluginMissing: 'Creator mode is not included in this configuration',
 
-  showPicker: 'Choose a mode for new tasks',
-  showPickerBeta: 'Beta',
-  showPickerDescription:
-    'When enabled, each new task can choose a mode and the default is set here. When disabled, new tasks use the application default preset. Existing tasks are unaffected.',
-  enablePickerToSetDefault: 'Turn on mode selection for new tasks to choose a default',
-  enablePickerToCreate: 'Turn on mode selection for new tasks to start Creator mode',
 }
 
 /** Simplified Chinese copy. */
@@ -89,33 +90,34 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
   nav: 'Agent 预设',
 
   setDefault: '设为新任务默认',
+  view: '查看配置',
 
   presetStandardName: '标准模式',
   presetStandardDescription: '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。',
   presetPtcName: 'PTC 模式',
   presetPtcDescription: '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。',
   presetMinimalName: '极简模式',
-  presetMinimalDescription: 'Agent 仅使用终端工具完成任务，适合测试和对比其基础表现。',
+  presetMinimalDescription: 'Agent 使用终端和图片读取工具，并支持上下文压缩，适合测试和对比其基础表现。',
   presetCordisName: '创造模式',
   presetCordisDescription: '用对话定制 DSH：让 Agent 编写插件，添加新功能或界面；也能组合工具和提示词，创建自己的模式。',
 
   inUse: '新任务默认',
-  selectionOffDefault: '应用默认',
 
   noDescription: '暂无描述。',
   brokenBadge: '加载失败',
 
   switchRefused: '无法切换到「{name}」：{reason}',
+  standardUnavailable: '标准模式不可用，请恢复该模式或选择其他可用模式。',
 
   close: '关闭',
 
   creatorDraft: '让 Agent 帮我创建预设模式',
+  createPlugin: '让 Agent 创建插件',
+  createPluginDescription: '进入创造模式，制作属于你的 DSH 插件',
+  createPluginChecking: '正在确认创造模式是否可用',
+  createPluginUnavailable: '暂时不可用，请重新打开菜单重试',
+  createPluginMissing: '当前配置未提供创造模式',
 
-  showPicker: '新任务可选择模式',
-  showPickerBeta: 'Beta',
-  showPickerDescription: '开启后，可为每个新任务选择模式，并在这里设置默认值。关闭后，新任务使用应用配置的默认预设。已有任务不受影响。',
-  enablePickerToSetDefault: '请先开启新任务模式选择，再设置默认值',
-  enablePickerToCreate: '请先开启新任务模式选择，再启动创造模式',
 }
 
 // The resolution itself is the shared fold in `dsh-agent-preset-registry/display`,

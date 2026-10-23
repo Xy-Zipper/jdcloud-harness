@@ -18,7 +18,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
+import type { JobId, JobOutcome, JobToolCall } from '@deepseek-ai/dsh-jobs'
 import type { Session, SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type {
@@ -151,28 +151,19 @@ function createWorkflowRecorder(ctx: Context): WorkflowRecorder {
 }
 
 /**
- * The script-authoring contract, embedded in the tool description. This IS the
- * model-facing spec: the meta block, the hooks and their exact semantics, and
- * the supported schema subset. The closing execution sentence follows the
- * composition: only a background-enabled tool describes `run_in_background`.
+ * The script-authoring contract, embedded in the tool description: the hooks,
+ * their exact semantics, and the supported schema subset. Parameter-level
+ * rules live in the parameter descriptions.
  */
 const DESCRIPTION = `Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.
 
-The workflow's identity rides the \`meta\` parameter as JSON: required \`name\` (short kebab-case) and \`description\` strings, optional \`whenToUse\` string and \`phases\` array (\`{title, detail?, provider?, model?}\`). The \`script\` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO \`export const meta\` statement — meta is a parameter, not code), running with top-level await; end with \`return <value>\` — the value must be JSON-serializable and is this tool's result.
-
 Script-body hooks:
-- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides (either may be provided alone). Anything else (\`effort\`/\`isolation\`/\`agentType\`) is rejected loudly.
-- \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. An ordinary stage throw drops that ITEM to \`null\` and skips its remaining stages.
+- \`agent(prompt, opts?): Promise<any>\` — run one subagent to completion. Without \`opts.schema\` it resolves to the child's final text; with \`opts.schema\` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf) it resolves to the validated object. Resolves \`null\` when the child fails (filter with \`.filter(Boolean)\`). Other opts: \`label\` (display), \`phase\` (progress group), and independent \`provider\`/\`model\` LLM target overrides.
+- \`pipeline(items, ...stages): Promise<any[]>\` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives \`(prev, item, index)\`. A stage throw drops that ITEM to \`null\` and skips its remaining stages.
 - \`parallel(thunks): Promise<any[]>\` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to \`null\`.
 - \`phase(title)\` — start a progress phase; \`log(message)\` — narrate progress; \`args\` — the tool call's \`args\` input, verbatim.
 
-Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item \`null\`.
-
-Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them.`
-
-const FOREGROUND_ONLY_CLOSING = ' The run executes in the foreground: this call returns when the whole script finishes.'
-
-const BACKGROUND_CLOSING = ' The run executes in the foreground by default: this call returns when the whole script finishes. Set `run_in_background: true` for a long run: the call returns a job id immediately, the run keeps orchestrating in the background, and its return value arrives with the job\'s completion notice (check on it with `job_output`, stop it with `job_kill`).'
+Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) end the whole script instead of producing \`null\`. The script has no filesystem, network, timer, or Node.js APIs; the agents do the work.`
 
 type WorkflowCallArgs = {
   script: string
@@ -264,6 +255,7 @@ function renderResult(name: string, agentsStarted: number, value: JsonValue, max
  * @param ctx - plugin context (engine, optional jobs registry, logger).
  * @param args - the validated tool call.
  * @param parent - the calling agent; owns the job.
+ * @param toolCall - creating invocation, including its root call.
  * @param recordsRun - whether this top-level call records durable run events.
  * @param deps - the tool's recorder/mirror taps and the render cap.
  * @returns the background result for the tool's output schema.
@@ -272,6 +264,7 @@ function startBackgroundRun(
   ctx: Context,
   args: WorkflowCallArgs,
   parent: Agent,
+  toolCall: JobToolCall,
   recordsRun: boolean,
   deps: { recorder: WorkflowRecorder; mirror: WorkflowRecordMirror; maxResultChars: number },
 ): { kind: 'background'; jobId: JobId; runId: WorkflowRunId } {
@@ -284,6 +277,7 @@ function startBackgroundRun(
     kind: 'workflow',
     label: args.meta.name,
     owner: parent.id,
+    toolCall,
     run: (job) => {
       // A synchronous engine rejection (META_INVALID/SCRIPT_PARSE) propagates
       // out of the starter, so the registry registers nothing and the model
@@ -336,18 +330,19 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.tools.register(defineTool({
     name: toolName,
-    description: DESCRIPTION + (enableRunInBackground ? BACKGROUND_CLOSING : FOREGROUND_ONLY_CLOSING),
+    description: DESCRIPTION,
     parameters: {
       script: {
         type: 'string',
         required: true,
-        description: 'The plain-JS workflow script body (top-level await allowed; NO `export const meta` statement; end with `return <json-value>`).',
+        description: 'The plain JavaScript body, not TypeScript and without an `export const meta` statement; top-level await is allowed. '
+          + 'End with `return <value>`; the JSON-serializable value is this tool\'s result.',
       },
       meta: {
         type: 'object',
         additionalProperties: true,
         required: true,
-        description: 'The workflow identity block (plain JSON — never code).',
+        description: 'The workflow identity as plain JSON, not code.',
         properties: {
           name: { type: 'string', required: true, description: 'Short kebab-case workflow name.' },
           description: { type: 'string', required: true, description: 'One-line description of what the workflow does.' },
@@ -428,7 +423,7 @@ export function apply(ctx: Context, config: Config): void {
         // jobs.start synchronously from there. The shell tools await a
         // sandbox escalation approval before registering, which is the window
         // their check covers.
-        return startBackgroundRun(ctx, args, parent, exec.parent === undefined, {
+        return startBackgroundRun(ctx, args, parent, { callId: exec.callId, rootCallId: exec.rootCallId }, exec.parent === undefined, {
           recorder,
           mirror,
           maxResultChars,

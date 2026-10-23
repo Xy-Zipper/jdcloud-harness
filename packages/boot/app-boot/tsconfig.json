@@ -21,9 +21,6 @@
       "path": "../../../vendor/group"
     },
     {
-      "path": "../../core/system-prompt"
-    },
-    {
       "path": "../../util/launch-environment"
     },
     {
@@ -31,6 +28,9 @@
     },
     {
       "path": "../../util/package-manifest"
+    },
+    {
+      "path": "../../util/atomic-write"
     }
   ]
 }

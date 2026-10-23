@@ -3,7 +3,7 @@
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { Deque } from '@deepseek-ai/dsh-deque'
-import { RemoteError, remoteErrorOf, type PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+import { RemoteError, remoteErrorOf, type PeerScope, type RemoteUplinkWindow } from '@deepseek-ai/dsh-typert-protocol'
 import WebSocket, { WebSocketServer, type RawData } from 'ws'
 import {
   parseRemoteStreamClientMessage,
@@ -16,7 +16,7 @@ import {
  * Open one validated Remote stream for a decoded wire request on behalf of one
  * Peer. `uplink` carries the Client's items; `control` cancels the logical
  * stream, and aborting it with a Remote failure as the reason delivers that
- * failure to the Client.
+ * failure to the Client. `window` describes this stream's complete-frame inbox budget.
  */
 export type RemoteStreamOpener = (
   endpoint: string,
@@ -24,6 +24,7 @@ export type RemoteStreamOpener = (
   uplink: AsyncIterable<unknown>,
   peer: PeerScope,
   control: AbortController,
+  window: RemoteUplinkWindow,
 ) => Promise<AsyncIterable<unknown>>
 
 /** The opener one socket uses: its Peer is fixed at upgrade time. */
@@ -32,6 +33,7 @@ type BoundStreamOpener = (
   payload: unknown,
   uplink: AsyncIterable<unknown>,
   control: AbortController,
+  window: RemoteUplinkWindow,
 ) => Promise<AsyncIterable<unknown>>
 
 /** Convert an invocation or carrier failure to a stable wire value. */
@@ -70,7 +72,8 @@ export class RemoteStreamMuxServer {
    * @param socket - carrier socket transferred to the WebSocket server.
    * @param head - bytes already read after the HTTP upgrade headers.
    * @param peer - Peer the upgrade was admitted as.
-   * @param run - request-scoped wrapper retained for each logical stream.
+   * @param run - wraps every logical stream's execution in the request context
+   *   that accepted the socket; identity-free deployments keep the operation.
    */
   handleUpgrade(
     req: IncomingMessage,
@@ -82,18 +85,19 @@ export class RemoteStreamMuxServer {
     this.server.handleUpgrade(req, socket, head, (websocket) => {
       const release = bindPeer(websocket, peer)
       if (release === undefined) return
-      this.missedHeartbeats.set(websocket, 0)
-      websocket.on('pong', () => { this.missedHeartbeats.set(websocket, 0) })
+      const alive = (): void => { this.missedHeartbeats.set(websocket, 0) }
+      alive()
       this.startHeartbeat()
-      const bound: BoundStreamOpener = (endpoint, payload, uplink, control) =>
-        this.open(endpoint, payload, uplink, peer, control)
-      const connection = new RemoteStreamMuxConnection(websocket, bound, this.failure, this.streamInboxBytes, run)
-      const done = connection.run()
-      this.connections.add(done)
-      void done.then(() => {
-        this.connections.delete(done)
-        void release()
+      const bound: BoundStreamOpener = (endpoint, payload, uplink, control, window) =>
+        this.open(endpoint, payload, uplink, peer, control, window)
+      const connection = new RemoteStreamMuxConnection(websocket, bound, this.failure, this.streamInboxBytes, alive, run)
+      const done = connection.run().catch((error: unknown) => {
+        console.error('[api-gateway] Remote stream connection failed:', error)
+      }).then(async () => { await release() }).catch((error: unknown) => {
+        console.error('[api-gateway] Remote stream scope cleanup failed:', error)
       })
+      this.connections.add(done)
+      void done.then(() => { this.connections.delete(done) })
     })
   }
 
@@ -151,14 +155,24 @@ class RemoteStreamMuxConnection {
     private readonly open: BoundStreamOpener,
     private readonly failure: RemoteStreamFailureMapper,
     private readonly streamInboxBytes: number,
-    private readonly requestRunner: RemoteStreamRequestRunner,
+    private readonly alive: () => void,
+    private readonly requestRunner: RemoteStreamRequestRunner = operation => operation(),
   ) {}
 
+  /**
+   * Serve frames until the socket closes. A Pong, any received frame, and a
+   * downlink write that waited in the local send buffer and then completed
+   * count as peer activity, so a congested link that delays the Pong behind
+   * data keeps its socket. A write that completes at once proves nothing
+   * about the peer and does not count.
+   */
   async run(): Promise<void> {
     const closed = new Promise<void>((resolve) => {
       this.socket.once('close', resolve)
       this.socket.once('error', () => { this.socket.terminate() })
+      this.socket.on('pong', this.alive)
       this.socket.on('message', (data, isBinary) => {
+        this.alive()
         if (isBinary) {
           this.socket.close(1003, 'text messages required')
           return
@@ -241,7 +255,10 @@ class RemoteStreamMuxConnection {
   ): Promise<void> {
     let outcome: { readonly failed: false } | { readonly failed: true; readonly error: unknown }
     try {
-      const source = await this.open(endpoint, payload, active.inbox, active.abort)
+      const source = await this.open(endpoint, payload, active.inbox, active.abort, {
+        maxBytes: this.streamInboxBytes,
+        frameOverheadBytes: Buffer.byteLength(JSON.stringify({ type: 'item', streamId, value: null }), 'utf8') - 'null'.length,
+      })
       for await (const value of source) {
         await this.send({ type: 'item', streamId, value })
       }
@@ -294,10 +311,18 @@ class RemoteStreamMuxConnection {
         reject(new Error('api gateway: Remote stream socket is closed'))
         return
       }
+      let queued = false
       this.socket.send(text, (error) => {
-        if (error) reject(error)
-        else resolve()
+        if (error) {
+          reject(error)
+          return
+        }
+        if (queued) this.alive()
+        resolve()
       })
+      // Read after send(): bytes still buffered mean the local send buffer was
+      // full, so their completion requires the peer to acknowledge data.
+      queued = this.socket.bufferedAmount > 0
     }))
     this.writes = delivery.catch(() => undefined)
     return delivery
@@ -441,8 +466,8 @@ function rawText(data: RawData): string {
  * @param socket - carrier socket that receives the HTTP rejection.
  * @param status - authentication or browser-trust rejection status.
  */
-export function rejectRemoteStreamUpgrade(socket: Duplex, status: 401 | 403): void {
-  const reason = status === 401 ? 'Unauthorized' : 'Forbidden'
+export function rejectRemoteStreamUpgrade(socket: Duplex, status: 401 | 403 | 409): void {
+  const reason = status === 401 ? 'Unauthorized' : status === 403 ? 'Forbidden' : 'Conflict'
   const body = reason.toLowerCase()
   socket.end([
     `HTTP/1.1 ${String(status)} ${reason}`,

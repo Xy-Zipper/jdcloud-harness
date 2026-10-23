@@ -145,7 +145,7 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
     }
     disposeAdministratorShadows ??= installAdministratorControlShadows(ctx)
     disposeTerminalFilter ??= ctx.sidebarRightTabs.registerAvailabilityFilter(kind => kind !== 'terminal')
-    disposePluginPanelFilter ??= ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins')
+    disposePluginPanelFilter ??= ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins' && id !== 'schedules')
   }
 
   const hideLogin = (): void => {
@@ -277,7 +277,8 @@ export function installJdcloudLoginUi(ctx: ClientContext): void {
   }, 'ui-jdcloud-login: administrator command policy')
   ctx.effect(() => {
     disposeTerminalFilter = ctx.sidebarRightTabs.registerAvailabilityFilter(kind => kind !== 'terminal')
-    disposePluginPanelFilter = ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins')
+    // Host management pages are available only to tenant administrators.
+    disposePluginPanelFilter = ctx.sidebarPanels.registerAvailabilityFilter(id => id !== 'plugins' && id !== 'schedules')
     return () => {
       disposeTerminalFilter?.()
       disposeTerminalFilter = undefined

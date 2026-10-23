@@ -45,7 +45,7 @@ This plugin accepts no configuration fields.
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The browser reads a redacted menu projection through `jdcloudAuth.writableMenus()`. The plugin owns one `conversation.input.dock` entry and one input-reference codec. The dock inserts a reference containing only the current tenant id, menu id, and display label. The codec calls the Host again during submission, requires the same tenant and menu, and serializes a durable `dsh-reference` marker containing the Host-confirmed display label and menu id.
+The browser reads a redacted menu projection through `jdcloudAuth.writableMenus()`. The plugin owns one `conversation.input.dock` entry, one input-reference codec, and the UserText matcher and keyed renderer for its durable marker. The dock inserts a reference containing only the current tenant id, menu id, and display label. The codec calls the Host again during submission, requires the same tenant and menu, and serializes a durable `dsh-reference` marker containing the Host-confirmed display label and menu id. The matcher projects that marker as an iconless `@label` chip without exposing the menu id in the transcript.
 
 </details>
 

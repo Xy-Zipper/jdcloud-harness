@@ -24,7 +24,6 @@ import WebServer from '../../../host/webserver/src/index.ts'
 
 let directory: string | undefined
 let ctx: Context | undefined
-const socketFetch = globalThis.fetch
 
 afterEach(async () => {
   await ctx?.fiber.dispose()
@@ -229,6 +228,9 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(context.get('systemPrompt')).toBeInstanceOf(SystemPrompt)
     expect(context.get('tools')).toBeInstanceOf(ToolRuntime)
     expect(context.tools.schemas().map(schema => schema.name)).toEqual([
+      'jdcloud_lowcode_find_department',
+      'jdcloud_lowcode_find_role',
+      'jdcloud_lowcode_find_user',
       'jdcloud_lowcode_describe',
       'jdcloud_lowcode_query',
       'jdcloud_lowcode_get',
@@ -269,19 +271,23 @@ describe('JDCloud login through a real Loader composition', () => {
       }
     })
     const context = await bootComposition(fetcher, true)
-    const externalResponse = await socketFetch(
-      `http://127.0.0.1:${String(context.webServer.port)}/api/external/v1/skills`,
+    const externalResponse = await ExternalApi.fetchExternalApi(context, new Request(
+      'http://127.0.0.1/api/external/v1/skills',
       {
         headers: {
           authorization: 'Bearer low-code-token',
           'x-tenant-id': 'corp-current',
+          'x-jdcloud-base-url': 'https://kindoucloud.com',
         },
       },
-    )
+    ))
     expect(externalResponse.status).toBe(200)
     await expect(externalResponse.json()).resolves.toEqual({
-      skills: [{ name: 'global-skill', scope: 'built-in' }],
-      canManageBuiltIn: true,
+      code: 200,
+      data: {
+        skills: [{ name: 'global-skill', scope: 'built-in' }],
+        canManageBuiltIn: true,
+      },
     })
     expect(fetcher.mock.calls.map(call => call[1]?.headers)).toEqual([
       { authorization: 'low-code-token' },
@@ -417,7 +423,7 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(JSON.stringify(decision)).toContain('form-1')
     expect(JSON.stringify(decision)).toContain('测试用户')
     expect(JSON.stringify(decision)).toContain('研发部')
-    expect(JSON.stringify(decision)).toContain('测试租户 / IT部门')
+    expect(JSON.stringify(decision)).toContain('Current Tenant')
     expect(JSON.stringify(decision)).not.toContain('board-1')
   })
 })

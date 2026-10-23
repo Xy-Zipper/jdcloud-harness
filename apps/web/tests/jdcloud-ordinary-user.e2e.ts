@@ -149,6 +149,30 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     }
   })
 
+  it('keeps the tenant menu opaque in light and dark themes', async () => {
+    const backgrounds: string[] = []
+    try {
+      for (const colorScheme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme })
+        await page.getByTestId('jdcloud-sidebar-account-trigger').click()
+        const menu = page.getByRole('menu')
+        await menu.waitFor()
+        // The shared menu paints its material separately from the tenant rows.
+        const material = menu.locator(':scope > [aria-hidden="true"]')
+        await expect.poll(() => material.evaluate(element => getComputedStyle(element).backgroundColor))
+          .toMatch(/^rgb\(/)
+        backgrounds.push(await material.evaluate(element => getComputedStyle(element).backgroundColor))
+        await menu.getByRole('menuitem', { name: '退出登录' }).waitFor()
+        await page.keyboard.press('Escape')
+        await menu.waitFor({ state: 'hidden' })
+      }
+      expect(backgrounds[0]).not.toBe(backgrounds[1])
+    } finally {
+      await page.keyboard.press('Escape')
+      await page.emulateMedia({ colorScheme: null })
+    }
+  })
+
   it('hides administrator controls and offers single-select writable low-code functions', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-jdcloud-ordinary-user'))
     await page.getByRole('button', {

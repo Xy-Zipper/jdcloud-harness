@@ -1,8 +1,9 @@
 /** Runtime plugin trees shared by Agents selecting one preset revision. */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { EntryTree, type EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
+import { prepareProfileEntries } from '@deepseek-ai/dsh-app-boot'
 import type { PresetDefinition } from './definition.ts'
-import { scopeOf, scopeParentOf, type ScopeKey } from '@deepseek-ai/dsh-scope'
+import { scopeOf, type ScopeKey } from '@deepseek-ai/dsh-scope'
 
 /** In-memory Loader tree; only the profile configuration editor persists definitions. */
 class PresetTree extends EntryTree {
@@ -32,23 +33,6 @@ export interface PresetMount {
   readonly tree: EntryTree
   /** The standing scope key agents are parented to (undefined only in torn-down records). */
   readonly key: ScopeKey | undefined
-}
-
-const mounts = new Set<PresetMount>()
-
-/**
- * Every preset composition retained by the registry.
- *
- * The record set is module state and therefore spans every Cordis runtime in
- * the process; a reader that serves one runtime passes that runtime's root
- * fiber so another runtime mounting the same preset id (a second embedded
- * app, a test's second harness) never answers for it.
- * @param within - when present, only mounts inside this fiber's subtree.
- * @returns the live mounts.
- */
-export function livePresetMounts(within?: Fiber): PresetMount[] {
-  const all = [...mounts]
-  return within === undefined ? all : all.filter(mount => withinFiber(mount.fiber, within))
 }
 
 /**
@@ -98,61 +82,24 @@ export function leakedServices(ctx: Context, mount: Fiber): string[] {
   return leaked.sort((left, right) => left.localeCompare(right))
 }
 
-/** A live standing mount located through one agent already joined to it. */
-export type JoinedPresetMount = PresetMount & {
-  /** The standing key, definite because it is what the lookup matched on. */
-  readonly key: ScopeKey
-}
-
 /**
- * The standing composition one agent is joined to.
- *
- * The agent's own key is parented to its preset's standing key, so the mount
- * is found by matching that parent rather than by walking up from the agent —
- * the mount is not under the agent's fiber. An agent that joined no preset —
- * a deployment composing no roster, or a child agent before its join — has no
- * parent link and resolves to undefined.
- * @param agentCtx - the agent's scope context.
- * @returns the mount the agent joined, or undefined when it joined none.
- */
-export function standingMountFor(agentCtx: Context): JoinedPresetMount | undefined {
-  const agentKey = scopeOf(agentCtx)
-  if (agentKey === undefined) return undefined
-  const standingKey = scopeParentOf(agentKey)
-  if (standingKey === undefined) return undefined
-  return livePresetMounts().find(
-    (candidate): candidate is JoinedPresetMount => candidate.key === standingKey,
-  )
-}
-
-/**
- * One agent's instance of a service its preset mounted.
- *
- * Preset revisions publish services behind an `isolate` realm. Browser RPCs
- * hold the Agent but resolve outside that realm, so they locate its revision
- * through the Agent's scope parent.
+ * Read a service implementation owned by one retained preset, including isolated realms.
  *
  * Ownership is the same relation {@link leakedServices} reads, inverted: there
  * it names implementations a subtree published into the ROOT realm, here it
  * names the one this subtree published anywhere. Fiber membership is object
  * identity for the reason stated on {@link withinFiber}.
  *
- * This is read addressing for a caller that already holds the agent. It is not
- * a general host handle on a session's internals: a host row that `inject`s a
- * service cannot use it, because injection resolves before any session exists
- * and has no agent to key by — such a service belongs on the host plane.
  * @param ctx - any context of the runtime whose service store is inspected.
- * @param agent - the agent whose mounted composition to look inside.
+ * @param mount - the retained revision whose subtree owns the service.
  * @param name - the service name as the preset's rows resolve it.
- * @returns the agent's instance, or undefined when its preset mounts none.
+ * @returns the implementation, or undefined when the mount provides none.
  */
-export function serviceForAgent<K extends string & keyof Context>(
+export function serviceForMount<K extends string & keyof Context>(
   ctx: Context,
-  agent: { ctx: Context },
+  mount: PresetMount,
   name: K,
 ): Context[K] | undefined {
-  const mount = standingMountFor(agent.ctx)
-  if (mount === undefined) return undefined
   const store = ctx.reflect.store
   for (const key of Object.getOwnPropertySymbols(store)) {
     const impl = store[key]
@@ -246,6 +193,9 @@ function mountDetail(error: unknown): string {
  * Failed rows and root-realm service leaks reject the mount. Rows waiting for
  * a Host service stay mounted: they activate by themselves once the provider
  * finishes, and the registry re-audits them after the Host tree settles.
+ * Inside a profile, compatibility policy decides admission first: a row whose
+ * plugin the profile denies mounts disabled, so the audit reads it as
+ * intentionally inactive instead of reporting a failed import.
  * @param ctx Scope context inheriting the declaring Loader's resolution base.
  * @param id Preset identity.
  * @param plugins Declared Cordis entry list.
@@ -256,13 +206,11 @@ export async function mountPreset(ctx: Context, id: string, plugins: PresetDefin
   await ctx.fiber.await()
   const tree = new PresetTree(ctx)
   ctx.effect(() => () =>{  tree.root.stop() }, 'agent-preset.tree')
-  await tree.root.update(structuredClone(plugins) as EntryOptions[])
+  await tree.root.update(prepareProfileEntries(ctx, plugins as EntryOptions[], ctx.baseUrl))
   const audit = await auditRows(tree)
   const leaked = leakedServices(ctx, ctx.fiber)
   if (audit.failed.length > 0) throw new Error(audit.failed.join('\n'))
   if (leaked.length > 0) throw new Error(`Preset services require isolate realms: ${leaked.join(', ')}`)
   const mount = { presetId: id, fiber: ctx.fiber, tree, key: scopeOf(ctx) }
-  mounts.add(mount)
-  ctx.effect(() => () => { mounts.delete(mount) }, 'agent-preset.mount')
   return mount
 }

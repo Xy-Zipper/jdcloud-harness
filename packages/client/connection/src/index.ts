@@ -7,23 +7,18 @@ import type {} from '@deepseek-ai/dsh-credentials'
 // Activates the webServer Context merge used below.
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
+import { CONNECT_PATH } from './connect-protocol.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
-import {
-  BrowserSessionService,
-  type BrowserSessionCookieSameSite,
-  type BrowserSessionTransport,
-} from './browser-session.ts'
-import {
-  BROWSER_SESSION_BOOTSTRAP_PATH,
-  BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
-} from './browser-session-protocol.ts'
+import { BrowserSessionService, type BrowserSessionCookieSameSite, type BrowserSessionTransport } from './browser-session.ts'
+import { BROWSER_SESSION_BOOTSTRAP_PATH, BROWSER_SESSION_WEBSOCKET_TICKET_PATH } from './browser-session-protocol.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
 export type {
   PeerAdmission,
+  ConnectionAdmission,
   ConnectionFetchMethod,
   ConnectionFetchHandler,
   ConnectionFetchRoute,
@@ -45,9 +40,11 @@ export type {
   RpcMessage,
   ServerResponse,
 } from './rpc.ts'
-export type { PeerId, PeerScope, RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
+export type { PeerId, PeerScope, Principal, RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
 export { RpcId, transportError } from './rpc.ts'
-export { OperatorPeer } from './operator-peer.ts'
+export { Peer } from './peer.ts'
+export type { PeerOptions } from './peer.ts'
+export { CONNECT_PATH, type ConnectionInteractions } from './connect-protocol.ts'
 export {
   clientRequestSchema,
   rpcErrorSchema,
@@ -59,7 +56,7 @@ export {
 export { HostConnectionService } from './rpc-host.ts'
 export { BrowserSessionService } from './browser-session.ts'
 export type { BrowserSessionTransport } from './browser-session-protocol.ts'
-export { bridge as bridgeFetchRequest, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
+export { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES }
 
 export { API_PATH } from './api-path.ts'
 
@@ -115,14 +112,12 @@ export interface ConnectionConfig {
   browserSessionTransport?: BrowserSessionTransport
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
-   * port-less `host` matching any port. The /api trust fence refuses any
-   * request whose Host is neither loopback nor listed here, so a
-   * non-loopback (`0.0.0.0`) deployment must declare the names it is reached
-   * by; the Web runtime derives LAN IP literals from an active all-interface
-   * bind. An entry that is not a bare, canonical authority fails plugin load.
+   * port-less `host` matching any port. The fence accepts loopback and the
+   * listener's own bind IP independently; other remote authorities require
+   * an entry here. A non-canonical or non-bare authority fails plugin load.
    */
   trustedHosts?: string[]
-  /** Absolute independent browser-session lifetime in days. Default: 30. */
+  /** Absolute browser and API cookie lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
@@ -188,7 +183,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
     webCtx.on('webserver/index-inject', (table) => {
       table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
-      if (browserSessionTransport === 'bearer') {
+      if (browserSessionTransport === 'bearer' && browserSessionService !== undefined) {
         table.push({ kind: 'global', name: '__DSH_BROWSER_SESSION_TRANSPORT__', value: 'bearer' })
       }
     })
@@ -204,7 +199,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
           return
         }
         await connection.runWithBrowserIdentity(req, () =>
-          webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, maxRequestBodyBytes)))
+          webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, admission.peer, maxRequestBodyBytes)))
       },
     }
     webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
@@ -265,6 +260,10 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
         `client-connection: ${BROWSER_SESSION_WEBSOCKET_TICKET_PATH} route`,
       )
     }
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: CONNECT_PATH,
+      handler: (req, res) => { connection.authorizeConnect(req, res) },
+    }), 'client-connection: /connect route')
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

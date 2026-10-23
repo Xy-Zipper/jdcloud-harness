@@ -13,6 +13,7 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { computeHunkDiffs, diffsFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
+import { mutationResult } from './mutation-result.ts'
 import { sessionResolveOptions } from './session-cwd.ts'
 import type { FsSandboxController } from './sandbox.ts'
 
@@ -80,7 +81,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
     order: ctx.systemPrompt.getSectionOrder('TOOL_EDIT'),
     text: ({ scope }) => ctx.tools.get('edit', scope) === undefined
       ? ''
-      : 'Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session.',
+      : 'Read a file before editing it (the default fs-observation-policy requires it), unless you just created or edited it in this session.',
   })
 
   /** Build the static execution schema or one request's narrower model schema. */
@@ -102,7 +103,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
         type: 'object',
         additionalProperties: false,
         properties: {
-          path: { type: 'string', required: true },
+          path: { type: 'string', required: true, description: 'Canonical absolute path in the filesystem execution world.' },
           before: { type: 'string', required: true },
           after: { type: 'string', required: true },
         },
@@ -111,8 +112,9 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
         type: 'text',
         text: formatEditOutput(value.path, args.replace_all ?? false),
       }],
-      presentationMeta: (args, value) => ({
-        diffs: computeHunkDiffs(args.file_path, value.before, value.after)
+      presentationMeta: (_args, value) => ({
+        path: value.path,
+        diffs: computeHunkDiffs(value.path, value.before, value.after)
           .map(({ path, oldText, newText }) => ({ path, oldText, newText })),
       }),
     },
@@ -121,7 +123,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
       // Resolve the per-call sandbox policy (approved mode > session override
       // > backend default, plus the session cwd root) BEFORE anything executes.
       const sandboxPolicy = await sandbox.resolvePolicy('edit', args, exec)
-      const target = await ctx.fs.resolve(input.filePath, sessionResolveOptions(exec, sandboxPolicy?.workspaceRoot))
+      const target = await ctx.fs.resolve(input.filePath, await sessionResolveOptions(ctx, exec))
       // Single-slot decision: the policy plugin returns { version: vObserved } or
       // throws FS_NOT_OBSERVED; the bare default is undefined (unconditional edit).
       // No stat — the bare default never manufactures a version basis. The intent
@@ -144,12 +146,7 @@ export function applyEditTool(ctx: Context, sandbox: FsSandboxController): void 
         // stable model-facing diagnostic; anything else passes through.
         throw remediateFsError(sandbox.mapError(error, sandboxPolicy, exec), target.displayPath)
       }
-      ctx.emit('fs/observed', target, { kind: 'present', version: outcome.version }, exec)
-      return {
-        path: target.displayPath,
-        before: outcome.before,
-        after: outcome.after,
-      }
+      return mutationResult(ctx, target, outcome, exec)
     },
     // Pure display: a diff card of the literal replacement (old_string → new_string), derived
     // from the call args. `oldText: old_string || null` matches claude-agent-acp's Edit arm;

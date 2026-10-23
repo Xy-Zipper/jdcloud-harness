@@ -45,7 +45,7 @@ kind: "package-reference"
 <details>
 <summary>实现细节——点击展开</summary>
 
-浏览器通过 `jdcloudAuth.writableMenus()` 读取脱敏菜单投影。本插件拥有一个 `conversation.input.dock` 条目和一个输入引用 codec。该 dock 插入仅含当前租户 id、菜单 id 与显示标签的引用。提交期间，codec 会再次调用 Host，要求租户和菜单保持一致，并把 Host 确认的显示标签与菜单 id 序列化为持久的 `dsh-reference` 标记。
+浏览器通过 `jdcloudAuth.writableMenus()` 读取脱敏菜单投影。本插件拥有一个 `conversation.input.dock` 条目、一个输入引用 codec，以及其持久标记对应的 UserText matcher 和 keyed renderer。该 dock 插入仅含当前租户 id、菜单 id 与显示标签的引用。提交期间，codec 会再次调用 Host，要求租户和菜单保持一致，并把 Host 确认的显示标签与菜单 id 序列化为持久的 `dsh-reference` 标记。matcher 会把该标记投影为无图标的 `@label` 标签，不在 transcript 中暴露菜单 id。
 
 </details>
 

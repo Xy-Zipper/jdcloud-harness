@@ -18,7 +18,7 @@ import {
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-files'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { bridgeFetchRequest, type ConnectionFetchHandler } from '@deepseek-ai/dsh-client-connection'
+import { bridge, type ConnectionFetchHandler, type PeerScope } from '@deepseek-ai/dsh-client-connection'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
@@ -87,15 +87,33 @@ function register(ctx: Context, path: string): void {
     requestBodyMode: () => 'buffered',
     fetch: request => fetchExternalApi(ctx, request),
   }
+  // External calls authenticate with provider tokens, so one owner-principal
+  // Peer shared by the whole surface stands in for the browser admission the
+  // shared bridge requires; createPeer Peers are disposed with the Context.
+  let ownerPeer: PeerScope | undefined
+  const peerOf = (): PeerScope | undefined => {
+    const connection = ctx.get('connection')
+    if (connection === undefined) return undefined
+    return ownerPeer ??= connection.createPeer({ principal: { kind: 'owner' }, interactions: 'none' })
+  }
   const route: WebRoute = {
     kind: 'exact',
     path,
-    handler: (request, response) => bridgeFetchRequest(
-      request,
-      response,
-      fetchHandler,
-      MAX_REQUEST_BODY_BYTES,
-    ),
+    handler: (request, response) => {
+      const peer = peerOf()
+      if (peer === undefined) {
+        response.writeHead(503)
+        response.end()
+        return Promise.resolve()
+      }
+      return bridge(
+        request,
+        response,
+        fetchHandler,
+        peer,
+        MAX_REQUEST_BODY_BYTES,
+      )
+    },
   }
   ctx.effect(() => ctx.webServer.register(route), `external-api: ${path}`)
 }

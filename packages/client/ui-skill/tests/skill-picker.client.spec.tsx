@@ -30,6 +30,7 @@ function actions(
     captureInsertion,
     insertText,
     setDraft: vi.fn(),
+    persistDraft: vi.fn(),
     addAttachments: vi.fn(() => true),
     removeAttachment: vi.fn(),
     pruneAttachments: vi.fn(),

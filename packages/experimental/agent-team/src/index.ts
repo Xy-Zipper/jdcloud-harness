@@ -1,17 +1,17 @@
-/** Agent Teams service façade over roster, mailbox, task, and runtime lifecycle owners. */
+/** Agent Teams service façade over roster, messaging, task, and runtime lifecycle owners. */
 
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { steerHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
 import { TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
 import { TeamJournal } from './journal.ts'
 import { TeamRuntimeLifecycle } from './lifecycle.ts'
-import { TeamMailbox } from './mailbox.ts'
 import { teamProjectionDefinition } from './projection.ts'
-import { TeamRoster } from './roster.ts'
+import { resolveActiveMember, TeamRoster } from './roster.ts'
 import type { TeamMembership } from './roster.ts'
 import { TeamTaskBoard } from './task-board.ts'
 import { TeamId, TeamTaskId } from './types.ts'
@@ -24,7 +24,6 @@ import type {
   SpawnTeammateResult,
   TeamMemberView,
   TeamTaskView,
-  TeamView,
   TeamWaitResult,
   UpdateTeamTaskRequest,
 } from './types.ts'
@@ -42,7 +41,6 @@ declare module '@deepseek-ai/cordis' {
 
 const DEFAULT_MAX_MEMBERS = 16
 const DEFAULT_MAX_TASKS = 256
-const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
 
@@ -55,13 +53,12 @@ function positiveLimit(name: string, value: number): number {
 }
 
 /** Agent Teams service backed by the exact live Lead Session log. */
-export class TeamService extends TypertRemoteService {
+export class TeamService extends Service {
   static inject = ['agents', 'sessions', 'sessionPersistence', 'sessionProjections', 'subagents']
 
   static Config: z<Config> = z.object({
     maxMembers: z.number().step(1).min(1).default(DEFAULT_MAX_MEMBERS),
     maxTasks: z.number().step(1).min(1).default(DEFAULT_MAX_TASKS),
-    maxPendingMessagesPerMember: z.number().step(1).min(1).default(DEFAULT_MAX_PENDING_MESSAGES),
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
   })
@@ -73,7 +70,6 @@ export class TeamService extends TypertRemoteService {
   private readonly lifecycle: TeamRuntimeLifecycle
   private readonly journal: TeamJournal
   private readonly roster: TeamRoster
-  private readonly mailbox: TeamMailbox
   private readonly tasks: TeamTaskBoard
 
   constructor(ctx: Context, config: Config = {}) {
@@ -81,10 +77,6 @@ export class TeamService extends TypertRemoteService {
     this.config = {
       maxMembers: positiveLimit('maxMembers', config.maxMembers ?? DEFAULT_MAX_MEMBERS),
       maxTasks: positiveLimit('maxTasks', config.maxTasks ?? DEFAULT_MAX_TASKS),
-      maxPendingMessagesPerMember: positiveLimit(
-        'maxPendingMessagesPerMember',
-        config.maxPendingMessagesPerMember ?? DEFAULT_MAX_PENDING_MESSAGES,
-      ),
       maxMessageBytes: positiveLimit('maxMessageBytes', config.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES),
       disposalTimeoutMs: positiveLimit(
         'disposalTimeoutMs',
@@ -96,17 +88,8 @@ export class TeamService extends TypertRemoteService {
     this.lifecycle = new TeamRuntimeLifecycle(this.config.disposalTimeoutMs)
     this.journal = new TeamJournal(ctx, (root) => { this.activity.notify(TeamId(root.id)) })
     this.roster = new TeamRoster(ctx, this.journal, this.lifecycle, this.config.maxMembers)
-    this.mailbox = new TeamMailbox(
-      ctx,
-      this.journal,
-      this.roster,
-      this.lifecycle,
-      this.config.maxPendingMessagesPerMember,
-      this.config.maxMessageBytes,
-    )
     this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
 
-    ctx.on('session/event', (session, event) => { this.mailbox.observeSessionEvent(session, event) })
     ctx.on('agent/created', ({ agent }) => { this.scheduleRecovery(agent) })
     ctx.on('agent/status', ({ agent }) => {
       const membership = this.roster.tryMembership(agent)
@@ -154,13 +137,17 @@ export class TeamService extends TypertRemoteService {
   }
 
   /**
-   * Queue one durable peer message, then attempt immediate delivery.
+   * Steer one peer message into the target inbox or reject the attempt.
    * @param caller - exact live sending Team member.
-   * @param request - target name, content, and pre-queue cancellation.
-   * @returns durable message identity and immediate-delivery observation.
+   * @param request - target name, content, and cancellation before acceptance.
+   * @returns accepted inbox identity; acceptance follows normal Agent persistence and does not await model processing.
    */
   async sendMessage(caller: Agent, request: SendTeamMessageRequest): Promise<SendTeamMessageResult> {
-    return await this.mailbox.send(caller, request)
+    if (this.lifecycle.disposed) throw new TeamError('Agent Teams service is disposing', 'TEAM_DISPOSED')
+    return await this.lifecycle.track(this.sendAdmitted(caller, {
+      ...request,
+      signal: AbortSignal.any([request.signal, this.lifecycle.signal]),
+    }))
   }
 
   /**
@@ -233,34 +220,42 @@ export class TeamService extends TypertRemoteService {
     return this.roster.tryMembership(agent)
   }
 
-  /**
-   * Read the current roster and non-deleted task board through the generated Remote API.
-   * @param agent - exact live Team member used as the authority credential.
-   * @returns detached current roster and task views.
-   */
-  @Remote('view')
-  remoteView(agent: Agent): TeamView {
-    return {
-      members: this.listMembers(agent),
-      tasks: this.listTasks(agent),
+  /** Deliver an admitted send using the Lead's authority and the actual sender's identity. */
+  private async sendAdmitted(caller: Agent, request: SendTeamMessageRequest): Promise<SendTeamMessageResult> {
+    const membership = this.roster.membership(caller)
+    request.signal.throwIfAborted()
+    const { root } = membership
+    const target = resolveActiveMember(root, this.journal.state(root), request.target)
+    if (target.id === caller.id) throw new TeamError('a Team member cannot message itself', 'TEAM_SELF_MESSAGE')
+    const content = [
+      { type: 'text' as const, text: `Team message from ${membership.name}:` },
+      ...structuredClone(request.content),
+    ]
+    if (Buffer.byteLength(JSON.stringify(content), 'utf8') > this.config.maxMessageBytes) {
+      throw new TeamError(`team message exceeds ${this.config.maxMessageBytes} bytes`, 'TEAM_MESSAGE_TOO_LARGE')
     }
+    const source = { kind: 'agent-message' as const, form: 'relay' as const, senderSessionId: caller.id }
+    let messageId
+    if (target.id === root.id) {
+      const input = createUserMessage({ content, source })
+      root.steer(input)
+      messageId = input.id
+    } else {
+      messageId = await steerHostSubagentPrompt(this.ctx.subagents, root, target.id, content, source, request.signal)
+    }
+    this.activity.notify(membership.id)
+    return { messageId }
   }
 
-  /** Queue one contained recovery pass after publication has unwound. */
+  /** Queue one contained provisioning reconciliation after publication has unwound. */
   private scheduleRecovery(agent: Agent): void {
     queueMicrotask(() => {
       if (this.lifecycle.disposed) return
-      void this.recoverFor(agent).catch((error: unknown) => {
+      void this.roster.recoverFor(agent, this.lifecycle.signal).catch((error: unknown) => {
         if (this.lifecycle.disposed) return
         this.ctx.logger.warn(`Agent Teams recovery for "${agent.id}" failed: ${errorMessage(error)}`)
       })
     })
-  }
-
-  /** Reconcile roster provisioning before retrying that member's pending mailbox. */
-  private async recoverFor(agent: Agent): Promise<void> {
-    await this.roster.recoverFor(agent, this.lifecycle.signal)
-    await this.mailbox.recoverFor(agent, this.lifecycle.signal)
   }
 
   /** Stop Team-owned live branches and release every waiter before service disposal completes. */
@@ -269,8 +264,7 @@ export class TeamService extends TypertRemoteService {
     this.activity.close()
 
     const failures: unknown[] = []
-    await this.lifecycle.settle(this.roster.pendingCreations(), failures)
-    await this.lifecycle.settle(this.mailbox.pendingDispatches(), failures)
+    await this.lifecycle.settle(this.lifecycle.pending(), failures)
     for (const [root, childIds] of this.roster.liveChildrenByRoot()) {
       try {
         await this.roster.stopTeammates(root, childIds)

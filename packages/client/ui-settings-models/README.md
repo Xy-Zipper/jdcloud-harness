@@ -129,4 +129,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. A nav-entry-only section plugin rendering a fixed empty content column — it emits no cordis events and owns no cross-plugin mutable relation.
+**Runtime invariant:** No companion is published. The page declares its settings, credential, provider-directory, and session-model-catalog service dependencies; account-backed provider availability comes from the session model catalog.

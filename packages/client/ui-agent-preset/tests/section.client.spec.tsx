@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { AgentPresetSection, type AgentPresetSectionProps } from '../src/client/AgentPresetSection.tsx'
 import type { AgentPresetSectionState } from '../src/client/section-store.ts'
 import { en } from '../src/client/locales.ts'
@@ -11,34 +12,71 @@ const translations: ReadonlyMap<string, string> = new Map(Object.entries(en))
 function unusedHook(): never {
   throw new Error('This section does not read global slot sources')
 }
-function view(partial: Partial<AgentPresetSectionState> = {}, startCreatorDraft?: () => void, developerTools = true) {
+function view(partial: Partial<AgentPresetSectionState> = {}, startCreatorDraft?: () => void, outerClose?: () => void, enabled = true) {
+  const developerTools = createSnapshotStore(enabled)
   const store = createSnapshotStore<AgentPresetSectionState>({ status: 'ready', error: null,
-    showPicker: true, policySaving: false, rows: [{ id: 'standard', isDefault: true }, { id: 'mine', name: 'Mine', isDefault: false }], ...partial })
-  const actions = { load: vi.fn(async () => {}), makeDefault: vi.fn(async () => {}),
-    setPickerVisible: vi.fn(async () => {}), close: vi.fn() }
+    saving: false, rows: [{ id: 'standard', isDefault: true }, { id: 'mine', name: 'Mine', isDefault: false }],
+    view: null, ...partial })
+  const actions = { load: vi.fn(async () => {}), view: vi.fn(async () => {}), closeView: vi.fn(), makeDefault: vi.fn(async () => {}),
+    close: vi.fn() }
   const props: AgentPresetSectionProps = { ...actions,
     ...(startCreatorDraft === undefined ? {} : { startCreatorDraft }),
     usePanelInfo: unusedHook, useSessions: unusedHook, useSessionStatus: unusedHook, useSessionRetainInfo: unusedHook,
     useWorkspaces: unusedHook, useResource: unusedHook,
+    ...allowAllAccess,
     useAgentPresetSection: bindSnapshotSelector(store),
-    useDeveloperTools: bindSnapshotSelector(createSnapshotStore(developerTools)),
+    useDeveloperTools: bindSnapshotSelector(developerTools),
     t: key => translations.get(key) ?? key }
-  render(<AgentPresetSection {...props} />)
-  return actions
+  render(outerClose === undefined ? <AgentPresetSection {...props} />
+    : <Modal open onClose={outerClose} title="Settings" closeLabel="Close"><AgentPresetSection {...props} /></Modal>)
+  return { ...actions, store, developerTools }
 }
 function rowFor(id: string): HTMLElement {
   const row = document.querySelector<HTMLElement>(`[data-agent-preset-id="${id}"]`)
   if (row === null) throw new Error(`no card for ${id}`)
   return row
 }
-it('hides the complete picker-policy row while developer tools are off', () => {
-  view({}, undefined, false)
-  expect(screen.queryByRole('switch', { name: en.showPicker })).toBeNull()
-  expect(screen.queryByText(en.showPickerDescription)).toBeNull()
-  expect(screen.queryByText(en.showPickerBeta)).toBeNull()
+it.each([false, true])('offers Standard, Creator and custom defaults with Coding Tools %s', (enabled) => {
+  const actions = view({ rows: [
+    { id: 'standard', isDefault: false }, { id: 'ptc', isDefault: false },
+    { id: 'minimal', isDefault: true }, { id: 'cordis', isDefault: false },
+    { id: 'mine', name: 'Mine', isDefault: false },
+  ] }, vi.fn(), undefined, enabled)
+  expect(screen.queryByRole('button', { name: `${en.setDefault}: ${en.presetPtcName}` }) !== null).toBe(enabled)
+  expect(screen.queryByRole('button', { name: `${en.inUse}: ${en.presetMinimalName}` }) !== null).toBe(enabled)
+  for (const [id, name] of [['standard', en.presetStandardName], ['cordis', en.presetCordisName], ['mine', 'Mine']]) {
+    const button = screen.getByRole<HTMLButtonElement>('button', { name: `${en.setDefault}: ${name}` })
+    expect(button.disabled).toBe(false)
+    fireEvent.click(button)
+    expect(actions.makeDefault).toHaveBeenLastCalledWith(id)
+  }
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: en.creatorDraft }).disabled).toBe(false)
+})
+it('updates visible settings choices without writing defaults from the renderer', () => {
+  const actions = view({ rows: [
+    { id: 'standard', isDefault: false }, { id: 'ptc', isDefault: false },
+    { id: 'minimal', isDefault: true }, { id: 'cordis', isDefault: false },
+  ] })
+  const rows = actions.store.getSnapshot().rows
+  act(() => { actions.developerTools.set(false) })
+  expect(document.querySelector('[data-agent-preset-id="ptc"]')).toBeNull()
+  expect(document.querySelector('[data-agent-preset-id="minimal"]')).toBeNull()
+  expect(rowFor('standard')).toBeTruthy()
+  expect(rowFor('cordis')).toBeTruthy()
+  expect(actions.makeDefault).not.toHaveBeenCalled()
+  expect(actions.store.getSnapshot().rows).toBe(rows)
+  act(() => { actions.developerTools.set(true) })
+  expect(screen.getByRole('button', { name: `${en.inUse}: ${en.presetMinimalName}` })).toBeTruthy()
+  expect(rowFor('ptc')).toBeTruthy()
+})
+it.each(['ptc', 'minimal'])('keeps a named custom %s override selectable with Coding Tools off', (id) => {
+  const actions = view({ rows: [{ id, name: 'My mode', isDefault: false }] }, undefined, undefined, false)
+  fireEvent.click(screen.getByRole('button', { name: `${en.setDefault}: My mode` }))
+  expect(actions.makeDefault).toHaveBeenCalledWith(id)
 })
 it('reads the roster once and sets a default from the card body', async () => {
   const actions = view()
+  expect(screen.queryByRole('switch')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: `${en.setDefault}: Mine` }))
   expect(actions.makeDefault).toHaveBeenCalledWith('mine')
   await waitFor(() =>{  expect(actions.load).toHaveBeenCalledOnce() })
@@ -78,24 +116,68 @@ it('offers no Creator entry without the conversation flow or the cordis preset',
   view({}, vi.fn())
   expect(screen.queryByRole('button', { name: en.creatorDraft })).toBeNull()
 })
-it('disables the Creator entry when mode selection is hidden', () => {
+it('disables the Creator entry while a default is being saved', () => {
   const launch = vi.fn()
-  view({ showPicker: false, rows: [{ id: 'cordis', isDefault: true }] }, launch)
+  view({ saving: true, rows: [{ id: 'cordis', isDefault: true }] }, launch)
   const button = screen.getByRole<HTMLButtonElement>('button', { name: en.creatorDraft })
   expect(button.disabled).toBe(true)
-  expect(button.title).toBe(en.enablePickerToCreate)
   fireEvent.click(button)
   expect(launch).not.toHaveBeenCalled()
 })
-it('shows roster errors while the policy switch stays usable', () => {
-  const actions = view({ error: 'Roster stale', rows: [{ id: 'broken', isDefault: false, broken: 'Missing plugin' }] })
-  expect(screen.getAllByRole('alert').map(node => node.textContent)).toEqual(['Roster stale', 'Missing plugin'])
-  fireEvent.click(screen.getByRole('switch'))
-  expect(actions.setPickerVisible).toHaveBeenCalledWith(false)
+it('reads a declared composition read-only from every card, broken ones included', () => {
+  const actions = view({ rows: [{ id: 'standard', isDefault: true }, { id: 'broken', isDefault: false, broken: 'Missing plugin' }] })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(within(rowFor('standard')).getByRole('button', { name: `${en.view}: ${en.presetStandardName}` }))
+  expect(actions.view).toHaveBeenCalledWith('standard')
+  fireEvent.click(within(rowFor('broken')).getByRole('button', { name: `${en.view}: broken` }))
+  expect(actions.view).toHaveBeenLastCalledWith('broken')
+  expect(actions.makeDefault).not.toHaveBeenCalled()
 })
-it('identifies the effective default when the picker is hidden', () => {
-  view({ showPicker: false })
-  expect(screen.getByRole<HTMLButtonElement>('button', { name: `${en.selectionOffDefault}: ${en.presetStandardName}` }).disabled).toBe(true)
+it('shows the open composition under the preset display name, without copy, and closes it from the footer', () => {
+  const actions = view({ view: { id: 'standard', title: 'standard', content: '- id: tool-fs\n  name: fs\n' } })
+  const dialog = screen.getByRole('dialog', { name: `${en.view} · ${en.presetStandardName}` })
+  expect(dialog.querySelector('pre')?.textContent).toBe('- id: tool-fs\n  name: fs\n')
+  expect(within(dialog).queryByRole('textbox')).toBeNull()
+  expect(dialog.querySelectorAll('p')).toHaveLength(0)
+  fireEvent.click(within(dialog).getAllByRole('button', { name: en.close }).at(-1)!)
+  expect(actions.closeView).toHaveBeenCalledOnce()
+  cleanup()
+  view({ view: { id: 'gone', title: 'Gone', content: '[]\n' } })
+  expect(screen.getByRole('dialog', { name: `${en.view} · Gone` })).toBeTruthy()
+})
+it('keeps Escape inside the composition viewer when Settings is also open', () => {
+  const closeSettings = vi.fn()
+  const actions = view({}, undefined, closeSettings)
+  const trigger = within(rowFor('standard')).getByRole('button', { name: `${en.view}: ${en.presetStandardName}` })
+  trigger.focus()
+  fireEvent.click(trigger)
+  act(() => { actions.store.set({ ...actions.store.getSnapshot(), view: { id: 'standard', title: 'standard', content: '[]\n' } }) })
+  const dialog = screen.getByRole('dialog', { name: `${en.view} · ${en.presetStandardName}` })
+  const [header, footer] = within(dialog).getAllByRole('button', { name: en.close })
+  expect(document.activeElement).toBe(footer)
+  fireEvent.keyDown(footer!, { key: 'Tab' })
+  expect(document.activeElement).toBe(header)
+  fireEvent.keyDown(header!, { key: 'Tab', shiftKey: true })
+  expect(document.activeElement).toBe(footer)
+  fireEvent.keyDown(footer!, { key: 'Escape' })
+  expect(actions.closeView).toHaveBeenCalledOnce()
+  expect(closeSettings).not.toHaveBeenCalled()
+  expect(actions.close).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(trigger)
+})
+it('clears an open viewer when the settings section unmounts', () => {
+  const actions = view({ view: { id: 'standard', title: 'standard', content: '[]\n' } })
+  cleanup()
+  expect(actions.closeView).toHaveBeenCalledOnce()
+})
+it('shows roster errors without hiding the roster', () => {
+  const actions = view({ error: 'Roster stale', rows: [
+    { id: 'broken', isDefault: false, broken: 'Missing plugin' },
+    { id: 'mine', name: 'Mine', isDefault: false },
+  ] })
+  expect(screen.getAllByRole('alert').map(node => node.textContent)).toEqual(['Roster stale', 'Missing plugin'])
+  fireEvent.click(screen.getByRole('button', { name: `${en.setDefault}: Mine` }))
+  expect(actions.makeDefault).toHaveBeenCalledWith('mine')
 })
 it('keeps a broken card focusable for diagnostics and refuses to select it', () => {
   const actions = view({ rows: [{ id: 'broken', isDefault: false, broken: 'Missing plugin' }] })
@@ -131,11 +213,12 @@ it.each([
   expect(actions.makeDefault).not.toHaveBeenCalled()
 })
 it('keeps keyboard focus in help and dismisses only the reader on Escape', () => {
-  const actions = view()
+  const closeSettings = vi.fn()
+  const actions = view({}, undefined, closeSettings)
   const trigger = within(rowFor('standard')).getByRole('button', { name: `${en.modeExplanation}: ${en.presetStandardName}` })
   trigger.focus()
   fireEvent.click(trigger)
-  const dialog = screen.getByRole('dialog')
+  const dialog = screen.getByRole('dialog', { name: en.presetStandardName })
   const details = within(dialog).getByRole('tab', { name: en.modeExplanation })
   const panel = within(dialog).getByRole('tabpanel', { name: en.modeExplanation })
   const close = within(dialog).getByRole('button', { name: en.close })
@@ -147,8 +230,10 @@ it('keeps keyboard focus in help and dismisses only the reader on Escape', () =>
   fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
   expect(document.activeElement).toBe(panel)
   fireEvent.keyDown(panel, { key: 'Escape' })
-  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(screen.queryByRole('dialog', { name: en.presetStandardName })).toBeNull()
+  expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
   expect(document.activeElement).toBe(trigger)
+  expect(closeSettings).not.toHaveBeenCalled()
   expect(actions.close).not.toHaveBeenCalled()
 })
 it('connects keyboard selection to the visible guide panel', () => {
@@ -173,14 +258,20 @@ it('does not attach built-in claims to named or unknown presets', () => {
   expect(screen.queryByRole('button', { name: new RegExp(en.modeExplanation) })).toBeNull()
   expect(screen.queryByRole('button', { name: new RegExp(en.howToUse) })).toBeNull()
 })
-it('leaves help usable when mode selection is disabled', () => {
-  const actions = view({ showPicker: false })
+it('leaves help usable while a default is being saved', () => {
+  const actions = view({ saving: true })
   fireEvent.click(within(rowFor('standard')).getByRole('button', { name: `${en.howToUse}: ${en.presetStandardName}` }))
   expect(screen.getByRole('dialog', { name: en.presetStandardName })).toBeTruthy()
-  expect(actions.setPickerVisible).not.toHaveBeenCalled()
+  expect(actions.makeDefault).not.toHaveBeenCalled()
 })
 it('closes help even when the browser reports no previously focused element', () => {
-  const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(null)
+  const descriptor: TypedPropertyDescriptor<Element | null> = Object.getOwnPropertyDescriptor(Document.prototype, 'activeElement')!
+  const readActiveElement = descriptor.get!.bind(document)
+  // Only the initial unfocused body is absent; modal controls must observe subsequent focus.
+  const activeElement = vi.spyOn(document, 'activeElement', 'get').mockImplementation(() => {
+    const focused = readActiveElement()
+    return focused === document.body ? null : focused
+  })
   try {
     view()
     fireEvent.click(within(rowFor('standard')).getByRole('button', { name: `${en.modeExplanation}: ${en.presetStandardName}` }))

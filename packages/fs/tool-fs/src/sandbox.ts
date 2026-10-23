@@ -69,7 +69,7 @@ export class FsSandboxController {
       justification: {
         type: 'string',
         description: 'Required with sandbox_permissions: one sentence for the user explaining '
-          + 'why this exact file operation needs the wider access.',
+          + 'why this exact file operation needs the wider access. Use the language of the user’s current request.',
       },
     }
   }
@@ -93,9 +93,9 @@ export class FsSandboxController {
   /**
    * The policy to stamp onto this mutation: an approved escalation grant (a
    * strictly wider retry resolved through `ctx.approval` before anything
-   * executes), else the session's standing mode. Repeating the standing mode
-   * requires no approval. The calling session's cwd is
-   * always carried as the workspace root. Validates the escalation argument
+   * executes), else the Session's standing mode. Repeating the standing mode
+   * requires no approval. The workspace root is the original Session
+   * directory, or the deployment fallback when absent. Validates the escalation argument
    * pairing first.
    * @param toolName - the mutating tool's name, for the approval audit trail.
    * @param args - the call's escalation arguments.

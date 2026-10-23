@@ -3,6 +3,7 @@
 import { within, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
+import { Context } from '@deepseek-ai/cordis'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -11,7 +12,7 @@ import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/Mo
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
-import { ModelsSettingsStore, deriveKeyRef, protocolChoices } from '../src/client/store.ts'
+import { ModelsSettingsStore, deriveKeyRef, protocolChoices, reasoningLevelChoices } from '../src/client/store.ts'
 import { createModelsOperations } from '../src/client/operations.ts'
 import type { ModelsOperations } from '../src/client/operations.ts'
 import { en } from '../src/client/locales.ts'
@@ -22,6 +23,7 @@ afterEach(cleanup)
 const t: ModelsSectionInjected['t'] = key => en[key]
 
 const PROTOCOLS = ['openai-completions', 'openai-responses', 'anthropic-messages']
+const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /** The pi-ai profile shape as the host serializes it, including the layer-1 fields. */
 const PiAiConfig = Schema.object({
@@ -36,6 +38,10 @@ const PiAiConfig = Schema.object({
       name: Schema.string(),
       contextWindow: Schema.number(),
       maxTokens: Schema.number(),
+      reasoningEfforts: Schema.union([
+        Schema.const(false),
+        Schema.dict(Schema.union([Schema.string(), Schema.const(null)]), Schema.union(LEVELS)),
+      ]),
     })),
     reasoning: Schema.union(['off', 'high']),
   })),
@@ -153,7 +159,9 @@ const contexts = new WeakMap<object, PageContext>()
 function ctxWith(face: object): PageContext {
   const existing = contexts.get(face)
   if (existing !== undefined) return existing
-  const ctx = { remote: face } as unknown as PageContext
+  const ctx = Object.assign(new Context(), { remote: { ...face,
+    session: { initializeDefaultModel: async () => ({ ok: true, value: undefined }) },
+  } })
   contexts.set(face, ctx)
   return ctx
 }
@@ -258,6 +266,23 @@ describe('protocolChoices', () => {
     const plain = { ...namespace, schema: JSON.parse(JSON.stringify(Schema.object({}).toJSON())) as JsonValue }
     expect(protocolChoices(plain, settingsSchema)).toEqual([])
     await Promise.resolve()
+  })
+})
+
+describe('reasoningLevelChoices', () => {
+  it('reads the levels out of the reasoningEfforts key schema and nothing else', () => {
+    const { namespace } = scriptedFace()
+    expect(reasoningLevelChoices(namespace, settingsSchema)).toEqual(LEVELS)
+    expect(reasoningLevelChoices(undefined, settingsSchema)).toEqual([])
+    const plain = { ...namespace, schema: JSON.parse(JSON.stringify(Schema.object({}).toJSON())) as JsonValue }
+    expect(reasoningLevelChoices(plain, settingsSchema)).toEqual([])
+    const withoutDict = Schema.object({
+      providers: Schema.dict(Schema.object({
+        models: Schema.array(Schema.object({ reasoningEfforts: Schema.union([Schema.const(false)]) })),
+      })),
+    })
+    const falseOnly = { ...namespace, schema: JSON.parse(JSON.stringify(withoutDict.toJSON())) as JsonValue }
+    expect(reasoningLevelChoices(falseOnly, settingsSchema)).toEqual([])
   })
 })
 
@@ -609,8 +634,8 @@ describe('endpoint interrogation', () => {
 
     fireEvent.click(screen.getByText(en.fetchModels))
     await screen.findByText(en.fetchTitle)
-    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'Fresh' }).checked).toBe(true)
-    expect(screen.queryByRole('checkbox', { name: 'fresh' })).toBeNull()
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: 'fresh' }).checked).toBe(true)
+    expect(screen.queryByRole('checkbox', { name: 'Fresh' })).toBeNull()
     // The already-configured row starts unchecked; the new one starts checked.
     const boxes = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
     expect(boxes.map(box => box.checked)).toEqual([false, true])
@@ -672,7 +697,7 @@ describe('endpoint interrogation', () => {
     const scripted = scriptedFace()
     render(
       <CustomProviderCard
-        taken={[]} protocols={PROTOCOLS} revision={7} operations={operationsWith(scripted.face)}
+        taken={[]} protocols={PROTOCOLS} reasoningLevels={LEVELS} revision={7} operations={operationsWith(scripted.face)}
         t={t} readOnly={false} onClose={vi.fn()}
       />,
     )
@@ -750,8 +775,8 @@ describe('endpoint interrogation', () => {
     fireEvent.click(screen.getByText(en.fetchModels))
     const dialog = await screen.findByRole('dialog')
     const search = screen.getByLabelText<HTMLInputElement>(en.fetchSearch)
-    expect(dialog.textContent).toContain('Beta Display')
-    expect(dialog.textContent).not.toContain('opaque-id')
+    expect(dialog.textContent).toContain('opaque-id')
+    expect(dialog.textContent).not.toContain('Beta Display')
     expect([...dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
       .map(box => box.checked)).toEqual([true, true, true])
 
@@ -760,11 +785,11 @@ describe('endpoint interrogation', () => {
     expect(dialog.textContent).not.toContain('opaque-id')
 
     fireEvent.change(search, { target: { value: 'beta' } })
-    expect(dialog.textContent).toContain('Beta Display')
+    expect(dialog.textContent).toContain('opaque-id')
     expect(dialog.textContent).not.toContain('alpha')
 
     fireEvent.change(search, { target: { value: 'opaque' } })
-    expect(dialog.textContent).toContain('Beta Display')
+    expect(dialog.textContent).toContain('opaque-id')
     expect(dialog.textContent).not.toContain('alpha')
 
     fireEvent.click(within_(dialog, en.fetchDeselectAll))
@@ -847,6 +872,7 @@ describe('hand-declared providers', () => {
       <CustomProviderCard
         taken={['openai']}
         protocols={PROTOCOLS}
+        reasoningLevels={LEVELS}
         revision={7}
         operations={operationsWith(scripted.face)}
         t={t}
@@ -857,6 +883,21 @@ describe('hand-declared providers', () => {
     )
     return { ...scripted, onClose }
   }
+
+  it('creates a custom provider without changing the default model', async () => {
+    const { face, mutate, set, onClose } = mountCard()
+    const initialize = vi.spyOn(ctxWith(face).remote.session, 'initializeDefaultModel')
+    fireEvent.change(screen.getByLabelText(en.customRoute), { target: { value: 'acme-gateway' } })
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://gateway.example/v1' } })
+    fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'test-key' } })
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'model' } })
+    fireEvent.click(screen.getByText(en.create))
+    await waitFor(() => { expect(onClose).toHaveBeenCalledWith(true) })
+    expect(mutate).toHaveBeenCalledOnce()
+    expect(set).toHaveBeenCalledOnce()
+    expect(initialize).not.toHaveBeenCalled()
+  })
 
   it('writes the whole profile and the key under the derived reference', async () => {
     const { mutate, set, onClose } = mountCard()
@@ -1049,6 +1090,28 @@ describe('hand-declared providers', () => {
     openEditor('acme-gateway')
 
     expect(screen.getByLabelText<HTMLSelectElement>(en.customApi).value).toBe('')
+  })
+
+  it.each([
+    ['blocks a hand-declared route', true],
+    ['leaves a catalog route to the adapter', false],
+  ])('%s whose stored reasoning levels the adapter refuses', async (_label, declared) => {
+    // Only a hand-declared route's rows edit reasoning levels, so only there
+    // can the card name the row and offer the switch that repairs it.
+    await mountSection({
+      providers: {
+        'acme-gateway': {
+          api: 'openai-completions',
+          models: [{ id: 'acme-large', reasoningEfforts: { off: null } }],
+        },
+      },
+      declaredRoutes: declared ? ['acme-gateway'] : [],
+    })
+    openEditor('acme-gateway')
+
+    const refusal = `${en.model} 1: ${en.modelReasoningNeedsLevel}`
+    expect(screen.queryByText(refusal) !== null).toBe(declared)
+    expect(buttonNamed(en.apply).disabled).toBe(declared)
   })
 
   it('retries only the key after the profile landed, and reports the provider on cancel', async () => {

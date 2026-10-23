@@ -19,7 +19,7 @@ const NAME = 'dsh'
  * During schema generation, ordinary stdout writes are redirected to stderr.
  * @param profile - the profile name.
  * @param patches - overlay paths, in argv order.
- * @param fromDefaultProfile - shipped template used once to initialize a missing profile.
+ * @param fromDefaultProfile - shipped template that replaces the profile before loading it.
  * @returns after collection and output, with diagnostics also written to stderr.
  */
 export async function runDumpConfigSchema(
@@ -35,7 +35,7 @@ export async function runDumpConfigSchema(
   // Trusted module diagnostics must not precede the JSON document on stdout.
   process.stdout.write = process.stderr.write.bind(process.stderr)
   try {
-    dump = await generateConfigSchema(NAME, loaded, layers.map(layer => layer.patches), INSTALL_ANCHOR)
+    dump = await generateConfigSchema(loaded, layers.map(layer => layer.patches), INSTALL_ANCHOR)
   } finally {
     process.stdout.write = stdoutWrite
   }

@@ -92,6 +92,12 @@ function updateChunk(
   seq: number,
   time: number,
 ): AssistantState {
+  if (chunk.type === 'tool-call-delta') {
+    const previous = state.blocks[chunk.index]
+    if (previous?.kind === 'tool-call' && previous.callId !== ''
+      && (chunk.name === undefined || chunk.name === previous.name)
+      && (state.firstTokenTime !== undefined || !isTokenDelta(chunk))) return state
+  }
   const blocks = [...state.blocks]
   let changedIndex = -1
   let previousVisible = false
@@ -119,14 +125,12 @@ function updateChunk(
       const previous = blocks[chunk.index]
       changedIndex = chunk.index
       previousVisible = blockIsVisible(previous)
-      const base = previous?.kind === 'tool-call'
-        ? previous
-        : { kind: 'tool-call' as const, callId: '', name: '', argsRaw: '' }
+      // Tool Nodes own streamed arguments; Assistant protocol blocks retain identity until full settlement.
       blocks[chunk.index] = {
         kind: 'tool-call',
-        callId: base.callId || String(chunk.id),
-        name: chunk.name ?? base.name,
-        argsRaw: base.argsRaw + chunk.argumentsDelta,
+        callId: (previous?.kind === 'tool-call' ? previous.callId : '') || String(chunk.id),
+        name: chunk.name ?? (previous?.kind === 'tool-call' ? previous.name : ''),
+        argsRaw: previous?.kind === 'tool-call' ? previous.argsRaw : '',
       }
       break
     }
@@ -259,7 +263,8 @@ function projectAssistant(context: ConversationNodeContext<AssistantState>): Ass
   const status = settled?.interrupted === true
     ? 'interrupted'
     : settled === undefined ? 'running' : 'settled'
-  const anchorSeq = settled?.seq ?? state.firstVisibleSeq ?? context.matches[0]?.event.seq ?? 0
+  const anchorSeq = (settled?.interrupted === true ? settled.seq : state.firstVisibleSeq ?? settled?.seq)
+    ?? context.matches[0]?.event.seq ?? 0
   const time = settled?.time ?? state.firstVisibleTime ?? context.matches[0]?.event.time ?? 0
   return {
     anchorSeq,
@@ -341,7 +346,9 @@ export const assistantDefinition: ConversationNodeDefinition<AssistantState> = {
     const settled = data.finalNode
     const visible = settled === undefined ? state.visibleBlocks > 0 : hasVisibleContent(data.blocks)
     if (settled === undefined && !visible && current == null) return null
-    const anchorSeq = settled?.seq ?? state.firstVisibleSeq ?? context.matches[0]?.event.seq ?? 0
+    // A successful message retains its live anchor alongside pending Tool calls.
+    const anchorSeq = (settled?.interrupted === true ? settled.seq : state.firstVisibleSeq ?? settled?.seq)
+      ?? context.matches[0]?.event.seq ?? 0
     return chatNode(context, 'assistant-step', anchorSeq, data, {
       visibility: settled?.interrupted === true || visible ? 'visible' : 'hidden',
     })
@@ -353,5 +360,14 @@ export const assistantDefinition: ConversationNodeDefinition<AssistantState> = {
  * @param ctx - owning UI Conversation context.
  */
 export function registerAssistantConversationNode(ctx: Context): void {
-  ctx.uiConversation.events.register(assistantDefinition)
+  const match = assistantDefinition.match.bind(assistantDefinition)
+  ctx.uiConversation.events.register({
+    ...assistantDefinition,
+    match: {
+      'step/start': match,
+      'assistant/live-chunk': match,
+      'assistant/message': match,
+      'llm/retry': match,
+    },
+  })
 }

@@ -4,10 +4,10 @@ import { attributionHeaders, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { DeepSeekLlmApiJson } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
-import { catalogModelInfo, modelInfo } from './model-info.ts'
+import { modelInfo } from './model-info.ts'
 import type { DeepSeekAdapterOptions, DeepSeekConnectionOptions as Connection } from './types.ts'
 import { DeepSeekFileStore } from './file-store.ts'
-import { MESSAGES_FILES_BETA, messagesApiRoot } from './messages-api.ts'
+import { MESSAGES_FILES_BETA, MESSAGES_TOOL_CHANGES_BETA, messagesApiRoot } from './messages-api.ts'
 import { FileResolutionFailure, RequestFiles } from './request-files.ts'
 import { prepareRequestExtensions } from './request-extensions.ts'
 import { imagePricing, inlineImages, prepareFileIds, prepareImages } from './images.ts'
@@ -15,41 +15,54 @@ import { serialize } from './serialize.ts'
 import { parseSse } from './sse.ts'
 import { translate } from './translate.ts'
 import { providerError, providerErrorDetail } from './transport.ts'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { resolveRequestImageTarget } from './request-pricing.ts'
 
 /** DeepSeek provider using Messages content and native thinking replay. */
-export class DeepSeekAdapter extends LlmAdapter {
+export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
   private readonly files: DeepSeekFileStore
   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
     const attachments = this.dependencies.resolveAttachments?.()
     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
   }
 
-  constructor(private readonly dependencies: DeepSeekAdapterOptions) {
+  constructor(private readonly dependencies: DeepSeekAdapterOptions<C>) {
     super()
     this.files = dependencies.resolveFiles?.() ?? new DeepSeekFileStore()
   }
 
-  override providerInfo(provider: string) { return { id: provider, name: 'DeepSeek' } }
+  override providerInfo(provider: string) { return { id: provider, name: this.dependencies.providerName ?? 'DeepSeek' } }
   override providerRetryPolicy(_provider: string) { return this.dependencies.options().retryPolicy }
-  override listModels(provider: string) {
-    const connection = this.dependencies.options()
-    return Promise.resolve(connection.models.map(model => catalogModelInfo(provider, model)))
+  override async listModels(provider: string) {
+    return this.dependencies.discoverModels?.(provider) ?? []
   }
-  override resolveModel(provider: string, model: string, _signal?: AbortSignal) {
-    return Promise.resolve(modelInfo(this.dependencies.options(), provider, model))
+  override async resolveModel(provider: string, model: string, signal?: AbortSignal) {
+    return modelInfo(await this.connection(signal), provider, model)
   }
   override imageRequestPricing(_provider: string, model: string) {
     return imagePricing(this.dependencies.options(), model, this.imageAccess)
   }
-  override prepareCall(provider: string, model: string, _signal?: AbortSignal): Promise<PreparedAdapterCall> {
-    const connection = this.dependencies.options()
-    return Promise.resolve({ model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) })
+  override imageRequestTarget(_provider: string, model: string, image: ImageAttachmentRef) {
+    const entry = this.dependencies.options().models.find(entry => entry.id === model)
+    if (entry === undefined) throw new LlmError(`DeepSeek model "${model}" has no declared image projection`, 'UNKNOWN_MODEL')
+    return resolveRequestImageTarget(entry, image)
+  }
+  override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    const connection = await this.connection(signal)
+    this.dependencies.admit?.(connection, model)
+    return { model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) }
   }
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    return this.generate(options, this.dependencies.options())
+    const connection = this.dependencies.options()
+    this.dependencies.admit?.(connection, options.model)
+    return this.generate(options, connection)
   }
 
-  private async * generate(options: GenerateOptions, connection: Connection): AsyncGenerator<StreamChunk> {
+  private connection(signal: AbortSignal | undefined): Promise<C> {
+    return this.dependencies.connect?.(signal) ?? Promise.resolve(this.dependencies.options())
+  }
+
+  private async * generate(options: GenerateOptions, connection: C): AsyncGenerator<StreamChunk> {
     const consumer = new AbortController()
     const signal = options.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, options.signal])
     using watchdog = idleWatchdog(signal, connection.streamIdleTimeoutMs, 'MESSAGES_IDLE')
@@ -67,78 +80,99 @@ export class DeepSeekAdapter extends LlmAdapter {
       throw new LlmError('DeepSeek Messages transport failed', 'TRANSPORT', { cause: error })
     } finally {
       consumer.abort()
-      try { await iterator.return(undefined) } catch (_abortedRequestCleanup) {
-        // The request already settled; aborting its reader cannot replace that outcome.
-      }
+      // The abort above owns the socket teardown. A demand the deadline abandoned
+      // can stay pending forever, and this generator queues its own return behind
+      // that demand, so awaiting the drain would re-hang the settled outcome.
+      /* v8 ignore next -- the detached drain only rejects while unwinding an abandoned request. */
+      void iterator.return(undefined).catch(() => {})
     }
   }
 
   private async * request(
-    options: GenerateOptions, connection: Connection, signal: AbortSignal, activity: () => void,
+    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void,
   ): AsyncGenerator<StreamChunk> {
     signal.throwIfAborted()
     const { messages, versions } = await prepareImages(
       options.messages, connection, options.model, this.dependencies.resolveAttachments?.(), this.imageAccess, signal,
     )
-    const accountToken = await this.dependencies.resolveAccountToken?.(connection)
-    const key = accountToken ?? await this.dependencies.resolveApiKey(connection)
-    const files = new RequestFiles(this.files, {
-      baseURL: connection.baseURL, apiKey: key, accountCredential: accountToken !== undefined,
-    },
-    connection.filePolicy, connection.filesApiTimeoutMs, signal, activity)
-    let inline = false
-    while (true) {
-      signal.throwIfAborted()
-      files.beginAttempt()
-      let fileIds: Awaited<ReturnType<typeof prepareFileIds>> | undefined
-      if (!inline) {
-        try {
-          fileIds = await prepareFileIds(messages, versions, files)
-        } catch (error) {
-          if (!(error instanceof FileResolutionFailure)) throw error
-          inline = true
-          continue
+    const auth = await this.dependencies.resolveAuth(connection)
+    try {
+      const files = new RequestFiles(this.files, {
+        baseURL: connection.baseURL, headers: auth.headers,
+      },
+      connection.filePolicy, connection.filesApiTimeoutMs, signal, activity)
+      let inline = false
+      while (true) {
+        signal.throwIfAborted()
+        files.beginAttempt()
+        let fileIds: Awaited<ReturnType<typeof prepareFileIds>> | undefined
+        if (!inline) {
+          try {
+            fileIds = await prepareFileIds(messages, versions, files)
+          } catch (error) {
+            if (!(error instanceof FileResolutionFailure)) throw error
+            inline = true
+            continue
+          }
         }
-      }
-      const history = inline ? inlineImages(messages, versions, connection) : messages
-      const body = serialize(options, connection, history, versions, this.imageAccess, (reason) => {
-        this.dependencies.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
-      }, fileIds)
-      const extensions = await prepareRequestExtensions(body as Readonly<Record<string, DeepSeekLlmApiJson>>, {
-        signal,
-        ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
-        ...options.purpose === undefined ? {} : { purpose: options.purpose },
-      }, this.dependencies.prepareExtensions)
-      signal.throwIfAborted()
-      const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
-        method: 'POST', signal, body: extensions.payload, redirect: 'error',
-        headers: {
-          ...attributionHeaders(),
-          'content-type': 'application/json', 'accept': 'text/event-stream',
-          ...accountToken === undefined ? { 'x-api-key': key } : { 'x-dsh-auth-token': accountToken },
-          'anthropic-version': '2023-06-01',
-          ...fileIds === undefined || fileIds.size === 0 ? {} : { 'anthropic-beta': MESSAGES_FILES_BETA },
-          'x-deepseek-harness-user-id': this.dependencies.resolveUserId(),
-          ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
-          ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
-        },
-      })
-      if (!response.ok) {
-        const text = await response.text()
-        let raw: unknown
-        try { raw = JSON.parse(text) } catch (_nonJsonGatewayError) {
-          // HTTP status is authoritative when a gateway does not return JSON.
+        const history = inline ? inlineImages(messages, versions, connection) : messages
+        const body = serialize(options, connection, history, versions, this.imageAccess, (reason) => {
+          this.dependencies.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
+        }, fileIds)
+        const extensions = await prepareRequestExtensions(body as Readonly<Record<string, DeepSeekLlmApiJson>>, {
+          signal,
+          ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+          ...options.purpose === undefined ? {} : { purpose: options.purpose },
+        }, this.dependencies.prepareExtensions, (fields, error) => {
+          this.dependencies.onExtensionsOmitted?.({ provider: options.provider, model: options.model, fields, error })
+        }, (error) => {
+          this.dependencies.onExtensionsUnaccepted?.({ provider: options.provider, model: options.model, error })
+        })
+        signal.throwIfAborted()
+        const betas = [
+          ...fileIds !== undefined && fileIds.size > 0 ? [MESSAGES_FILES_BETA] : [],
+          ...body.messages.some(message => message.content.some(block => block.type === 'tool_addition' || block.type === 'tool_removal'))
+            ? [MESSAGES_TOOL_CHANGES_BETA]
+            : [],
+        ]
+        const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
+          method: 'POST', signal, body: extensions.payload, redirect: 'error',
+          headers: {
+            ...attributionHeaders(),
+            'content-type': 'application/json', 'accept': 'text/event-stream',
+            ...auth.headers,
+            'anthropic-version': '2023-06-01',
+            ...betas.length === 0 ? {} : { 'anthropic-beta': betas.join(',') },
+            'x-deepseek-harness-user-id': this.dependencies.resolveUserId(),
+            ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
+            ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
+          },
+        })
+        if (!response.ok) {
+          const text = await response.text()
+          let raw: unknown
+          try { raw = JSON.parse(text) } catch (_nonJsonGatewayError) {
+            // HTTP status is authoritative when a gateway does not return JSON.
+          }
+          const detail = providerErrorDetail(raw)
+          if (await files.retry(detail)) continue
+          const failure = providerError(raw, response.status, response.headers)
+          const message = files.errorMessage(response.status, failure.message, detail)
+          throw new LlmError(message, failure.code, { ...failure.failure, cause: new Error(text) })
         }
-        const detail = providerErrorDetail(raw)
-        if (await files.retry(detail)) continue
-        const failure = providerError(raw, response.status, response.headers)
-        const message = files.errorMessage(response.status, failure.message, detail)
-        throw new LlmError(message, failure.code, { ...failure.failure, cause: new Error(text) })
+        await extensions.accept()
+        if (response.body === null) throw new LlmError('DeepSeek Messages returned no response body', 'EMPTY_RESPONSE')
+        yield* translate(parseSse(response.body, activity), options.model)
+        return
       }
-      await extensions.accept()
-      if (response.body === null) throw new LlmError('DeepSeek Messages returned no response body', 'EMPTY_RESPONSE')
-      yield* translate(parseSse(response.body, activity), options.model)
-      return
+    } catch (error) {
+      if (auth.onRequestError !== undefined) {
+        let mapped: unknown
+        try { mapped = await auth.onRequestError(error) }
+        catch (_credentialUpdateFailed) { throw error }
+        throw mapped
+      }
+      throw error
     }
   }
 }

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useDisclosure } from '@deepseek-ai/dsh-client-ui-chat/src/client/chat/use-disclosure.ts'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 
-import type { RunningToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { StartedToolCall, ToolResultNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { localizeAutoReviewDenial, normalizeAutoReviewReason } from '../src/client/tool/models/auto-review-denial.ts'
@@ -13,6 +13,7 @@ import {
 import { ToolRow } from '../src/client/tool/components/ToolRow.tsx'
 import { GenericToolCard, type GenericToolCardProps } from '../src/client/tool/toolviews/GenericToolCard.tsx'
 import { zh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
+import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 
 afterEach(() => {
   cleanup()
@@ -21,17 +22,24 @@ afterEach(() => {
 
 const t: GenericToolCardProps['t'] = makeTranslate(zh, commonZh)
 
-const running = (over?: Partial<RunningToolCall>): RunningToolCall => ({
-  callId: 'c1', name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}',
-  turn: 1, step: 1, time: 1_000, subCalls: [], ...over,
-})
+const running = (over?: Partial<StartedToolCall>): StartedToolCall => {
+  const argsRaw = over?.argsRaw ?? '{"command":"ls -la","description":"List files"}'
+  return {
+    phase: 'start' as const, args: PartialArguments.fromText(argsRaw), callId: 'c1', name: 'bash', argsRaw,
+    turn: 1, step: 1, time: 1_000, subCalls: [], ...over,
+  }
+}
 
-const result = (over?: Partial<ToolResultNode>): ToolResultNode => ({
-  kind: 'tool-result', seq: 10, time: 2_000, callId: 'c1',
-  call: { name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}' },
-  callTime: 1_000,
-  content: [], isError: false, subCalls: [], ...over,
-})
+const result = (over?: Partial<ToolResultNode>): ToolResultNode => {
+  const call = over?.call === undefined ? { name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}' } : over.call
+  return {
+    kind: 'tool-result', seq: 10, time: 2_000, callId: 'c1',
+    name: call?.name ?? '', args: call === null ? PartialArguments.EMPTY : PartialArguments.fromText(call.argsRaw),
+    call,
+    callTime: 1_000,
+    content: [], isError: false, subCalls: [], ...over,
+  }
+}
 
 describe('tool-call-model', () => {
   it('classifies known tools and falls back to others', () => {
@@ -102,6 +110,23 @@ describe('tool-call-model', () => {
     expect(toolRowModel('bash', running({ argsRaw: '{"command":"pwd"}' })).summary).toBe('pwd')
   })
 
+  it.each([
+    { name: 'web_search', variant: 'search', prefix: '' },
+    { name: 'custom-tool', variant: 'others', prefix: 'custom-tool · ' },
+  ])('prefers description for $variant summaries and retains the raw-argument fallback', ({ name, variant, prefix }) => {
+    for (const withDescription of [true, false]) {
+      const argsRaw = JSON.stringify({
+        query: 'First argument',
+        ...withDescription ? { description: 'Preferred description\nSecond line' } : {},
+      })
+      for (const block of [running({ name, argsRaw }), result({ call: { name, argsRaw } })]) {
+        expect(toolRowModel(name, block)).toMatchObject({
+          variant, summary: prefix + (withDescription ? 'Preferred description' : 'First argument'),
+        })
+      }
+    }
+  })
+
   it('keeps summaries single-line and falls back for opaque args', () => {
     expect(toolRowModel('bash', running({ argsRaw: '{"command":"a\\nb"}' })).summary).toBe('a')
     expect(toolRowModel('read', running({ name: 'read', argsRaw: '{"path":"/tmp/x.ts"}' })).summary).toBe('/tmp/x.ts')
@@ -123,9 +148,9 @@ describe('tool-call-model', () => {
   })
 
   it('exposes filePath for path/file_path args and skips URL-only reads', () => {
-    expect(toolRowModel('read', running({ name: 'read', argsRaw: '{"path":"src/a.ts"}' })).filePath).toBe('src/a.ts')
-    expect(toolRowModel('write', running({ name: 'write', argsRaw: '{"file_path":"src/a.ts"}' })).filePath).toBe('src/a.ts')
-    expect(toolRowModel('edit', running({ name: 'edit', argsRaw: '{"file_path":"src/a.ts"}' })).filePath).toBe('src/a.ts')
+    expect(toolRowModel('read', result({ call: { name: 'read', argsRaw: '{"path":"src/a.ts"}' } })).filePath).toBe('src/a.ts')
+    expect(toolRowModel('write', result({ call: { name: 'write', argsRaw: '{"file_path":"src/a.ts"}' } })).filePath).toBe('src/a.ts')
+    expect(toolRowModel('edit', result({ call: { name: 'edit', argsRaw: '{"file_path":"src/a.ts"}' } })).filePath).toBe('src/a.ts')
     expect(toolRowModel('web_fetch', running({ name: 'web_fetch', argsRaw: '{"url":"https://example.com"}' })).filePath)
       .toBeUndefined()
     expect(toolRowModel('bash', running()).filePath).toBeUndefined()
@@ -139,6 +164,31 @@ describe('tool-call-model', () => {
     expect(toolRowModel('read', running({ name: 'read', argsRaw: '{"path":"/etc/hosts"}' }), cwd).summary).toBe('/etc/hosts')
     expect(toolRowModel('bash', running({ argsRaw: '{"command":"pwd"}' }), cwd).summary).toBe('pwd')
     expect(toolRowModel('read', running({ name: 'read', argsRaw: '{"path":"/Users/u/ws/a.md"}' }), '').summary).toBe('/Users/u/ws/a.md')
+  })
+
+  it.each(['read', 'write', 'edit', 'read_image'].flatMap(name => [false, true].map(nested => ({ name, nested }))))('opens $name nested=$nested at its recorded target after later directory changes without relabeling it', ({ name, nested }) => {
+    const block = result({ ...(nested ? { parentCallId: 'outer' } : {}), call: { name, argsRaw: '{"file_path":"note.txt"}' }, meta: { path: '/workspace/b/note.txt' } })
+    for (const cwd of ['/workspace/a', '/workspace/c']) {
+      const model = toolRowModel(name, block, cwd)
+      expect(model.filePath).toBe('/workspace/b/note.txt')
+      expect(model.summary).toBe('note.txt')
+      const openFile = vi.fn()
+      const view = render(<GenericToolCard useDisclosure={useDisclosure} phase="result" callId="c1" toolName={name} block={block} cwd={cwd} openFile={openFile} loadImage={vi.fn(async () => '')} t={t} />)
+      fireEvent.click(view.getByText('note.txt'))
+      expect(openFile).toHaveBeenCalledWith('/workspace/b/note.txt')
+      view.unmount()
+    }
+  })
+
+  it('keeps old root results usable and waits for recorded targets before opening relative pending or nested calls', () => {
+    const call = { name: 'read', argsRaw: '{"file_path":"note.txt"}' }
+    for (const meta of [undefined, null, [], { path: 7 }, { path: 'relative.txt' }]) {
+      expect(toolRowModel('read', result({ call, meta }), '/original').filePath).toBe('note.txt')
+    }
+    expect(toolRowModel('read', running(call), '/original').filePath).toBeUndefined()
+    expect(toolRowModel('read', result({ call, parentCallId: 'outer' }), '/original').filePath).toBeUndefined()
+    expect(toolRowModel('read', result({ call, isError: true }), '/original').filePath).toBeUndefined()
+    expect(toolRowModel('read', running({ name: 'read', argsRaw: '{"file_path":"/absolute/note.txt"}' })).filePath).toBe('/absolute/note.txt')
   })
 
   it('abbreviates leftover POSIX home paths after cwd relativization', () => {
@@ -309,10 +359,11 @@ describe('ToolRow', () => {
         newText: 'start\nsecond\nthird\nnew\nfourth\nfifth\nend',
       }] },
     }} />)
-    expect(view.getByText('+1 -1')).toBeTruthy()
+    expect(view.container.querySelector('[data-disclosure-row]')?.textContent).toContain('+1 -1')
     expect(view.container.querySelector('[data-diff]')).toBeNull()
     fireEvent.click(view.getByRole('button'))
-    expect(view.getAllByText('+1 -1')).toHaveLength(1)
+    expect(view.getAllByText('+1')).toHaveLength(1)
+    expect(view.getAllByText('-1')).toHaveLength(1)
     expect(view.getAllByText('start')).toHaveLength(1)
     expect(view.getAllByText('end')).toHaveLength(1)
     expect(view.getByText('old', { exact: true })).toBeTruthy()
@@ -439,6 +490,18 @@ describe('ToolRow', () => {
     expect(failed.queryByText('+2')).toBeNull()
   })
 
+  it('places the summary suffix before diff totals without replacing them', () => {
+    const diff = { card: { diffs: [{ path: 'out.txt', oldText: null, newText: 'one\ntwo\n' }] } }
+    const view = render(<ToolRow {...rowProps} variant="write" summary="out.txt" summarySuffix="2KB" diff={diff} />)
+    expect(view.container.querySelector('[data-disclosure-row]')?.textContent).toMatch(/2KB.*\+2 -0/)
+    for (const state of ['error', 'stopped'] as const) {
+      view.rerender(<ToolRow {...rowProps} state={state} summarySuffix="2KB" diff={diff} />)
+      expect(view.queryByText('2KB')).toBeNull()
+      expect(view.queryByText('+2')).toBeNull()
+      expect(view.queryByText('-0')).toBeNull()
+    }
+  })
+
   it('an error file row drops the open-file link (the summary is failure prose, not the path)', () => {
     const open = vi.fn()
     const view = render(
@@ -494,9 +557,9 @@ describe('ToolRow', () => {
 })
 
 describe('GenericToolCard', () => {
-  const props = (toolName: string, block: RunningToolCall | ToolResultNode): GenericToolCardProps => ({
+  const props = (toolName: string, block: StartedToolCall | ToolResultNode): GenericToolCardProps => ({
     loadImage: vi.fn(() => Promise.reject(new Error('not used'))),
-    useDisclosure, callId: 'c1', toolName, block, openFile: vi.fn(), t,
+    useDisclosure, callId: 'c1', toolName, ...('kind' in block ? { phase: 'result' as const, block: block } : { phase: block.phase, block: block }), openFile: vi.fn(), t,
   })
 
   it('renders the classified variant row from the frozen slice', () => {
@@ -522,7 +585,7 @@ describe('GenericToolCard', () => {
 
   it('unknown tools land on the others variant titled Tool call', () => {
     const view = render(
-      <GenericToolCard {...props('todo_write', running({ name: 'todo_write', argsRaw: '{"note":"x"}' }))} />,
+      <GenericToolCard {...props('custom_tool', running({ name: 'custom_tool', argsRaw: '{"note":"x"}' }))} />,
     )
     expect(view.getByText('工具调用')).toBeTruthy()
     expect(view.container.querySelector('[data-variant="others"]')).not.toBeNull()
@@ -564,7 +627,7 @@ describe('GenericToolCard', () => {
   })
 
   it('file-path summary click reaches openFile; bash summary does not', () => {
-    const file = props('read', running({ name: 'read', argsRaw: '{"path":"src/x.ts"}' }))
+    const file = props('read', result({ call: { name: 'read', argsRaw: '{"path":"src/x.ts"}' } }))
     const fileView = render(<GenericToolCard {...file} />)
     fireEvent.click(fileView.getByText('src/x.ts'))
     expect(file.openFile).toHaveBeenCalledWith('src/x.ts')

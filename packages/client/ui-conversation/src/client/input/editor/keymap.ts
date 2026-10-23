@@ -32,7 +32,7 @@ export interface ComposerKeymapHandlers {
   dismissPopup(): void
   /** Whether Enter may submit right now (locked/busy states refuse). */
   canSubmit(): boolean
-  /** The Enter gesture after every guard passed; `accelerated` = Ctrl/Cmd held. */
+  /** Plain Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
   submit(accelerated: boolean): void
   /**
    * Pasted files with directory metadata supplied by the clipboard entry API.
@@ -115,7 +115,7 @@ export function registerComposerKeymap(editor: LexicalEditor, handlers: Composer
     ),
     editor.registerCommand(KEY_ESCAPE_COMMAND, (event) => {
       // Escape layering: an open overlay closes; claimed without an overlay
-      // does NOT release (backspacing the token is the only exit gesture).
+      // does NOT release (deleting the command chip is the only exit gesture).
       handlers.dismissPopup()
       if (handlers.arbitrate('escape', isComposingEvent(event, recentlyComposing)) === 'consumed') {
         event.preventDefault()
@@ -127,14 +127,17 @@ export function registerComposerKeymap(editor: LexicalEditor, handlers: Composer
       if (isComposingEvent(event, recentlyComposing)) return false
       const consumed = handlers.space()
       if (consumed) {
-        event.preventDefault() // claim token already carries the trailing separator
+        event.preventDefault() // the command chip insertion already carries its separator
         return true
       }
       return false
     }, COMMAND_PRIORITY_CRITICAL),
     editor.registerCommand(KEY_ENTER_COMMAND, (event) => {
-      // Shift+Enter is the native line break UNCONDITIONALLY — decided before
-      // the IME guard so a composition-closing Shift+Enter still breaks the line.
+      // Returning true stops Lexical's fallback line break without consuming
+      // the DOM event that application shortcuts need.
+      if (event !== null && (event.altKey || event.getModifierState('AltGraph')
+        || (event.ctrlKey && event.metaKey) || (event.shiftKey && (event.ctrlKey || event.metaKey)))) return true
+      // Plain Shift+Enter keeps its native line break, including during composition.
       if (event?.shiftKey === true) return false
       if (event !== null && isComposingEvent(event, recentlyComposing)) {
         // The IME consumes this Enter (candidate pick); neither submit nor

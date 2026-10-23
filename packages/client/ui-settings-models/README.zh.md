@@ -129,4 +129,4 @@ Host 配置 `credentialOnboarding` 默认为 `true`。Electron preload 标记会
 
 </details>
 
-**运行时不变式：** 不发布伴生入口。这是只贡献 nav entry 的 section 插件，渲染固定空 content column，不发出 Cordis 事件，也不持有跨插件可变关系。
+**运行时不变式：** 不发布伴生入口。页面声明设置、凭据、提供商目录与 Session 模型目录服务依赖；账号模型提供商的可用状态来自 Session 模型目录。

@@ -237,12 +237,14 @@ describe('JDCloud login browser plugin', () => {
     expect(b.tabs.guide()).toHaveLength(0)
     expect(b.tabs.get('terminal')).toBeUndefined()
     expect(b.panelAvailable('plugins')).toBe(false)
+    expect(b.panelAvailable('schedules')).toBe(false)
     expect(b.commandAvailable('plan')).toBe(true)
     await fiber.dispose()
     expect(b.commandAvailable('model')).toBe(true)
     expect(b.commandAvailable('permission')).toBe(true)
     expect(b.tabs.get('terminal')?.kind).toBe('terminal')
     expect(b.panelAvailable('plugins')).toBe(true)
+    expect(b.panelAvailable('schedules')).toBe(true)
   })
 
   it('updates administrator controls when tenant permissions change', async () => {
@@ -264,6 +266,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('permission')).toBe(true)
     expect(b.tabs.get('terminal')?.kind).toBe('terminal')
     expect(b.panelAvailable('plugins')).toBe(true)
+    expect(b.panelAvailable('schedules')).toBe(true)
 
     b.setAdministrator(false)
     const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
@@ -273,6 +276,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.tabs.get('terminal')).toBeUndefined()
     expect(b.panelAvailable('plugins')).toBe(false)
+    expect(b.panelAvailable('schedules')).toBe(false)
     await fiber.dispose()
   })
 

@@ -19,8 +19,21 @@ async function expectFailure(operation: Promise<unknown>, code: string): Promise
 }
 
 function controllerAgents(overrides: object = {}): ApiSessionAgentController {
+  const ensureSession = Reflect.get(overrides, 'ensureSession') as ((
+    sessionId: SessionId,
+    cwd: string,
+    explicit: boolean,
+    agentPreset: string | undefined,
+  ) => Promise<Agent>) | undefined
+  const createSession: ApiSessionAgentController['createSession'] = async (request) => {
+    const sessionId = request.sessionId ?? SessionId('session-created')
+    const agent = ensureSession === undefined
+      ? { id: sessionId, session: { header: { cwd: request.cwd } } } as Agent
+      : await ensureSession(sessionId, request.cwd, request.sessionId !== undefined, request.agentPreset)
+    return { agent, agentPreset: undefined }
+  }
   return {
-    ensureSession: () => Promise.resolve(),
+    createSession,
     composeAgent: () => Promise.resolve({ setup: () => {} }),
     presetForSession: () => undefined,
     presetForObservation: () => undefined,

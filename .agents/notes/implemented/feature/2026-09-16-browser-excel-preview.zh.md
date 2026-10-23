@@ -24,7 +24,7 @@ PDF 转换会丢失工作表导航以及公式与已保存值之间的关系。�
 
 只读公式栏直接读取原始 `cell.f`，通过 `textContent` 写入公式和单元格文本。FortuneSheet 的公式格式化器会生成含有文档文本的 HTML span，其 HTML 辅助函数会原样放行公式和以 `<span` 开头的字符串。只读模式和解析 Worker 都不能隔离这部分 DOM。[core 补丁](../../../../patches/@fortune-sheet__core@1.0.4.patch)会对复制的单元格内容进行 HTML 转义，包括字面字符串和已保存的公式结果，同时保留剪贴板表格及其格式。
 
-ESM 和 CommonJS 入口应用相同补丁。升级 FortuneSheet 时需要重新检查工作表切换、完整初始选区、公式栏字面文本以及经过转义的表格复制。
+core 补丁还在 `allowEdit === false` 时跳过冻结分隔线的绘制，保留冻结窗格计算和编辑模式下的分隔线。这些分隔线由 Canvas 绘制，因此局部 CSS 无法修改。预览区域内的 CSS 隐藏行列冻结拖拽条。ESM 和 CommonJS 入口应用相同补丁。升级 FortuneSheet 时需要重新检查工作表切换、完整初始选区、公式栏字面文本、经过转义的表格复制，以及冻结窗格的绘制和滚动。
 
 ## 考虑过的替代方案
 
@@ -36,7 +36,7 @@ ESM 和 CommonJS 入口应用相同补丁。升级 FortuneSheet 时需要重新�
 
 **替换 ExcelJS 或要求用户重写文件。** 更换解析器会使现有字体、边框、合并及冻结窗格的保留面临风险。重写源文件则把查看器缺陷交给用户处理。临时预览副本同时保留现有适配器和用户文件。
 
-**保留 PDF 作为 Excel 兜底，或在导入时计算所有公式。** PDF 无法保留表格交互与公式查看，而重新计算可能改变已保存结果。[Office 引擎决策](../architecture/2026-09-11-node-office-kit.zh.md)仍适用于 Word/PowerPoint 预览与独立转换使用方；转换能力仍支持表格。
+**保留 PDF 作为 Excel 兜底，或在导入时计算所有公式。** PDF 无法保留表格交互与公式查看，而重新计算可能改变已保存结果。[Office 引擎参考](../../../../packages/document/office-to-pdf/README.zh.md)仍适用于 Word/PowerPoint 预览与独立转换使用方；转换能力仍支持表格。
 
 ## 影响
 

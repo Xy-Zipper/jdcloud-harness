@@ -9,6 +9,7 @@ import type {
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { UserTextRegistry } from '@deepseek-ai/dsh-client-ui-conversation/src/client/conversation/user-text-registry.ts'
 import type { InputTriggerSource, ReferenceInsert } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
@@ -16,6 +17,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply, inject } from '../src/client/index.ts'
+import { JdcloudLowcodeFunctionReference } from '../src/client/JdcloudLowcodeFunctionReference.tsx'
 import { LowcodeActionPicker } from '../src/client/LowcodeActionPicker.tsx'
 import { zh } from '../src/client/locales.ts'
 import type { WritableMenuPickerInjected, WritableMenuState } from '../src/client/types.ts'
@@ -66,10 +68,15 @@ const MENUS: readonly JdcloudWritableMenu[] = [
 /** Assemble the plugin over controllable Remote and input-source faces. */
 async function bench() {
   const ctx = new Context()
+  const userText = new UserTextRegistry(ctx)
+  ctx.provide('uiConversation', { userText } as never)
   await ctx.plugin(SlotRegistry).await()
   ctx.slots.register({
     name: 'root',
-    children: { 'conversation.input.dock': { kind: 'list', scope: 'session' } },
+    children: {
+      'conversation.input.dock': { kind: 'list', scope: 'session' },
+      'conversation.user.text.node': { kind: 'keyed', scope: 'session' },
+    },
   } as never, () => null)
   ctx.provide('locale', new LocaleRuntime(ctx))
   const writableMenus = vi.fn(() => Promise.resolve({
@@ -125,6 +132,7 @@ async function bench() {
     fiber,
     writableMenus,
     status,
+    userText,
     injected,
     source: () => source,
     inserted: () => inserted,
@@ -137,8 +145,26 @@ describe('JDCloud low-code action browser plugin', () => {
     const b = await bench()
     expect(inject).toEqual([
       'inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.jdcloudAuth',
+      'uiConversation',
     ])
     expect(b.source()).toMatchObject({ trigger: '@', name: 'jdcloud-lowcode-function' })
+    expect(b.userText.entries().map(rule => rule.id)).toEqual(['jdcloud-lowcode-function'])
+    expect(b.ctx.slots.entries('conversation.user.text.node')).toMatchObject([{
+      options: { key: 'jdcloud-lowcode-function' },
+      component: JdcloudLowcodeFunctionReference,
+    }])
+    const marker = '@[报账审批表](dsh-reference:jdcloud-lowcode-function/6a5861c3120862bdfedd15ff)'
+    const [node] = b.userText.createEvaluator()({ text: marker, facts: {} })
+    expect(node).toMatchObject({
+      id: 'jdcloud-lowcode-function',
+      data: { label: '报账审批表', menuId: '6a5861c3120862bdfedd15ff' },
+    })
+    const referenceNode = node as Parameters<typeof JdcloudLowcodeFunctionReference>[0]['node']
+    const view = render(<JdcloudLowcodeFunctionReference node={referenceNode} raw={marker} />)
+    const chip = view.container.querySelector('[data-ref-chip="reference"]')
+    expect(chip?.textContent).toBe('@报账审批表')
+    expect(chip?.getAttribute('title')).toBe(marker)
+    expect(chip?.querySelector('svg')).toBeNull()
     b.injected.selectMenu(MENUS[0]!, 7)
     expect(b.inserted()).toMatchObject({
       draftRev: 7,
@@ -150,6 +176,8 @@ describe('JDCloud low-code action browser plugin', () => {
     })
     await b.fiber.dispose()
     expect(b.source()).toBeUndefined()
+    expect(b.userText.entries()).toHaveLength(0)
+    expect(b.ctx.slots.entries('conversation.user.text.node')).toHaveLength(0)
   })
 
   it('offers current-tenant forms through @ and inserts the selected tag', async () => {

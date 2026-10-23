@@ -36,6 +36,9 @@
       "path": "../../goal/goal"
     },
     {
+      "path": "../../schedule/schedule"
+    },
+    {
       "path": "../../preset/agent-preset-registry"
     },
     {
@@ -78,10 +81,16 @@
       "path": "../../boot/plugin-manager"
     },
     {
+      "path": "../../boot/plugin-market"
+    },
+    {
       "path": "../../host/plugin-inventory"
     },
     {
       "path": "../account-controller"
+    },
+    {
+      "path": "../../credentials/deepseek-account"
     }
   ]
 }

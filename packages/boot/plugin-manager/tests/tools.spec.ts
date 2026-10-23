@@ -1,15 +1,17 @@
+import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 /** Agent controls use the same manager methods as the Web and bound inventory reads. */
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import SandboxPolicy, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import { Session, SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { expect, it, onTestFinished, vi } from 'vitest'
 import type PluginManager from '../src/index.ts'
+import type { BundleInfo } from '../src/types.ts'
 import * as tool from '../src/tools.ts'
 
 function resultText(result: Awaited<ReturnType<ToolRuntime['execute']>>): string {
@@ -27,6 +29,8 @@ async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-acce
     setBundleEnabled: vi.fn(async () => ({ changed: true, application: 'applied' })),
     installBundle: vi.fn(async () => ({ changed: true, application: 'restart-required' })),
     removeBundle: vi.fn(async () => ({ changed: false, application: 'failed' })),
+    listVersionExemptions: vi.fn(() => ({ exemptions: { 'example@1.2.3': ['0.1.7-alpha.1'] }, warnings: [] })),
+    setVersionExemption: vi.fn(async () => ({ changed: true, application: 'applied' })),
   }
   ctx.provide('pluginManager', manager as unknown as PluginManager)
   await ctx.plugin(SystemPrompt)
@@ -43,7 +47,7 @@ async function fixture(mode: 'read-only' | 'workspace-write' | 'danger-full-acce
 
 it.each(['read-only', 'workspace-write'] as const)('denies every management action in %s before accessing the manager', async (mode) => {
   const { call, manager } = await fixture(mode)
-  for (const action of ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle']) {
+  for (const action of ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle', 'list_version_exemptions', 'set_version_exemption']) {
     const result = await call({ action, target: 'bundle', enabled: true })
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain('requires approval, but no approval service is composed')
@@ -69,6 +73,40 @@ it('preserves selected bundle load errors in the agent list result', async () =>
           },
           "name": "bundle",
           "overrides": [],
+          "rows": [],
+        },
+      ],
+      "nextOffset": null,
+      "total": 1,
+    }
+  `)
+})
+
+it('exposes an absent Official bundle installation target without display metadata', async () => {
+  const { manager, call } = await fixture()
+  const offered: BundleInfo = {
+    name: '@deepseek-ai/dsh-subagent-codex', official: true, availability: 'missing',
+    installed: false, enabled: false, optional: false, removable: false, rows: [], overrides: [],
+    installTarget: { spec: '@deepseek-ai/dsh-subagent-codex@1.2.3', version: '1.2.3' },
+    meta: { title: 'Codex subagent' },
+  }
+  manager.listBundles.mockResolvedValue([offered])
+  expect(JSON.parse(resultText(await call({ action: 'list_bundles' })))).toMatchInlineSnapshot(`
+    {
+      "entries": [
+        {
+          "availability": "missing",
+          "enabled": false,
+          "installTarget": {
+            "spec": "@deepseek-ai/dsh-subagent-codex@1.2.3",
+            "version": "1.2.3",
+          },
+          "installed": false,
+          "name": "@deepseek-ai/dsh-subagent-codex",
+          "official": true,
+          "optional": false,
+          "overrides": [],
+          "removable": false,
           "rows": [],
         },
       ],
@@ -105,14 +143,14 @@ it.each(['read-only', 'workspace-write'] as const)('approves each action once in
   const agent = activeAgent()
   const prompted = vi.fn(async () => 'allowed-once' as const)
   const dispose = ctx.on('approval/request', prompted)
-  for (const action of ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle']) {
-    expect((await call({ action, target: 'bundle', enabled: true }, agent)).isError).toBe(false)
+  for (const action of ['list_plugins', 'list_bundles', 'set_plugin', 'set_bundle', 'install_bundle', 'remove_bundle', 'list_version_exemptions', 'set_version_exemption']) {
+    expect((await call({ action, target: 'bundle@1.0.0', enabled: true, runtimeVersion: '0.1.7-alpha.1', acceptRisk: true }, agent)).isError).toBe(false)
   }
-  expect(prompted).toHaveBeenCalledTimes(6)
+  expect(prompted).toHaveBeenCalledTimes(8)
   for (const method of Object.values(manager)) expect(method).toHaveBeenCalledTimes(1)
   expect(ctx.sandboxPolicy.resolve({ session: agent.session }).mode).toBe(mode)
   const audit = agent.session.snapshotEvents().filter(event => event.type.startsWith('approval/'))
-  expect(audit).toHaveLength(12)
+  expect(audit).toHaveLength(16)
   expect(audit[0]).toMatchObject({ type: 'approval/asked', data: {
     toolName: 'plugin_manager', callId: 'manager-call',
   } })
@@ -193,10 +231,10 @@ it('keeps UI translation metadata out of model-facing plugin and bundle lists', 
     entries: [{ entryId: 'include:plugin', enabled: true }], total: 1, nextOffset: null,
   })
   manager.listBundles.mockImplementationOnce(async () => [{
-    name: 'bundle', enabled: true, meta, rows: [{ rowId: 'plugin', moduleName: 'plugin', meta }],
+    name: 'bundle', source: 'bundle@^1.0.0', enabled: true, meta, rows: [{ rowId: 'plugin', moduleName: 'plugin', meta }],
   }])
   expect(JSON.parse(resultText(await call({ action: 'list_bundles' })))).toEqual({
-    entries: [{ name: 'bundle', enabled: true, rows: [{ rowId: 'plugin', moduleName: 'plugin' }] }], total: 1, nextOffset: null,
+    entries: [{ name: 'bundle', source: 'bundle@^1.0.0', enabled: true, rows: [{ rowId: 'plugin', moduleName: 'plugin' }] }], total: 1, nextOffset: null,
   })
 })
 
@@ -228,6 +266,9 @@ it.each([
   { action: 'set_plugin', enabled: true },
   { action: 'set_bundle', target: 'bundle' },
   { action: 'install_bundle' }, { action: 'remove_bundle' },
+  { action: 'set_version_exemption', enabled: true, runtimeVersion: '1.0.0' },
+  { action: 'set_version_exemption', target: 'plugin@1.0.0', enabled: true },
+  { action: 'set_version_exemption', target: 'plugin@1.0.0', runtimeVersion: '1.0.0' },
 ])('rejects incomplete or unbounded tool inputs: %j', async (args) => {
   const { call } = await fixture()
   expect((await call(args)).isError).toBe(true)
@@ -240,4 +281,26 @@ it('presents reads and changes distinctly and disposes its registration', async 
   expect(definition.presentCall?.({ action: 'remove_bundle', target: 'bundle' })).toMatchObject({ kind: 'other' })
   await fiber.dispose()
   expect(ctx.tools.get('plugin_manager')).toBeUndefined()
+})
+
+it('tells the agent the next step for each change outcome it can act on', async () => {
+  const { manager, call } = await fixture()
+  const outcome = async (result: object): Promise<unknown> => {
+    manager.setBundleEnabled.mockResolvedValueOnce(result as never)
+    return (JSON.parse(resultText(await call({ action: 'set_bundle', target: 'bundle', enabled: true }))) as { nextStep?: string }).nextStep
+  }
+  expect(await outcome({ changed: true, application: 'applied' })).toBeUndefined()
+  expect(await outcome({ changed: false, application: 'cancelled' })).toContain('nothing changed')
+  expect(await outcome({ changed: true, application: 'overridden' })).toContain('higher-priority layer')
+  expect(await outcome({ changed: true, application: 'restart-required', restartReason: 'host-module' }))
+    .toBe('Tell the user to restart DSH to apply this change: the change reaches modules DSH itself loaded.')
+  expect(await outcome({ changed: true, application: 'restart-required' })).toBe('Tell the user to restart DSH to apply this change.')
+  expect(await outcome({ changed: false, application: 'failed', packageResult: { kind: 'build-blocked' } })).toContain('approvedBuilds')
+  // A refusal code is more specific than the package manager's failure kind.
+  expect(await outcome({ changed: false, application: 'failed', packageResult: { kind: 'network' }, error: { code: 'stale-approval' } }))
+    .toContain('without approvedBuilds')
+  // A failure kind without its own step falls back to the refusal code.
+  expect(await outcome({ changed: false, application: 'failed', packageResult: { kind: 'unknown' }, error: { code: 'operation-error' } }))
+    .toContain('Report the diagnostic')
+  expect(await outcome({ changed: false, application: 'failed' })).toContain('Report the diagnostic')
 })

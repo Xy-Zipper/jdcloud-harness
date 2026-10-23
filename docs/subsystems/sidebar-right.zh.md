@@ -46,6 +46,8 @@ tab 身份是 `(kind, address)` 二元组：注册表的认领把地址原文用
 | `keepMounted` | 可选的懒保活：已访问正文跨隐藏、Session 切换与停靠切换保留，由所属 View 持有 Session reference。 |
 | `guide` | 可选的引导页入口框：`{ order, title(), description?(), icon? }`。点一框即把贡献它的类型作为页面打开；省略即不上引导页。 |
 
+完整地址模式匹配地址原文：picomatch 的 globstar（`**`）即使启用 `dot: true` 也排除独立的 `.` 和 `..` 段；该选项允许匹配 dotfile，不改变点段排除规则。地址由资源业务代码解析，文件读取仍受 Host 文件系统权限限制。
+
 路由是一次排序认领。`candidates(address)` 对模式命中且未被 `canOpen` 否决的类型排序：先按档，再按最长命中模式的长度，最后按注册顺序。`claim(address, kind?)` 取第一个候选，或直接用点名的 `kind`——跳过它的 glob，但 `canOpen` 仍生效——返回 `{ kind, contentId: address, title }`。没有任何类型认领的地址会抛错：这是接线错误，不是用户错误。
 
 同一个 `kind` 可同时携带一个 `builtin` 与一个 `extension` 注册。extension 在认领、`get(kind)`、`openTab(kind)` 与引导页上生效，席位按生效定义的 `id` 找 tab 的正文与标题，不涉及任何 slot 优先级；extension 注销后 builtin 恢复。kind 上的其它任何撞名以及任何重复的 `id` 都抛错。
@@ -90,6 +92,8 @@ export function apply(ctx: Context): void {
 
 `focus(tabId)` 让一个 tab 成为其 pane 的活动 tab；`split(paneId?)` 分割活动的停靠 pane 或点名的 pane，返回新 pane 的 id——pane 数预算或列宽不允许时返回 `undefined` 且不记账；`float(tabId, rect?)` 把一个 tab 浮出为浮窗 pane；`dock(paneId)` 把浮窗 pane 收回停靠区。四者都走 store 既有动作、各记一条历史；目标不存在或已处于目标状态时是空操作，与 `open` 一样在没有已挂载会话面时抛错。`TabId`、`PaneId`、`TabRecord`、`FloatRect` 自本包 `/client` 入口再导出，调用方无需引 dockkit。
 
+`focusedTarget(element?)` 从实时 DOM 焦点（包括内嵌 iframe）捕获可见页面；侧栏外部或过期的侧栏标记不产生目标。`commandTarget(element?)` 还允许侧栏外部发起的打开操作使用已挂载 Session 的活动停靠窗格。`SidebarRightTarget` 捕获 Session、窗格、host、tab occurrence 和导航 revision。`isTargetCurrent(target)` 在执行前检查这些身份，因此重新打开记录或再次导航都会使已捕获的动作失效；它不会改为操作其他页面。关闭与落位结果见[控制器方法](../../packages/client/ui-sidebar-right/src/client/service.ts)。
+
 ## Slot 与 owner props
 
 Sidebar 声明四个扩展 slot；其文档 tab 另行声明下表中的 keyed 文档正文 slot（[层级](slots.zh.md)）。
@@ -105,6 +109,8 @@ Sidebar 声明四个扩展 slot；其文档 tab 另行声明下表中的 keyed �
 正文、标题与引导页替换项接收框架注入的 `useTabInfo()`。它返回 `{ sidebar, panel, tab }`：`sidebar` 包含 `expanded` 与 `fullscreen`，`panel.id` 标识所属窗格，`tab` 包含记录字段以及 `visible`、`navigation`、`signal` 和 `actions`。所有 tab 都要求 Session 位于前台。停靠正文还要求展开且选中；停靠标题要求展开；前台浮窗不随整栏收起。`signal` 在记录消失或插件卸载时中止，不因隐藏或切换 Session 而中止。`tab.actions` 提供绑定到标签所属 Session 的 `openResource`、`openTab` 与 `close`。打开位置缺省为当前所属窗格；`revealIfOpened` 缺省为 `true`，`replaceTab: true` 在同一历史项中替换本记录。菜单项保留普通的 `tab` 与 `dismiss` owner 参数。
 
 `navigation.revision` 在每次导航到该 tab 时递增，`params` 不变也递增，正文可仅凭「又被导航了」行动；按地址打开的 tab 为 `1`，没有人按地址打开的记录——种入的引导、撤销恢复的 tab——为 `0`。Tab 域为每条打开的记录保有一个 occurrence：记录出现即在资源模型里钉住，因此切换 tab 卸载正文也不丢内容；记录消失即中止并丢弃；撤销恢复的记录是新的 occurrence（[Tab 域](../../packages/client/ui-sidebar-right/README.zh.md#the-tab-domain)）。
+
+`tab.actions.bindCommands(commands)` 为已挂载正文提供 `SidebarRightTabCommands`，目前包含可选的 `refresh` 回调。省略的操作不可用；返回的 disposer 释放本次注册，不会移除较新正文的命令。标签生命周期结束时也会释放这些命令。`tab.refreshShortcut` 为页面控件提供生效的刷新目录项；没有可用条目时该字段可省略。这些字段声明在 [slot owner 类型](../../packages/client/ui-sidebar-right/src/client/contract/slots.ts)中。
 
 ## 文档渲染器
 

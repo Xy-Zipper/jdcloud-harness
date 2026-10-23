@@ -27,9 +27,9 @@ kind: "package-reference"
 
 `GET /login/transfer?token=...&baseUrl=...` 会返回一个禁止缓存的跳板文档，再把内部参数放入 URL fragment，并发起同源导航进入 Web 外壳。fragment 可确保 JDCloud Token 不进入根路径 HTTP 请求和子资源 Referer。该文档默认拒绝 iframe 嵌入；`transferFrameAncestorOrigin` 接受一个准确的 HTTP(S) 父页面 origin，也可使用 `*` 允许全部父页面。通配符允许任意网站实施点击劫持，因此必须由部署显式配置。JDCloud bundle 选择 Connection 的 Bearer 浏览器会话载体，因此跨站 iframe 可以通过同源 HTTP 请求初始化标签页范围内的身份，不依赖第三方 cookie 或 HTTPS；明文 HTTP 仍会向网络观察者和中间节点暴露该 bearer 凭证。Client 随即把地址栏替换为 `/login/transfer`。priority 为 `-110` 的 root contribution 只调用一次 `loginWithToken()`；成功后显示应用，失败后显示本地化恢复页。选择恢复操作会关闭中转页并显示账号密码登录。原始 JDCloud Token 校验后只归 Host 所有，不写入浏览器存储；单独的 Harness 浏览器会话 token 存放在当前标签页的 `sessionStorage` 中。
 
-登录后，本包会占用 `sidebar.account`。展开侧边栏时显示 Host 返回的账号和当前租户，折叠轨道只显示账号图标。账号菜单列出全部自有与加入租户，高亮当前租户，并通过 `GET /api/system/corp/switchCorp/{corpId}` 切换到其他租户而不显示登录页。租户行在 240 像素高的区域内滚动，“退出登录”保持固定。切换失败时保留当前租户，并在菜单中显示错误。选择“退出登录”会删除 Host credential 并恢复登录页。
+登录后，本包会占用 `sidebar.account`。展开侧边栏时显示 Host 返回的账号和当前租户，折叠轨道只显示账号图标。账号菜单使用匹配当前主题的不透明背景，列出全部自有与加入租户，高亮当前租户，并通过 `GET /api/system/corp/switchCorp/{corpId}` 切换到其他租户而不显示登录页。租户行在 240 像素高的区域内滚动，“退出登录”保持固定。切换失败时保留当前租户，并在菜单中显示错误。选择“退出登录”会删除 Host credential 并恢复登录页。
 
-认证状态还携带 `systemAdministrator`。非管理员会以 priority `-100` 覆盖 `sidebar.settings`、`conversation.input.model`、`conversation.input.permission` 和 `conversation.hero.agentPreset`，拒绝 `/model` 与 `/permission`，并从引导页、渲染、恢复和浏览器直接导航中过滤 `terminal` 标签页类型。新 Session 使用部署的权限默认值，不再接受 JDCloud 专用覆盖。切换租户会立即重新应用仅限管理员的控件策略。管理员可看到底层控件。已有 Session 保留其持久模型与权限选择。
+认证状态还携带 `systemAdministrator`。非管理员会以 priority `-100` 覆盖 `sidebar.settings`、`conversation.input.model`、`conversation.input.permission` 和 `conversation.hero.agentPreset`，拒绝 `/model` 与 `/permission`，隐藏插件与自动化面板，并从引导页、渲染、恢复和浏览器直接导航中过滤 `terminal` 标签页类型。新 Session 使用部署的权限默认值，不再接受 JDCloud 专用覆盖。切换租户会立即重新应用仅限管理员的控件策略。管理员可看到底层控件。已有 Session 保留其持久模型与权限选择。
 
 本包还以优先级 `-10` 填充 `sidebar.brand.mark`、`sidebar.brand.name` 与 `conversation.hero.brand.mark`。蓝青渐变的六边形 J 标志遵循各宿主请求的尺寸，登录页复用同一图形。登录页标签与侧栏名称读取构建期 `DSH_CLIENT_TITLE`，未配置时回退为 `LSY-Agent`；Docker Compose 会把 `JDCLOUD_PRODUCT_NAME` 传入该变量。这些 single slot 选择更低优先级的填充，因此插件激活时 JDCloud 品牌会替换通用或官方品牌，卸载时自动恢复原填充。
 

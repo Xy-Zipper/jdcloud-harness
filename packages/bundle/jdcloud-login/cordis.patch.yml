@@ -6,7 +6,7 @@
     browserAuthentication: false
     browserSession: true
     browserSessionTransport: bearer
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    trustedHosts: !!js ctx.webStartup.trustedHosts
 
 # JDCloud workspaces stay inside the authenticated user's private directory.
 # The in-app browser starts at that directory and cannot navigate above it.

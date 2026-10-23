@@ -17,9 +17,11 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { JdcloudLowcodeFunctionReference } from './JdcloudLowcodeFunctionReference.tsx'
 import { LowcodeActionPicker } from './LowcodeActionPicker.tsx'
 import { en, NS, zh, type JdcloudLowcodeActionKey } from './locales.ts'
 import type { WritableMenuPickerInjected, WritableMenuState } from './types.ts'
+import { jdcloudLowcodeFunctionRule } from './user-text-rules.ts'
 
 const AUTH_RECORD_KEY = 'jdcloud-auth-controller/login'
 const SOURCE = 'jdcloud-lowcode-function'
@@ -37,7 +39,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Services required by the menu Remote, input reference codec, and dock contribution. */
+/** Services required by the menu Remote, input codec, sent-text projection, and dock contribution. */
 export const inject = [
   'inputTriggers',
   'sessions',
@@ -45,9 +47,10 @@ export const inject = [
   'locale',
   'remote',
   'remote.jdcloudAuth',
+  'uiConversation',
 ]
 
-/** Register the writable-menu loader, single-select dock, and structured reference codec. */
+/** Register the writable-menu loader, single-select dock, reference codec, and sent-text projection. */
 export function apply(ctx: ClientContext): void {
   const menuState = createSnapshotStore<WritableMenuState>({ phase: 'loading', menus: [] })
   const sessions = ctx.get('sessions') as ISessions
@@ -123,6 +126,13 @@ export function apply(ctx: ClientContext): void {
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-jdcloud-lowcode-actions: dictionaries')
   ctx.effect(() => inputTriggers.registerSource(source), 'ui-jdcloud-lowcode-actions: reference source')
+  ctx.effect(
+    () => ctx.uiConversation.userText.register(jdcloudLowcodeFunctionRule),
+    'ui-jdcloud-lowcode-actions: sent reference matcher',
+  )
+  ctx.slots.inject('conversation.user.text.node', () => ctx.slots.register({
+    name: 'conversation.user.text.node', key: SOURCE, priority: 100,
+  }, JdcloudLowcodeFunctionReference))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock',
     id: 'jdcloud-lowcode-actions',

@@ -1,6 +1,46 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-jdcloud-lowcode-actions/README.md
-README.md: 7512c569b7eef5c15ac5737bae13274ca94b6d3f
-README.zh.md: 30034ec5af3820e9edc2cc3bb17deb0f0a5ec716
+/:
+  en: 1854eb769d67404c
+  zh: 01d62526eb1d06e0
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions:
+  en: b2269fd3e9b11c88
+  zh: 7f2e538f5417023b
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/summary:
+  en: 4c476306c9663913
+  zh: 0cec60253fc2e60c
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/use-this-package:
+  en: 05234ef669452852
+  zh: 2c767a44edac7d60
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/understand-the-implementation:
+  en: 55ef3cd26d0eb433
+  zh: a7aeadecd2e74538
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/further-exploration:
+  en: ac01912c840a0c39
+  zh: 49646ffbffc9c61b
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/model-experience/selected-function-reference:
+  en: 82e9f69963afb198
+  zh: 5789c772e00adbfe
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/model-experience/selected-function-reference/what-the-model-sees:
+  en: 54fe1d3f7f84ee53
+  zh: a0a2d555e11f5871
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/model-experience/selected-function-reference/token-effect:
+  en: cd461843561eb863
+  zh: 52ebb714c44eefa1
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/model-experience/selected-function-reference/kv-cache-effect:
+  en: 56c8a3cd3b8f22c2
+  zh: f9b08c2d3e901329
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/known-limitations-and-deferred-work:
+  en: 396a4ecf67af901c
+  zh: 272505cf346be379
+/deepseek-ai-dsh-client-ui-jdcloud-lowcode-actions/known-limitations-and-deferred-work/dev-note:
+  en: 6f7f3b1088277647
+  zh: c97880d95da5ed77

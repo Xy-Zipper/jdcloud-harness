@@ -20,6 +20,9 @@ interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
 }
 
+/** Frames produced by the domain feed; access filtering alone may synthesize `replace`. */
+type WorkspaceFeedFrame = Exclude<WorkspaceFollowFrame, { readonly type: 'replace' }>
+
 /**
  * Project one authoritative Workspace entity into its Remote value.
  * @param workspace - authoritative registry entity.
@@ -87,7 +90,7 @@ export class WorkspaceFeed {
    * @param signal - generation cancellation.
    * @returns baseline followed by ordered Workspace increments.
    */
-  async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
+  async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFeedFrame> {
     signal.throwIfAborted()
     const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
     const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
@@ -112,9 +115,9 @@ export class WorkspaceFeed {
     for (const workspace of this.ctx.workspaceRegistry.list()) {
       if (await owner.owns('workspace', String(workspace.id), scopeKey)) items.push(workspaceView(workspace))
     }
-    const archivedSessionIds: string[] = []
+    const archivedSessionIds: WorkspaceBaseline['archivedSessionIds'][number][] = []
     for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
-      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(String(sessionId))
+      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(sessionId)
     }
     const pinnedSessionIds: WorkspaceBaseline['pinnedSessionIds'][number][] = []
     for (const sessionId of this.ctx.workspaceRegistry.pinnedSessionIds) {
@@ -122,7 +125,7 @@ export class WorkspaceFeed {
     }
     return {
       items,
-      archivedSessionIds: archivedSessionIds as unknown as WorkspaceBaseline['archivedSessionIds'],
+      archivedSessionIds,
       pinnedSessionIds,
     }
   }
@@ -170,7 +173,7 @@ export class WorkspaceFeed {
     })
   }
 
-  private publish(frame: Exclude<WorkspaceFollowFrame, { readonly type: 'baseline' }>): void {
+  private publish(frame: Exclude<WorkspaceFeedFrame, { readonly type: 'baseline' }>): void {
     for (const follower of this.followers) void follower.push(frame)
   }
 }
@@ -180,7 +183,7 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 }
 
 class WorkspaceFollower {
-  private readonly frames = new Deque<WorkspaceFollowFrame>()
+  private readonly frames = new Deque<WorkspaceFeedFrame>()
   private waiting: (() => void) | undefined
   private closed = false
   private pending = Promise.resolve()
@@ -190,7 +193,7 @@ class WorkspaceFollower {
     private readonly scopeKey: string | undefined,
   ) {}
 
-  async push(frame: WorkspaceFollowFrame): Promise<void> {
+  async push(frame: WorkspaceFeedFrame): Promise<void> {
     /* v8 ignore next -- closed followers are removed before later publication can reach them. */
     if (this.closed) return
     this.pending = this.pending.then(async () => {
@@ -234,7 +237,7 @@ class WorkspaceFollower {
     this.waiting?.()
   }
 
-  async *read(signal: AbortSignal): AsyncIterable<WorkspaceFollowFrame> {
+  async *read(signal: AbortSignal): AsyncIterable<WorkspaceFeedFrame> {
     while (!this.closed && !signal.aborted) {
       const frame = this.frames.popFront()
       if (frame !== undefined) {

@@ -126,7 +126,7 @@ export class BrowserSessionService extends Service {
    * @returns Whether the request carries a valid browser session.
    */
   accepts(request: ConnectionTrustRequest): boolean {
-    return this.browserId(request) !== undefined
+    return this.admittedWebSockets.has(request) || this.browserId(request) !== undefined
   }
 
   /**
@@ -176,7 +176,7 @@ export class BrowserSessionService extends Service {
    * @param request - trusted upgrade request carrying a `ticket` query parameter.
    * @returns whether the ticket authorized this exact request.
    */
-  admitWebSocket(request: ConnectionTrustRequest): boolean {
+  admitWebSocket(request: ConnectionIndexRequest): boolean {
     if (this.transport !== 'bearer') return this.accepts(request)
     this.pruneWebSocketTickets()
     const ticket = requestTicket(request.url)

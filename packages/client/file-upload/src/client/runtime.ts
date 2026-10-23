@@ -170,7 +170,7 @@ export class FileUploadRuntime extends Service implements FileUploadService {
     const hook = (globalThis as ClientFileUploadGlobal).__DSH_FILE_UPLOAD__
     const connection = ctx.get('connection') as Pick<ConnectionHandle, 'authorizationHeader'> | undefined
     this.transport = hook === undefined
-      ? workerTransport(() => connection?.authorizationHeader())
+      ? workerTransport(() => connection?.authorizationHeader?.())
       : customTransport(hook.fetch)
   }
 

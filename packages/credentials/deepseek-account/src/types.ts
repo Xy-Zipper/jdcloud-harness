@@ -1,10 +1,26 @@
-/** Client-safe account state; credentials never cross this projection. */
+/** Client-supplied request identity and client-safe account state; credentials never cross this projection. */
+import type {} from '@deepseek-ai/cordis'
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+
+/** Identity of the requesting UI for one account operation; the Host derives Platform request headers from it. */
+export interface AccountClientMetadata {
+  readonly version: string
+  /** Active UI language; only its primary subtag selects the Platform wire locale. */
+  readonly locale: string
+  /** Offset from UTC in seconds, positive east of Greenwich. */
+  readonly timezoneOffsetSeconds: number
+}
 
 /** Identity of one local login attempt, unrelated to the platform request ID. */
 export type SignInAttemptId = Branded<'SignInAttemptId'>
-/** Safe failure codes rendered through the caller's locale dictionary. */
-export type SignInErrorCode = 'network' | 'protocol' | 'expired' | 'storage'
+/**
+ * Safe failure codes rendered through the caller's locale dictionary.
+ * `no-response`: fetch returned no Response; `network`: HTTP or account-detail retrieval failure.
+ * `protocol`: invalid response or authorization data; `expired`: authorization expired;
+ * `storage`: local credential access or commit failed.
+ */
+export type SignInErrorCode = 'no-response' | 'network' | 'protocol' | 'expired' | 'storage'
 /** Latest login attempt, including terminal outcomes until the next attempt. */
 export interface SignInAttemptView {
   readonly id: SignInAttemptId
@@ -44,4 +60,40 @@ export interface AccountWallet {
 export interface AccountDetails {
   readonly profile: { readonly status: 'ready'; readonly value: AccountProfile } | { readonly status: 'failed' }
   readonly balance: { readonly status: 'ready'; readonly value: readonly AccountWallet[]; readonly bonusWallets: readonly AccountWallet[] } | { readonly status: 'failed' }
+}
+
+/** Identity of one granted bonus order; stable across devices and sign-ins. */
+export type AccountBonusOrderId = Branded<'AccountBonusOrderId'>
+/** One granted bonus Platform has not yet recorded as displayed; copy is server-authored. */
+export interface AccountBonusNotification {
+  /** Server-localized plain-text title; absent responses use the localized bonus title. */
+  readonly title?: string
+  readonly orderId: AccountBonusOrderId
+  /** Optional Platform metadata, forwarded without validation. */
+  readonly campaign?: JsonValue
+  readonly amount?: JsonValue
+  readonly currency?: JsonValue
+  readonly grantedAt?: JsonValue
+  /** Platform expiry timestamp; an empty string means the notice never expires. */
+  readonly expiresAt: string
+  /** Server-localized plain text ready for display. */
+  readonly message: string
+}
+/** Unnotified bonuses with the account they belong to, in Platform order. */
+export interface AccountBonusBatch {
+  readonly accountId: AccountUserId
+  readonly bonuses: readonly AccountBonusNotification[]
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /** Server rejection removed the current account credential; this notification is not replayed.
+     * @mode emit
+     */
+    'deepseek-account/session-expired'(): void
+    /** An account model request requires the user to sign in.
+     * @mode emit
+     */
+    'deepseek-account/model-sign-in-required'(): void
+  }
 }

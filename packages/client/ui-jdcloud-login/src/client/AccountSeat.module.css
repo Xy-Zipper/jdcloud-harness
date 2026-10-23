@@ -7,8 +7,13 @@
   min-width: 0;
 }
 
-/* The tenant rows scroll independently so the sign-out footer stays visible. */
-.tenantViewport > :first-child {
+/* Opaque tenant choices remain readable over the workspace list in either theme. */
+.tenantViewport {
+  --dsw-menu-surface-fill: var(--dsw-alias-bg-base);
+}
+
+/* The material precedes the scroll viewport; the sign-out footer stays outside it. */
+.tenantViewport > [role='presentation']:nth-child(2) {
   max-height: 240px;
   overflow-y: auto;
 }

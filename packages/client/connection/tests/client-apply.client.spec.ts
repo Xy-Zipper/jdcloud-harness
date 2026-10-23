@@ -480,7 +480,7 @@ describe('connection client apply', () => {
     })
   })
 
-  it('stores a Bearer session in sessionStorage and authenticates same-origin fetches', async () => {
+  it('stores a Bearer session in sessionStorage and authenticates same-origin fetches and WebSockets', async () => {
     const values = new Map<string, string>()
     const session = {
       getItem: vi.fn((key: string) => values.get(key) ?? null),
@@ -491,6 +491,13 @@ describe('connection client apply', () => {
       get length() { return values.size },
     } satisfies Storage
     const local = { setItem: vi.fn() }
+    const physicalSocket = Object.assign(new EventTarget(), {
+      readyState: 0,
+      send: vi.fn(),
+      close: vi.fn(),
+    })
+    const createSocket = vi.fn(function (_url: string) { return physicalSocket })
+    vi.stubGlobal('WebSocket', createSocket)
     ;(globalThis as Win).location = { hostname: 'harness.example', origin: 'http://harness.example' }
     ;(globalThis as Win).__DSH_BROWSER_SESSION_TRANSPORT__ = 'bearer'
     vi.stubGlobal('document', { baseURI: 'http://harness.example/' })
@@ -504,6 +511,7 @@ describe('connection client apply', () => {
       if (url === 'api/browser-session') {
         return Response.json({ token: 'browser-token', expiresAt: Date.now() + 60_000 })
       }
+      if (url === 'api/browser-session/websocket-ticket') return Response.json({ ticket: 'one-use' })
       if (url === 'https://outside.example/data') return new Response('outside')
       if (typeof init?.body !== 'string') throw new TypeError('expected a JSON request body')
       const request = JSON.parse(init.body) as { rpcId: string }
@@ -524,6 +532,17 @@ describe('connection client apply', () => {
       expect(baseFetch.mock.calls[0]?.[1]).not.toHaveProperty('headers.authorization')
       expect(new Headers(baseFetch.mock.calls[1]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
       expect(new Headers(baseFetch.mock.calls[2]?.[1]?.headers).get('authorization')).toBeNull()
+      const socket = handle.openWebSocket('/api/remote.mux')
+      try {
+        await vi.waitFor(() => {
+          expect(createSocket).toHaveBeenCalledExactlyOnceWith('ws://harness.example/api/remote.mux?ticket=one-use')
+        })
+        expect(new Headers(baseFetch.mock.calls[3]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
+        expect(session.setItem).toHaveBeenCalledOnce()
+      } finally {
+        socket.close()
+        physicalSocket.dispatchEvent(new Event('close'))
+      }
     } finally {
       await fiber.dispose()
     }

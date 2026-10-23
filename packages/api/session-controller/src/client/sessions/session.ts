@@ -289,7 +289,7 @@ export class Session implements SessionFace {
       // wire type is used; this array is not filtered or reordered.
       const routedContent = content as Exclude<PromptContentPart, { readonly type: 'file' }>[]
       const routed = await this.remote.subagents.prompt({
-        requestId: randomUUID() as SessionRequestId,
+        requestId: requestId ?? randomUUID() as SessionRequestId,
         parentSessionId: this.address.parentSessionId,
         childSessionId: this.address.childSessionId,
         mode: 'continuable',
@@ -723,8 +723,10 @@ export class Session implements SessionFace {
       this.notifier.markDirty()
       return
     }
-    if (result?.type === 'publish' && this.appendLive(result.entry)) {
-      this.notifier.markDirty()
+    if (result?.type === 'publish') {
+      const changed = this.appendLive(result.entry)
+      if (result.retireAttemptId !== undefined) this.eventSource.settleAssistant(result.retireAttemptId)
+      if (changed || result.retireAttemptId !== undefined) this.notifier.markDirty()
     } else if (result?.type === 'transient') {
       this.eventSource.append(result.entry)
       this.notifier.markDirty()

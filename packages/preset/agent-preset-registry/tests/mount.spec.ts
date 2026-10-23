@@ -1,9 +1,38 @@
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
+import Group from '@deepseek-ai/cordis-plugin-group'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import { getDshRuntimeVersion, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import { expect, it, onTestFinished } from 'vitest'
 import { harness, declare } from './harness.ts'
-import { auditRows, mountPreset, livePresetMounts } from '../src/mount.ts'
-import { mountedCompositionRows } from '../src/composition-inventory.ts'
+import { auditRows, mountPreset, type PresetMount } from '../src/mount.ts'
+import { activeCompositionModules, mountedCompositionRows } from '../src/composition-inventory.ts'
+
+it('keeps active module order without a base URL and excludes inactive, disabled, and group rows', async () => {
+  const ctx = new Context()
+  onTestFinished(() => ctx.fiber.dispose())
+  await ctx.plugin(Loader)
+  ctx.loader.builtins.first = { apply() {} }
+  ctx.loader.builtins.last = { apply() {} }
+  ctx.loader.builtins.group = Group
+  ctx.loader.builtins.waiting = { inject: ['unavailableForInspection'], apply() {} }
+  await ctx.loader.root.update([
+    { id: 'first', name: 'cordis:first' },
+    { id: 'group', name: 'cordis:group', group: true, config: [] },
+    { id: 'disabled', name: 'cordis:last', disabled: true },
+    { id: 'waiting', name: 'cordis:waiting' },
+    { id: 'missing', name: 'cordis:unavailableForInspection' },
+    { id: 'last', name: 'cordis:last' },
+  ])
+  expect(activeCompositionModules(ctx.loader.root.tree)).toEqual([
+    { moduleName: 'cordis:first', useHostBase: true },
+    { moduleName: 'cordis:last', useHostBase: true },
+  ])
+})
 
 it('preserves individual causes of import and plugin failures', async () => {
   const ctx = await harness()
@@ -67,6 +96,58 @@ it('reports grouped and conditional plugin rows from the activated tree', async 
   await declare(ctx, { id: 'standard', plugins: [{ name: 'cordis:group', group: true, config: [
     { id: 'off', name: 'missing', disabled: { __jsExpr: 'true' } },
   ] }] })
-  const tree = livePresetMounts(ctx.fiber)[0]!.tree
-  expect(mountedCompositionRows(tree)).toEqual([{ entryId: 'off', moduleName: 'missing', enabled: false, condition: 'true' }])
+  const [composition] = await ctx.agentPresets.compositionInventory()
+  expect(composition!.rows).toEqual([{ entryId: 'off', moduleName: 'missing', enabled: false, condition: 'true' }])
+})
+
+it('mounts a profile-denied row disabled and the same row active once exempted', async () => {
+  const ctx = await harness()
+  onTestFinished(() => ctx.fiber.dispose())
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-preset-compat-')))
+  onTestFinished(() => { rmSync(dir, { recursive: true, force: true }) })
+  const pluginDir = join(dir, 'plugin')
+  mkdirSync(pluginDir, { recursive: true })
+  const loaded = join(pluginDir, 'loaded.txt')
+  writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({
+    name: 'incompatible-preset-plugin', version: '1.0.0', type: 'module', main: 'index.mjs',
+    peerDependencies: { '@deepseek-ai/dsh': '<0.0.0' },
+  }))
+  writeFileSync(join(pluginDir, 'index.mjs'), [
+    "import { writeFileSync } from 'node:fs'",
+    "writeFileSync(new URL('./loaded.txt', import.meta.url), '')",
+    'export function apply() {}',
+    '',
+  ].join('\n'))
+  const profileDir = join(dir, 'profile')
+  mkdirSync(profileDir, { recursive: true })
+  const compatibilityPath = join(profileDir, 'compatibility.json')
+  writeFileSync(compatibilityPath, '{}\n')
+  ctx.provide('profileContext', {
+    name: 'test', dir: profileDir, patchPath: join(profileDir, 'cordis.patch.yml'), home: dir,
+    cwd: dir, installAnchor: join(dir, 'package.json'), startedBundles: [], overlays: [],
+    telemetryDisabledEnv: undefined,
+  } satisfies ProfileContext)
+  const row = { id: 'row', name: pathToFileURL(join(pluginDir, 'index.mjs')).href }
+  const scopes: ReturnType<typeof createScope>[] = []
+  onTestFinished(async () => { for (const scope of scopes) await scope.dispose() })
+  const mounts: PresetMount[] = []
+  const loadedWhileDenied: boolean[] = []
+  // A scope inherits the dependency API of the context that mints it, and the
+  // preset tree needs `loader`, so the mounts run under a loader-injecting row.
+  await ctx.plugin({ inject: ['loader'], async apply(owner: Context) {
+    const deniedScope = createScope(owner, {})
+    scopes.push(deniedScope)
+    mounts.push(await mountPreset(deniedScope.ctx, 'denied', [row]))
+    loadedWhileDenied.push(existsSync(loaded))
+    writeFileSync(compatibilityPath, JSON.stringify({ 'incompatible-preset-plugin@1.0.0': [getDshRuntimeVersion()] }))
+    const exemptedScope = createScope(owner, {})
+    scopes.push(exemptedScope)
+    mounts.push(await mountPreset(exemptedScope.ctx, 'exempted', [row]))
+  } })
+
+  expect(mountedCompositionRows(mounts[0]!.tree)).toEqual([{ entryId: 'row', moduleName: row.name, enabled: false }])
+  expect(await auditRows(mounts[0]!.tree)).toEqual({ failed: [], pending: [] })
+  expect(loadedWhileDenied).toEqual([false])
+  expect(mountedCompositionRows(mounts[1]!.tree)[0]!.enabled).toBe(true)
+  expect(existsSync(loaded)).toBe(true)
 })

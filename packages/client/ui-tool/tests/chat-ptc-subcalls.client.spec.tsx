@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
-  ChatSnapshot, RunningToolCall, ToolCallBlock, ToolResultNode,
+  ChatSnapshot, StartedToolCall, ToolCallBlock, ToolResultNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { SlotTestRuntime, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
@@ -15,6 +15,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { en as conversationEn, NS as CONVERSATION_NS, zh as conversationZh } from '@deepseek-ai/dsh-client-ui-conversation/src/client/locales.ts'
 import { apply as applyChat, inject as injectChat } from '@deepseek-ai/dsh-client-ui-chat/client'
+import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { apply as applyTool, inject as injectTool } from '../src/client/apply.ts'
 import { toolChatSnapshot } from './tool-fixtures.client.ts'
 
@@ -44,14 +45,15 @@ const RUN_CODE_ARGS = JSON.stringify({ code: PROGRAM, description: 'List the not
 
 const codeResult = (seq: number, callId: string): ToolResultNode => ({
   kind: 'tool-result', seq, time: seq * 1_000, callId,
+  name: 'run_code', args: PartialArguments.fromText(RUN_CODE_ARGS),
   call: { name: 'run_code', argsRaw: RUN_CODE_ARGS },
   callTime: seq * 1_000 - 500,
   content: [{ type: 'text', text: 'demo.txt' }], isError: false,
   subCalls: [],
 })
 
-const runningCode = (callId: string): RunningToolCall => ({
-  callId, name: 'run_code', argsRaw: RUN_CODE_ARGS, turn: 9, step: 0, time: 9_000,
+const runningCode = (callId: string): StartedToolCall => ({
+  phase: 'start' as const, args: PartialArguments.fromText(RUN_CODE_ARGS), callId, name: 'run_code', argsRaw: RUN_CODE_ARGS, turn: 9, step: 0, time: 9_000,
   subCalls: [],
 })
 
@@ -60,6 +62,7 @@ const subCall = (
 ): ToolCallBlock => ({
   kind: 'tool-result', seq, time: seq * 1_000,
   callId: `${parent}:code:${n}`,
+  name, args: PartialArguments.fromText(JSON.stringify(args)),
   parentCallId: parent,
   call: { name, argsRaw: JSON.stringify(args) },
   callTime: seq * 1_000,
@@ -70,7 +73,7 @@ const subCall = (
 function snapshotWith(
   nodes: ToolResultNode[],
   subCalls: readonly ToolCallBlock[],
-  runningCalls: RunningToolCall[] = [],
+  runningCalls: StartedToolCall[] = [],
 ): ChatSnapshot {
   const nestedNodes = nodes.map(node => ({ ...node, subCalls }))
   const nestedRunningCalls = runningCalls.map(call => ({ ...call, subCalls }))
@@ -189,7 +192,7 @@ describe('run_code sub-calls through the real chat machinery', () => {
 
     // Each run-control verb names its act and shows the package id; without the
     // owned titles all three would read "Tool call · cordis_run · dyn-2".
-    expect(nest.querySelector('[data-tool="cordis_runtime_inspect"]')?.textContent).toContain('Inspect')
+    expect(nest.querySelector('[data-tool="cordis_runtime_inspect"]')?.textContent).toContain('Query Cordis environment')
     expect(nest.querySelector('[data-tool="cordis_run"]')?.textContent).toContain('Run Cordis Plugindyn-2')
     expect(nest.querySelector('[data-tool="cordis_undefine"]')?.textContent).toContain('Remove Cordis Plugindyn-2')
     // None of them is a code row: the program belongs to cordis_define, whose
@@ -227,7 +230,7 @@ describe('run_code sub-calls through the real chat machinery', () => {
   it('a file sub-row click opens the file in the Sidebar; bash sub-rows open nothing', async () => {
     const parent = 'call-64'
     const subCalls = [
-      subCall(11, parent, 1, 'read', { path: 'notes/demo.txt' }, 'ok'),
+      { ...subCall(11, parent, 1, 'read', { path: 'notes/demo.txt' }, 'ok'), meta: { path: '/w/notes/demo.txt' } },
       subCall(12, parent, 2, 'bash', { command: 'ls notes', description: 'List notes' }, 'demo.txt'),
     ]
     const b = await bench(snapshotWith([codeResult(10, parent)], subCalls))
@@ -258,13 +261,13 @@ describe('run_code sub-calls through the real chat machinery', () => {
   it('a started-but-unsettled sub-call renders the running state exactly like a native in-flight row', async () => {
     const parent = 'call-live'
     const runningSub: ToolCallBlock = {
-      callId: `${parent}:code:1`, name: 'grep', argsRaw: '{"pattern":"todo"}',
+      phase: 'start' as const, args: PartialArguments.fromText('{"pattern":"todo"}'), callId: `${parent}:code:1`, name: 'grep', argsRaw: '{"pattern":"todo"}',
       parentCallId: parent,
       turn: 0, step: 0, time: 21_000, subCalls: [],
     }
     const b = await bench(snapshotWith([], [runningSub], [runningCode(parent)]))
     const view = mountApp(b.runtime)
-    // The nested row derives 'running' from the RunningToolCall shape — the
+    // The nested row derives 'running' from the StartedToolCall shape — the
     // same data-state chrome (row sweep) a native in-flight row wears.
     const nested = view.container.querySelector('[data-subcalls] [data-variant][data-state="running"]')
     expect(nested).not.toBeNull()
@@ -274,6 +277,7 @@ describe('run_code sub-calls through the real chat machinery', () => {
     const parent = 'call-64'
     const plain: ToolResultNode = {
       kind: 'tool-result', seq: 10, time: 10_000, callId: parent,
+      name: 'mystery', args: PartialArguments.fromText('{"n":1}'),
       call: { name: 'mystery', argsRaw: '{"n":1}' },
       callTime: 9_500,
       content: [], isError: false, subCalls: [],
