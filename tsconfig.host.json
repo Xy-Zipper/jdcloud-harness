@@ -399,6 +399,7 @@
     { "path": "./packages/experimental/claude-code-mods" },
     { "path": "./packages/core/tools" },
     { "path": "./packages/jdcloud/tool-jdcloud-lowcode" },
+    { "path": "./packages/jdcloud/creation-studio-media" },
     { "path": "./packages/core/agent-tool-presentation" },
     { "path": "./packages/skill/skill" },
     { "path": "./packages/experimental/skill-badge" },

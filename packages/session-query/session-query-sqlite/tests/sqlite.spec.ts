@@ -130,6 +130,7 @@ class TestHandle implements SessionHandle {
 
 class TestPersistence extends SessionPersistence {
   static entries = new Map<SessionIdType, { meta: SessionHeader; events: SessionEvent[] }>()
+  async delete(id: SessionIdType): Promise<void> { TestPersistence.entries.delete(id) }
   static revisions = new Map<SessionIdType, number>()
   static nextRevision = 0
   static reads = new Map<SessionIdType, number>()

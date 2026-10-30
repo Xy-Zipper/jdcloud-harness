@@ -110,13 +110,30 @@ export class WorkspaceCommands {
   }
 
   /**
-   * Delete one Workspace registration without deleting its directory or Sessions.
-   * @param request - Workspace identity to remove.
+   * Delete one Workspace registration, optionally removing its Sessions first.
+   * Project files remain. Session cleanup is sequential; failure retains the
+   * Workspace and reports failure, while already completed deletions remain committed.
+   * @param request - Workspace identity and optional Session deletion.
    * @returns deletion confirmation.
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
-      await this.assertOwned(request.workspaceId)
+      const workspace = await this.requireWorkspace(request.workspaceId)
+      if (request.deleteSessions === true) {
+        const sessions = this.ctx.get('sessionController')
+        if (sessions === undefined) throw new RemoteError('gateway/internal', 'Session deletion is unavailable', {})
+        const sessionIds = [...workspace.sessionIds]
+        // Authorize every target before the first destructive operation.
+        for (const sessionId of sessionIds) {
+          await this.assertSessionOwned(sessionId)
+          if (!this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) {
+            throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
+          }
+        }
+        for (const sessionId of sessionIds) {
+          await sessions.delete({ sessionId })
+        }
+      }
       if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }

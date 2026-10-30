@@ -440,6 +440,17 @@ export class JsonlBackendTracker {
   }
 
   /**
+   * Drain and release this instance's writer before permanent removal.
+   * @param id - Session whose producers the caller has stopped.
+   * @returns completion after any local writer has closed.
+   */
+  async closeWriter(id: SessionId): Promise<void> {
+    const writer = this.writers.get(id)
+    if (writer === null) throw new SessionAlreadyOwnedError(id)
+    await writer?.close()
+  }
+
+  /**
    * The pending entry for a created-but-unmaterialized session, if any.
    * @param id - the session to look up.
    * @returns the pending header and in-memory revision.

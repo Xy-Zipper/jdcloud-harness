@@ -1,0 +1,19 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "@deepseek-ai/dsh-jdcloud-login",
+        "creation-studio-harness-media"
+      ],
+      "patchReload": "live"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-jdcloud-login": "link:D:/WebstormProjects/jdcloud-harness/packages/bundle/jdcloud-login",
+    "creation-studio-harness-media": "link:D:/WebstormProjects/monorepo-root/apps/cms/creation-studio/harness/media"
+  }
+}

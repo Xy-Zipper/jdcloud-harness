@@ -22,6 +22,8 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
+`workspace.delete({ workspaceId })` retains Sessions. Setting `deleteSessions: true` permanently deletes the Workspace's member Sessions before removing its registration; every Session must belong to the caller and be inactive. The project directory remains. Cleanup is sequential: a failure keeps the Workspace registered and may leave earlier Session deletions committed. The Client service accepts the same choice through `workspaces.delete(id, { deleteSessions: true })`.
+
 With JDCloud ownership installed, `create` accepts only paths inside the current tenant-user directory and reuses only the current owner's Workspace. The directory picker starts at that directory, omits symlinks leaving it, and refuses navigation or creation outside it. Mutations by Workspace or Session id require that owner.
 
 Authenticated Host integrations call `listVisible()` to read detached projections for only the Workspaces owned by the current account scope. The method does not require a Session and returns an empty list when the authentication controller has no active scope.

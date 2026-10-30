@@ -34,6 +34,7 @@ import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-a
 import { RenameSessionMenuItem, SessionRenameDialog } from '../src/client/session-actions/RenameSession.tsx'
 import { RowActionToast } from '../src/client/session-actions/RowActionToast.tsx'
 import { SessionIdMenuItem } from '../src/client/session-actions/SessionId.tsx'
+import { DeleteSessionMenuItem, SessionDeleteConfirmDialog } from '../src/client/session-actions/DeleteSession.tsx'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { en, zh } from '../src/client/locales.ts'
 import { ShortcutRegistry } from '../../shortcuts/src/client/registry.ts'
@@ -95,6 +96,57 @@ type OverlayProps = PropsRuntime<'shell.overlay'> & PropsLocale<'workspace'>
 function menuRow(menu: MenuOpenState): MenuRowProps {
   return { ...ROW, useMenuOpenState: () => menu, useShortcuts: hook([]), t, ...standard }
 }
+
+describe('permanent Session deletion', () => {
+  it('hides deletion when the Session access policy refuses it', () => {
+    render(<DeleteSessionMenuItem {...menuRow([true, vi.fn()])} useSessionAccess={() => false}
+      requestSessionDelete={vi.fn()} />)
+    expect(screen.queryByRole('menuitem', { name: '删除会话' })).toBeNull()
+  })
+
+  it('dismisses the row menu and requests confirmation without deleting immediately', () => {
+    const setOpen = vi.fn()
+    const requestSessionDelete = vi.fn()
+    render(<DeleteSessionMenuItem {...menuRow([true, setOpen])} requestSessionDelete={requestSessionDelete} />)
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    expect(setOpen).toHaveBeenCalledWith(false)
+    expect(requestSessionDelete).toHaveBeenCalledWith(ROW.sessionId, ROW.displayTitle)
+  })
+
+  it('cancels without deleting and blocks dismissal while deletion is pending', async () => {
+    const pending = Promise.withResolvers<undefined>()
+    const deleteSession = vi.fn(() => pending.promise)
+    const settleSessionDelete = vi.fn()
+    const props = {
+      ...standard, t, useDeleteRequest: hook(ROW), deleteSession, settleSessionDelete,
+    }
+    const view = render(<SessionDeleteConfirmDialog {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(settleSessionDelete).toHaveBeenCalledOnce()
+    expect(deleteSession).not.toHaveBeenCalled()
+    settleSessionDelete.mockClear()
+    view.rerender(<SessionDeleteConfirmDialog {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(deleteSession).toHaveBeenCalledOnce()
+    expect(settleSessionDelete).not.toHaveBeenCalled()
+    await act(async () => { pending.resolve(undefined) })
+    expect(settleSessionDelete).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a failed deletion visible for retry', async () => {
+    const deleteSession = vi.fn().mockRejectedValueOnce(new Error('请先停止任务')).mockResolvedValueOnce(undefined)
+    const settleSessionDelete = vi.fn()
+    render(<SessionDeleteConfirmDialog {...standard} t={t} useDeleteRequest={hook(ROW)}
+      deleteSession={deleteSession} settleSessionDelete={settleSessionDelete} />)
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('请先停止任务') })
+    expect(settleSessionDelete).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    await waitFor(() => { expect(settleSessionDelete).toHaveBeenCalledOnce() })
+  })
+})
 
 /** Owner share, standard seat, and locale seat of one hover button. */
 const actionRow: ActionRowProps = { ...ROW, t, ...standard }

@@ -4,6 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { WorkspaceCommands } from './commands.ts'
 import { DirectoryPickerController } from './directory-picker.ts'
@@ -146,8 +147,9 @@ export class WorkspaceController extends TypertRemoteService {
   }
 
   /**
-   * Remove one Workspace registration while retaining files and Sessions.
-   * @param request - Workspace identity to remove.
+   * Remove one Workspace registration, optionally deleting its Sessions first.
+   * The project directory remains; a failed Session cleanup retains the registration.
+   * @param request - Workspace identity and whether to delete its Sessions.
    * @returns deletion confirmation.
    */
   @Remote('delete')

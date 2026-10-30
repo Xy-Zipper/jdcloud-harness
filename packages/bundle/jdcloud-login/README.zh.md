@@ -13,6 +13,8 @@ kind: "package-bundle"
 
 该 bundle 同时安装外部 API。这些路由会针对 `JDCLOUD_DEFAULT_BASE_URL` 校验低代码原始 Token，并要求 Token 当前租户与 `X-Tenant-Id` 一致；它们不会复用或修改浏览器登录状态。
 
+该 bundle 随 Harness 构建和部署[造物片场媒体工具](../../jdcloud/creation-studio-media/README.zh.md)。供应商密钥配置在 Host，造物片场 Skill 仍按账号单独安装。
+
 ## 目录
 
 - [使用本包](#use-this-package)

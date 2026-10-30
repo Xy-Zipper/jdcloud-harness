@@ -1,0 +1,8 @@
+- dialog "Delete workspace":
+  - heading "Delete workspace" [level=2]
+  - button "Close"
+  - paragraph: Delete workspace “deletion-workspace”, its session history and files in the session storage directories. This cannot be undone. The project folder is unaffected.
+  - checkbox "Also permanently delete this workspace’s sessions and their stored files" [checked]
+  - text: Also permanently delete this workspace’s sessions and their stored files
+  - button "Cancel"
+  - button "Delete workspace"

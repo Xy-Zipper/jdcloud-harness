@@ -1,0 +1,16 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@deepseek-ai/dsh-jdcloud-login':
+        specifier: link:D:/WebstormProjects/jdcloud-harness/packages/bundle/jdcloud-login
+        version: link:D:/WebstormProjects/jdcloud-harness/packages/bundle/jdcloud-login
+      creation-studio-harness-media:
+        specifier: link:D:/WebstormProjects/monorepo-root/apps/cms/creation-studio/harness/media
+        version: link:D:/WebstormProjects/monorepo-root/apps/cms/creation-studio/harness/media

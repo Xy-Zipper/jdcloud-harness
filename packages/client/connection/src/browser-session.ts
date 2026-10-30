@@ -5,7 +5,10 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { credentialKey, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { ConnectionIndexRequest, ConnectionIndexResponse, ConnectionTrustRequest } from './rpc.ts'
-import type { BrowserSessionTransport } from './browser-session-protocol.ts'
+import {
+  BROWSER_SESSION_DOWNLOAD_TICKET_QUERY,
+  type BrowserSessionTransport,
+} from './browser-session-protocol.ts'
 
 export type { BrowserSessionTransport } from './browser-session-protocol.ts'
 
@@ -24,6 +27,7 @@ const BEARER_VERSION = 1
 const SECRET_VERSION = 1
 const MAX_AGE_DAYS = 30
 const WEBSOCKET_TICKET_MAX_AGE_MS = 30_000
+const DOWNLOAD_TICKET_MAX_AGE_MS = 30_000
 
 /** Browser cookie policy supported by the independent session service. */
 export type BrowserSessionCookieSameSite = 'strict' | 'none'
@@ -51,11 +55,17 @@ interface WebSocketTicket {
   readonly expiresAt: number
 }
 
+interface DownloadTicket extends WebSocketTicket {
+  readonly target: string
+}
+
 /** Carries one opaque browser id through HTTP, RPC, and Fetch handlers. */
 export class BrowserSessionService extends Service {
   static inject = ['credentials']
   private readonly requests = new AsyncLocalStorage<string>()
+  private readonly admittedDownloads = new WeakMap<ConnectionTrustRequest, string>()
   private readonly admittedWebSockets = new WeakMap<ConnectionTrustRequest, string>()
+  private readonly downloadTickets = new Map<string, DownloadTicket>()
   private readonly webSocketTickets = new Map<string, WebSocketTicket>()
 
   private constructor(
@@ -126,7 +136,9 @@ export class BrowserSessionService extends Service {
    * @returns Whether the request carries a valid browser session.
    */
   accepts(request: ConnectionTrustRequest): boolean {
-    return this.admittedWebSockets.has(request) || this.browserId(request) !== undefined
+    return this.admittedDownloads.has(request)
+      || this.admittedWebSockets.has(request)
+      || this.browserId(request) !== undefined
   }
 
   /**
@@ -172,6 +184,52 @@ export class BrowserSessionService extends Service {
   }
 
   /**
+   * Mint a short-lived, single-use ticket for one browser-managed download URL.
+   * @param request - request carrying the browser session Bearer token.
+   * @param target - same-origin `/api/` path and query the browser will navigate to.
+   * @returns opaque ticket accepted by one request for that exact target.
+   */
+  issueDownloadTicket(request: ConnectionTrustRequest, target: string): string {
+    if (this.transport !== 'bearer') throw new Error('browser Bearer sessions are not enabled')
+    const browserId = this.browserId(request)
+    const authority = requestAuthority(request.headers)
+    if (browserId === undefined || authority === undefined) throw new Error('browser user session is required')
+    const canonicalTarget = downloadTarget(target)
+    if (canonicalTarget === undefined) throw new TypeError('browser download target is invalid')
+    this.pruneDownloadTickets()
+    const ticket = randomBytes(32).toString('base64url')
+    this.downloadTickets.set(ticket, {
+      browserId,
+      authority,
+      target: canonicalTarget,
+      expiresAt: Date.now() + DOWNLOAD_TICKET_MAX_AGE_MS,
+    })
+    return ticket
+  }
+
+  /**
+   * Admit one ordinary Bearer request or consume its one-use download ticket.
+   * @param request - incoming API request.
+   * @returns whether the browser session authorized this request.
+   */
+  admitHttp(request: ConnectionTrustRequest): boolean {
+    if (this.transport !== 'bearer') return this.accepts(request)
+    if (this.accepts(request)) return true
+    this.pruneDownloadTickets()
+    const presented = presentedDownload(request.url)
+    if (presented === undefined) return false
+    const session = this.downloadTickets.get(presented.ticket)
+    if (session === undefined) return false
+    this.downloadTickets.delete(presented.ticket)
+    if (request.method !== 'GET'
+      || session.expiresAt <= Date.now()
+      || session.authority !== requestAuthority(request.headers)
+      || session.target !== presented.target) return false
+    this.admittedDownloads.set(request, session.browserId)
+    return true
+  }
+
+  /**
    * Consume the ticket carried by one WebSocket upgrade.
    * @param request - trusted upgrade request carrying a `ticket` query parameter.
    * @returns whether the ticket authorized this exact request.
@@ -196,7 +254,9 @@ export class BrowserSessionService extends Service {
    * @returns The operation result.
    */
   run<Value>(request: ConnectionTrustRequest, operation: () => Value): Value {
-    const browserId = this.admittedWebSockets.get(request) ?? this.browserId(request)
+    const browserId = this.admittedDownloads.get(request)
+      ?? this.admittedWebSockets.get(request)
+      ?? this.browserId(request)
     if (browserId === undefined) throw new Error('browser user session is required')
     return this.requests.run(browserId, operation)
   }
@@ -244,6 +304,32 @@ export class BrowserSessionService extends Service {
       if (session.expiresAt <= now) this.webSocketTickets.delete(ticket)
     }
   }
+
+  private pruneDownloadTickets(): void {
+    const now = Date.now()
+    for (const [ticket, session] of this.downloadTickets) {
+      if (session.expiresAt <= now) this.downloadTickets.delete(ticket)
+    }
+  }
+}
+
+function downloadTarget(value: string): string | undefined {
+  let target: URL
+  try { target = new URL(value, 'http://dsh.invalid') } catch { return undefined }
+  if (target.origin !== 'http://dsh.invalid' || !target.pathname.startsWith('/api/')
+    || target.hash !== '' || target.searchParams.has(BROWSER_SESSION_DOWNLOAD_TICKET_QUERY)) return undefined
+  return `${target.pathname}${target.search}`
+}
+
+function presentedDownload(value: string | undefined): { readonly ticket: string; readonly target: string } | undefined {
+  if (value === undefined) return undefined
+  let target: URL
+  try { target = new URL(value, 'http://dsh.invalid') } catch { return undefined }
+  const ticket = target.searchParams.get(BROWSER_SESSION_DOWNLOAD_TICKET_QUERY)
+  if (ticket === null || ticket.length === 0) return undefined
+  target.searchParams.delete(BROWSER_SESSION_DOWNLOAD_TICKET_QUERY)
+  const canonical = downloadTarget(`${target.pathname}${target.search}`)
+  return canonical === undefined ? undefined : { ticket, target: canonical }
 }
 
 function requestAuthority(headers: ConnectionTrustRequest['headers']): string | undefined {

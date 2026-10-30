@@ -34,6 +34,7 @@ function controllerAgents(overrides: object = {}): ApiSessionAgentController {
   }
   return {
     createSession,
+    own: (handle: AgentHandle) => handle.agent,
     composeAgent: () => Promise.resolve({ setup: () => {} }),
     presetForSession: () => undefined,
     presetForObservation: () => undefined,

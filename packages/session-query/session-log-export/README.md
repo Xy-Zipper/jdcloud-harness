@@ -83,7 +83,7 @@ The Header’s More action uses the shared compact Button, with a 28px square ta
 
 ### Download flow
 
-Both entry paths issue a `HEAD` preflight to the document-relative `api/session.export?...`, then hand the GET route to the browser download manager without buffering the ZIP in JavaScript. One controller owns one in-flight download per session, collapses concurrent gestures into that operation, and cancels the preflight on plugin disposal. Modal state lives in a snapshot store keyed by session, so the button and the command share one dialog per session.
+Both entry paths issue a `HEAD` preflight to the document-relative `api/session.export?...`, ask Connection to authorize that exact URL when the deployment uses Bearer browser sessions, then hand the GET route to the browser download manager without buffering the ZIP in JavaScript. The authorization is a 30-second single-use ticket, not the long-lived browser token. One controller owns one in-flight download per session, collapses concurrent gestures into that operation, and cancels the preflight on plugin disposal. Modal state lives in a snapshot store keyed by session, so the button and the command share one dialog per session.
 
 The Host route is a feature-owned exact Fetch contribution. Connection applies its Host/Origin and browser-session checks and bridges the streaming `Response`; this package owns query validation, live-session flushes, handle-based log reads and attachment reads, ZIP generation, and HTTP status semantics.
 

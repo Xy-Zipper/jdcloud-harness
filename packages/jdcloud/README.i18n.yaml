@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/jdcloud/README.md
-README.md: d0dd9dfc38f6df0fc9623ae2b2929337eba9f091
-README.zh.md: 59a2bc96baae652b2bf70af400fad1ccd750616d
+/:
+  en: 924f5b0a026e8db2
+  zh: 2da851a6ebb96e7a
+/jdcloud-low-code-conversation-integration:
+  en: e6f59d48f721a16f
+  zh: c3eb360f9ae8bf3e
+/jdcloud-low-code-conversation-integration/summary:
+  en: 860cf8b3c45a816e
+  zh: 3aacebf0612598d0
+/jdcloud-low-code-conversation-integration/table-of-contents:
+  en: 1eb35b015a6c423f
+  zh: a8a3dceee2c9e943
+/jdcloud-low-code-conversation-integration/packages:
+  en: 9f9175248428dd0c
+  zh: 07fb57b0d9cf1923
+/jdcloud-low-code-conversation-integration/related-documentation:
+  en: 1fd775b9df4e8e85
+  zh: 7bf4ebd671cf8237
+/jdcloud-low-code-conversation-integration/dev-note:
+  en: 5de1d6304e00c58f
+  zh: 8d8225361cfa29e5

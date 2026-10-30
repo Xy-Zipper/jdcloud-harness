@@ -508,6 +508,25 @@ describe('connection node half', () => {
       }, '/api/browser-id'), allowed.response)
       expect(allowed.state.status).toBe(200)
       expect(JSON.parse(String(allowed.state.body))).toEqual({ id: expect.any(String) })
+      const downloadTicket = routes.find(route => route.path === '/api/browser-session/download-ticket')
+      expect(downloadTicket).toMatchObject({ kind: 'exact' })
+      const target = '/api/browser-id?archive=session-1'
+      const issuedDownload = fakeResponse()
+      await downloadTicket!.handler(fakePost({
+        host: 'harness.example', authorization: `Bearer ${payload.token}`,
+      }, `/api/browser-session/download-ticket?target=${encodeURIComponent(target)}`, {}), issuedDownload.response)
+      expect(issuedDownload.state.status).toBe(200)
+      const downloadPayload = JSON.parse(String(issuedDownload.state.body)) as { ticket: string }
+      const browserDownload = fakeResponse()
+      await shared!.handler(fakeRequest({ host: 'harness.example' },
+        `${target}&downloadTicket=${downloadPayload.ticket}`), browserDownload.response)
+      expect(browserDownload.state.status).toBe(200)
+      const browserDownloadBody = JSON.parse(String(browserDownload.state.body)) as { id: unknown }
+      expect(browserDownloadBody.id).toBeTypeOf('string')
+      const reusedDownload = fakeResponse()
+      await shared!.handler(fakeRequest({ host: 'harness.example' },
+        `${target}&downloadTicket=${downloadPayload.ticket}`), reusedDownload.response)
+      expect(reusedDownload.state.status).toBe(401)
       const authenticated = { headers: { host: 'harness.example', authorization: `Bearer ${payload.token}` } }
       const ticket = ctx.browserSession!.issueWebSocketTicket(authenticated)
       const upgrade = fakeRequest({ host: 'harness.example' }, `/api/remote.mux?ticket=${ticket}`)

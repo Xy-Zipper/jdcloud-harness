@@ -201,6 +201,16 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Permanently remove one Session and its provider-owned files. The caller
+   * must stop Session producers first; local write handles drain and close
+   * before removal. Foreign write ownership refuses deletion. Missing ids
+   * are a no-op. Files outside the Session's storage directory remain.
+   * @param id - Session whose durable storage is removed.
+   * @returns completion after physical removal; storage failures reject and may leave partial files.
+   */
+  abstract delete(id: SessionId): Promise<void>
 }
 
 export default SessionPersistence

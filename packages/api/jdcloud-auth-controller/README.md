@@ -32,6 +32,8 @@ Mount the controller beside API Gateway, Session Controller, and a writable cred
 
 Before Session Controller persists attachments or delivers a browser prompt, the controller calls the tenant-list and current-user endpoints with the stored token. It synchronizes a changed tenant list or administrator flag before admitting the prompt. Business codes `600`, `601`, and `602` delete the stored login and reject the prompt as expired. Network failures and other business codes reject that submission without deleting the login.
 
+Transport failures preserve the underlying network cause in the surfaced error message, so DNS, proxy, TLS, and connection failures remain distinguishable from JDCloud business-code failures.
+
 Before Session Controller changes a Session model, the controller reads the stored administrator flag through `api-session/model-selection-admission`. Missing login returns `jdcloud/auth-required`; a non-administrator returns `jdcloud/administrator-required` without changing the Session or deployment default model.
 
 In the JDCloud deployment, login records are keyed by an opaque browser session. The stable owner identity is the external `userInfo.id` together with the normalized service address and current tenant id; usernames are display labels only. A browser must log in independently, while browsers using the same tenant and user share newly-owned Sessions and Workspaces. Records without an owner are ignored.
@@ -45,6 +47,8 @@ The browser can call `writableMenus()` to refresh `/api/oauth/currentUser` and r
 Host plugins can call `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` for a fixed `/api/...` path. The controller reads the current credential internally, adds the authorization header, applies `requestTimeoutMs`, returns the successful response's `data`, and never returns the token. It accepts JSON `GET`, `POST`, `PUT`, and `DELETE` requests, or one `POST` multipart file under the `file` field; a multipart file can carry Host-owned bytes or an exact-length asynchronous byte stream, which the controller forwards without complete-file buffering. JSON and multipart bodies are mutually exclusive, and `GET` bypasses caches. Codes `600`, `601`, and `602` delete the stored login and become `jdcloud/auth-required`, while other business errors preserve the login.
 
 External server integrations pass their original low-code Token to `runExternalRequest()` together with the tenant from `X-Tenant-Id` and service address from `X-JDCloud-Base-Url`. The controller normalizes the caller-selected address, validates both tenant-list and current-user responses against that tenant, installs the address-scoped identity only in request-local asynchronous storage, and removes it when the operation settles. It never reads `defaultBaseUrl` for an external request, switches the Token's tenant, or writes browser login state; the external API composition refuses `X-Project-Id`.
+
+Host consumers use `downloadFileAuthenticated(fileId, signal)` to obtain a raw current-tenant file response without reading the token. The method validates the file id, fixes the URL to the current service and tenant, disables redirects and caches, and applies the request timeout. Consumers own file authorization, response status checks, byte limits and decoding; this Host-only method is not a Remote endpoint.
 
 <a id="configuration"></a>
 ## Configuration

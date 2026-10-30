@@ -12,7 +12,11 @@ import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
 import { BrowserSessionService, type BrowserSessionCookieSameSite, type BrowserSessionTransport } from './browser-session.ts'
-import { BROWSER_SESSION_BOOTSTRAP_PATH, BROWSER_SESSION_WEBSOCKET_TICKET_PATH } from './browser-session-protocol.ts'
+import {
+  BROWSER_SESSION_BOOTSTRAP_PATH,
+  BROWSER_SESSION_DOWNLOAD_TICKET_PATH,
+  BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
+} from './browser-session-protocol.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
@@ -251,6 +255,43 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
           res.end(JSON.stringify({ ticket }))
         },
       }
+      const downloadTicket: WebRoute = {
+        kind: 'exact',
+        path: BROWSER_SESSION_DOWNLOAD_TICKET_PATH,
+        handler: (req, res) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405)
+            res.end()
+            return
+          }
+          const rejection = connection.requestRejection(req)
+          if (rejection !== undefined) {
+            res.writeHead(rejection)
+            res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+            return
+          }
+          const target = new URL(req.url ?? '', 'http://dsh.invalid').searchParams.get('target')
+          if (target === null) {
+            res.writeHead(400)
+            res.end('missing download target')
+            return
+          }
+          let ticket: string
+          try { ticket = browserSessionService.issueDownloadTicket(req, target) }
+          catch (error) {
+            if (!(error instanceof TypeError)) throw error
+            res.writeHead(400)
+            res.end(error.message)
+            return
+          }
+          res.writeHead(200, {
+            'cache-control': 'no-store',
+            'content-type': 'application/json; charset=utf-8',
+            'x-content-type-options': 'nosniff',
+          })
+          res.end(JSON.stringify({ ticket }))
+        },
+      }
       webCtx.effect(
         () => webCtx.webServer.register(bootstrap),
         `client-connection: ${BROWSER_SESSION_BOOTSTRAP_PATH} route`,
@@ -258,6 +299,10 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       webCtx.effect(
         () => webCtx.webServer.register(webSocketTicket),
         `client-connection: ${BROWSER_SESSION_WEBSOCKET_TICKET_PATH} route`,
+      )
+      webCtx.effect(
+        () => webCtx.webServer.register(downloadTicket),
+        `client-connection: ${BROWSER_SESSION_DOWNLOAD_TICKET_PATH} route`,
       )
     }
     webCtx.effect(() => webCtx.webServer.register({

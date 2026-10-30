@@ -37,7 +37,7 @@ describe('BrowserSessionService', () => {
     const request = { headers: { host: 'example.test', cookie: firstCookie } }
     expect(firstService.accepts(request)).toBe(true)
     expect(secondService.accepts(request)).toBe(false)
-    await firstService.run(request, () => {
+    firstService.run(request, () => {
       expect(firstService.currentIdRequired()).toBeTypeOf('string')
     })
   })
@@ -100,6 +100,53 @@ describe('BrowserSessionService', () => {
     expect(service.admitWebSocket({
       headers: { host: 'harness.example' },
       url: `/api/remote.mux?ticket=${expired}`,
+    })).toBe(false)
+  })
+
+  it('binds each download ticket to one authority and exact API target', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    await ctx.plugin(MemoryCredentials)
+    const service = await BrowserSessionService.create(ctx, ctx.credentials, 30, 'strict', 'bearer')
+    const session = service.issueBearer({ headers: { host: 'harness.example' } })
+    const authenticated = { headers: { host: 'harness.example', authorization: `Bearer ${session.token}` } }
+    const target = '/api/session.export?sessionId=session-1&includeDescendants=true'
+    const ticket = service.issueDownloadTicket(authenticated, target)
+    const request = {
+      headers: { host: 'harness.example' },
+      method: 'GET',
+      url: `${target}&downloadTicket=${ticket}`,
+    }
+
+    expect(service.admitHttp(request)).toBe(true)
+    expect(service.run(request, () => service.currentIdRequired())).toBe(
+      service.run(authenticated, () => service.currentIdRequired()),
+    )
+    expect(service.admitHttp({ ...request })).toBe(false)
+
+    const wrongMethod = service.issueDownloadTicket(authenticated, target)
+    expect(service.admitHttp({
+      headers: { host: 'harness.example' },
+      method: 'POST',
+      url: `${target}&downloadTicket=${wrongMethod}`,
+    })).toBe(false)
+
+    const wrongTarget = service.issueDownloadTicket(authenticated, target)
+    expect(service.admitHttp({
+      headers: { host: 'harness.example' },
+      method: 'GET',
+      url: `/api/session.export?sessionId=other&downloadTicket=${wrongTarget}`,
+    })).toBe(false)
+    expect(() => service.issueDownloadTicket(authenticated, 'https://outside.example/archive.zip'))
+      .toThrow('browser download target is invalid')
+
+    vi.useFakeTimers()
+    const expired = service.issueDownloadTicket(authenticated, target)
+    vi.advanceTimersByTime(30_001)
+    expect(service.admitHttp({
+      headers: { host: 'harness.example' },
+      method: 'GET',
+      url: `${target}&downloadTicket=${expired}`,
     })).toBe(false)
   })
 })

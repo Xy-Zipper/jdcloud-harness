@@ -261,8 +261,8 @@ export type WorkspaceBrowserInjected = {
   notifyArchivedNotOpenable: () => void
   /** Rename a Host Workspace (rejects on name conflict; resolves on durability). */
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
-  /** Delete only a Host Workspace registration; directory and Session logs remain. */
-  deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  /** Remove a Workspace; true also deletes its Sessions and their storage. Project files remain. */
+  deleteWorkspace: (workspaceId: WorkspaceId, deleteSessions?: boolean) => Promise<void>
   /**
    * Reorder a Workspace in the durable registry display order.
    * Omitted anchor appends to the end.
@@ -291,6 +291,8 @@ export type SessionRowActionProps<Injected extends object = object> =
 
 /** One transient Workspace notice rendered by the overlay toast entry. */
 export type RowToast =
+  | { kind: 'sessionDeleted' }
+  | { kind: 'workspaceDeleted' }
   | { kind: 'archived'; sessionId: SessionId }
   | { kind: 'stoppedAndArchived'; sessionId: SessionId }
   | { kind: 'sessionIdCopied' }
@@ -397,6 +399,24 @@ export interface RenameSessionInjected {
   requestSessionRename: (sessionId: SessionId, currentTitle: string) => void
 }
 
+/** Destructive row action opens a confirmation outside the row menu. */
+export interface DeleteSessionInjected {
+  /** Ask to permanently delete the named Session. */
+  requestSessionDelete: (sessionId: SessionId, displayTitle: string) => void
+}
+
+/** Permanent Session deletion confirmation and its authoritative operation. */
+export interface SessionDeleteConfirmInjected {
+  hooks: {
+    /** Pending target; null while the confirmation is closed. */
+    deleteRequest: HostObservable<SessionRowOwnerProps | null>
+  }
+  /** Dismiss the confirmation without deleting. */
+  settleSessionDelete: () => void
+  /** Delete the Session and its files; rejects with localized actionable failure text. */
+  deleteSession: (sessionId: SessionId) => Promise<void>
+}
+
 /** Session ID action share; copying does not open the Session. */
 export interface SessionIdInjected {
   /** Copy the complete id and report acceptance or failure through the global toast. */
@@ -456,6 +476,13 @@ export type SessionArchiveConfirmProps =
   & PropsLocale<'workspace'>
   & Omit<SessionArchiveConfirmInjected, 'hooks'>
   & PropsHooks<SessionArchiveConfirmInjected['hooks']>
+
+/** Props of the Session deletion confirmation in the shell overlay. */
+export type SessionDeleteConfirmProps =
+  PropsRuntime<'shell.overlay'>
+  & PropsLocale<'workspace'>
+  & Omit<SessionDeleteConfirmInjected, 'hooks'>
+  & PropsHooks<SessionDeleteConfirmInjected['hooks']>
 
 /** Props of the existing overlay's keyed notice dispatcher. */
 export type RowToastProps =

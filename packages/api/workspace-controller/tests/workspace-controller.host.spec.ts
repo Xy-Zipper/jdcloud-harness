@@ -116,6 +116,32 @@ async function nextFrame(
 }
 
 describe('WorkspaceController commands', () => {
+  it('deletes member Sessions before removing a Workspace when explicitly requested', async () => {
+    const { controller, ctx, root } = await harness()
+    const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'cascade'))
+    const session = ctx.sessions.create(SessionId('cascade-session'), { meta: { cwd: workspace.path } })
+    await workspace.attachSession(session.id)
+    const remove = vi.fn(async () => {
+      expect(ctx.workspaceRegistry.get(workspace.id)).toBeDefined()
+      return { deleted: true as const }
+    })
+    ctx.provide('sessionController', { delete: remove } as never)
+    await controller.delete({ workspaceId: workspace.id, deleteSessions: true })
+    expect(remove).toHaveBeenCalledWith({ sessionId: session.id })
+    expect(ctx.workspaceRegistry.get(workspace.id)).toBeUndefined()
+    expect(existsSync(workspace.path)).toBe(true)
+  })
+
+  it('retains the Workspace if a member Session deletion fails', async () => {
+    const { controller, ctx, root } = await harness()
+    const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'failed-cascade'))
+    const session = ctx.sessions.create(SessionId('failed-session'), { meta: { cwd: workspace.path } })
+    await workspace.attachSession(session.id)
+    ctx.provide('sessionController', { delete: async () => { throw new Error('storage unavailable') } } as never)
+    await expect(controller.delete({ workspaceId: workspace.id, deleteSessions: true })).rejects.toThrow('storage unavailable')
+    expect(ctx.workspaceRegistry.get(workspace.id)).toBeDefined()
+  })
+
   it('lists only Workspaces owned by the current authenticated scope', async () => {
     const { controller, ctx, root } = await harness()
     const owned = await ctx.workspaceRegistry.create(stageDir(root, 'owned'))

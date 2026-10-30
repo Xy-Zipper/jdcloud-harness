@@ -71,12 +71,16 @@ scp .\jdcloud-harness.tar .\compose.yaml user@<服务器地址>:/opt/jdcloud-har
 
 ```env
 GPT_API_KEY=实际模型密钥
+GPT_IMAGE_API_KEY=实际图片密钥
+ARK_API_KEY=实际方舟密钥
 JDCLOUD_HARNESS_TRUSTED_HOST=实际域名或服务器IP
 JDCLOUD_HARNESS_PORT=3080
 JDCLOUD_DEFAULT_BASE_URL=http://内部服务地址
 JDCLOUD_IFRAME_PARENT_ORIGIN=http://实际外链页面地址
 TZ=Asia/Hong_Kong
 ```
+
+造物片场媒体插件随 JDCloud bundle 构建并装入镜像，无需到前端项目打包或单独安装媒体插件。两类媒体密钥可留空；配置后重建容器即可使用。任务回执和上传进度保存在 `data/creation-studio-media`，替换容器时保留该目录。Skill ZIP 继续通过 Skill 管理单独安装，详见[媒体包说明](packages/jdcloud/creation-studio-media/README.zh.md)。
 
 `JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。Docker overlay 使用 Bearer 浏览器会话：token 只保存在当前标签页的 `sessionStorage`，同源 Fetch 与 RPC 通过 Authorization header 携带 token，WebSocket 使用短期单次 ticket。因此跨站 iframe 不再依赖第三方 cookie，也不要求 HTTPS。
 
@@ -110,6 +114,8 @@ docker compose up -d --no-build --force-recreate
 ```
 
 ## 更新镜像
+
+Docker 认证 overlay 从 `webStartup.trustedHosts` 读取 `--trusted-host` 参数，并沿用 Web profile 的 `webStartup` 注入。若启动日志出现 `cannot get property "webRuntime" without inject`，镜像中的 `/app/docker.no-browser-auth.patch.yml` 仍引用旧服务名；需要将其改为 `ctx.webStartup.trustedHosts` 并按本节更新镜像。只重启原镜像不会更新该文件。
 
 本地重新构建并上传新的 tar 后，在服务器重新加载并重建服务：
 

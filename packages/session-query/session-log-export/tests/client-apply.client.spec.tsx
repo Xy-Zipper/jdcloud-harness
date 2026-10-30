@@ -28,6 +28,7 @@ async function bench() {
   const slots = ctx.get('slots') as SlotRegistry
   const declaration = declare(slots)
   ctx.provide('locale', new LocaleRuntime(ctx))
+  ctx.provide('connection', { authorizeDownloadUrl: async (url: string) => `${url}&downloadTicket=fixture` } as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   return { ctx, slots, declaration, fiber }
@@ -57,7 +58,7 @@ describe('session-log-download browser plugin', () => {
   it('provides one controller and removes its Header contribution on disposal', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })))
     const b = await bench()
-    expect(inject).toEqual(['slots', 'locale'])
+    expect(inject).toEqual(['slots', 'locale', 'connection'])
     expect(b.ctx.sessionLogDownload).toBeDefined()
     expect(b.slots.entries('conversation.session.header.actions')).toHaveLength(0)
     const entry = b.slots.entries('conversation.session.header.utilities')[0]

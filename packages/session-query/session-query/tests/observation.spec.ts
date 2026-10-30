@@ -490,6 +490,7 @@ describe('SessionObservationReader cold path', () => {
 
     class SwapPersistence extends SessionPersistence {
       static readCalls = 0
+      delete(): Promise<void> { return Promise.reject(new Error('not used')) }
 
       create(): Promise<SessionHandle> {
         return Promise.reject(new Error('not used'))

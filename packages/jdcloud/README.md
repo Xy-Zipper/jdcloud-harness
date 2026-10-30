@@ -25,6 +25,7 @@ The jdcloud group makes the current tenant's low-code forms and workflows availa
 | Package | Role |
 |---|---|
 | [`tool-jdcloud-lowcode`](tool-jdcloud-lowcode/README.md) | Injects type 3/4 capability snapshots for each user prompt and provides Host-enforced low-code data tools |
+| [`creation-studio-media`](creation-studio-media/README.md) | Generates storyboard images and reference videos and saves authenticated project media |
 
 -----
 

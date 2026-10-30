@@ -1,0 +1,37 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "allowJs": true
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cosmokit"
+    },
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../api/jdcloud-auth-controller"
+    },
+    {
+      "path": "../../attachment/attachment"
+    },
+    {
+      "path": "../../credentials/credentials"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../../core/tools"
+    }
+  ]
+}

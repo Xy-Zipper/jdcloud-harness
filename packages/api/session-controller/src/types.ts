@@ -13,6 +13,16 @@ import type { Principal } from '@deepseek-ai/dsh-typert-protocol'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 
+/** Permanent deletion of one Session and its provider-owned storage directory. */
+export interface SessionDeleteRequest {
+  readonly sessionId: SessionId
+}
+
+/** Receipt after Session storage and navigation records have been removed. */
+export interface SessionDeleteValue {
+  readonly deleted: true
+}
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
     /** Host state persisted for cold Session list summaries. */
@@ -242,6 +252,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }
     'session/projections-unavailable': Record<string, never>
     'session/writer-held': { readonly sessionId: SessionId }
+    /** Permanent deletion requires all Session work to stop first. */
+    'session/delete-active': { readonly sessionId: SessionId }
     'session/agent-busy': { readonly reason: string }
     'session/invalid-time-zone': { readonly value: string }
     'session/workspace-attach-failed': { readonly sessionId: SessionId; readonly workspaceId: string }

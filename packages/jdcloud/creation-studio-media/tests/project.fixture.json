@@ -1,0 +1,193 @@
+{
+  "requirement": {
+    "_meta": {
+      "schemaVersion": "1.0",
+      "artifactType": "creation-studio-requirement-intake",
+      "tenantId": "6ad80f2f1f280486bb45ac3a",
+      "projectId": "111111111111111111111111",
+      "spaceId": "222222222222222222222222",
+      "baseRevision": 2,
+      "revision": 2,
+      "syncStatus": "synced",
+      "confirmedRevision": null,
+      "requirementConfirmedAt": null
+    },
+    "name": "海滩防晒霜质感短视频",
+    "productName": "防晒霜",
+    "productCategory": "美妆护肤",
+    "platform": "抖音",
+    "audience": "上班族",
+    "intent": "以一位女性在海滩的场景展开，呈现高级而克制的质感。",
+    "avoid": "避免夸大功效、无依据的防晒指数、检测数据、价格信息和促销式表达。",
+    "sellingPoints": "暂无可核验资料｜依据：用户未提供产品功效证据。",
+    "caseIds": [],
+    "specification": {
+      "family": "scene",
+      "primary": "daily_scene",
+      "secondary": "",
+      "objective": "brand_seeding",
+      "presentation": "appearance",
+      "duration": "seconds_15",
+      "ratio": "portrait_9_16",
+      "styles": {
+        "tone": [
+          "premium_cool"
+        ],
+        "editing_pace": [
+          "medium"
+        ],
+        "camera_shot": [
+          "fixed_camera"
+        ],
+        "sound": [
+          "music_only"
+        ],
+        "text_graphics": [
+          "subtitle_bar"
+        ],
+        "persona": [
+          "everyday_user"
+        ],
+        "production_texture": [
+          "live_action"
+        ]
+      }
+    }
+  },
+  "project": {
+    "_id": "111111111111111111111111",
+    "spaceId": "222222222222222222222222",
+    "name": "海滩防晒霜质感短视频",
+    "productName": "防晒霜",
+    "productCategory": "美妆护肤",
+    "platform": "抖音",
+    "audience": "上班族",
+    "intent": "以一位女性在海滩的场景展开，呈现高级而克制的质感。",
+    "avoid": "避免夸大功效、无依据的防晒指数、检测数据、价格信息和促销式表达。",
+    "sellingPoints": "暂无可核验资料｜依据：用户未提供产品功效证据。",
+    "caseIds": [],
+    "specification": "{\"family\":\"scene\",\"primary\":\"daily_scene\",\"secondary\":\"\",\"objective\":\"brand_seeding\",\"presentation\":\"appearance\",\"duration\":\"seconds_15\",\"ratio\":\"portrait_9_16\",\"styles\":{\"tone\":[\"premium_cool\"],\"editing_pace\":[\"medium\"],\"camera_shot\":[\"fixed_camera\"],\"sound\":[\"music_only\"],\"text_graphics\":[\"subtitle_bar\"],\"persona\":[\"everyday_user\"],\"production_texture\":[\"live_action\"]}}",
+    "adoptedPlanId": "555555555555555555555555",
+    "formRevision": 2,
+    "confirmedFormRevision": 2,
+    "requirementConfirmedAt": 1793000000000
+  },
+  "plan": {
+    "_id": "555555555555555555555555",
+    "projectId": "111111111111111111111111",
+    "spaceId": "222222222222222222222222",
+    "title": "把午休留给海风",
+    "expectedSeconds": 15,
+    "tone": "高级冷感",
+    "referenceCaseIds": [],
+    "scores": "{\"referenceFit\":0,\"goalFit\":0,\"presentationFit\":0,\"complianceSafety\":0,\"composite\":0,\"assessed\":false}",
+    "riskLevel": "中",
+    "riskNote": "包装与人物素材尚未提供；拍摄前核对商品、授权和使用范围。",
+    "opening": "{\"attract\":\"海面反光后接女性抬头，固定机位。\",\"attractHint\":\"固定机位与自然光，人物动作可见。\",\"bridge\":\"由人物动作承接真实产品外观。\",\"bridgeHint\":\"不把表情变化当成功效证据。\"}",
+    "hookType": "场景引入式",
+    "hookCopy": "海面反光后接女性抬头，固定机位。",
+    "sellingPoints": [],
+    "narrative": "以海风和人物停顿，建立上班族短暂抽离日常的情绪连接。",
+    "description": "海面空镜起，切人物半身和包内真实产品，最后克制落版。",
+    "numberCard": "{\"timing\":\"\",\"font\":\"\",\"size\":\"\",\"color\":\"\",\"position\":\"\"}",
+    "feedback": "",
+    "revision": 1,
+    "stageConfirmations": "{\"schemaVersion\":1,\"revisions\":{\"plan\":1,\"script\":1,\"storyboard\":0,\"video\":0,\"post\":0,\"delivery\":0},\"creative\":{\"at\":1793000001000,\"formRevision\":2,\"formHash\":\"b8bfe2c9\",\"planRevision\":1,\"planHash\":\"626ae1ae\",\"scriptRevision\":0,\"scriptHash\":\"741638a5\",\"storyboardRevision\":0,\"storyboardHash\":\"\",\"videoRevision\":0,\"videoHash\":\"\",\"postRevision\":0,\"postHash\":\"\",\"deliveryRevision\":0,\"deliveryHash\":\"\"},\"script\":{\"at\":1793000001001,\"formRevision\":2,\"formHash\":\"b8bfe2c9\",\"planRevision\":1,\"planHash\":\"626ae1ae\",\"scriptRevision\":1,\"scriptHash\":\"550510f6\",\"storyboardRevision\":0,\"storyboardHash\":\"\",\"videoRevision\":0,\"videoHash\":\"\",\"postRevision\":0,\"postHash\":\"\",\"deliveryRevision\":0,\"deliveryHash\":\"\"}}"
+  },
+  "rows": [
+    {
+      "_id": "888888888888888888888881",
+      "projectId": "111111111111111111111111",
+      "planId": "555555555555555555555555",
+      "spaceId": "222222222222222222222222",
+      "code": "SHOT-01",
+      "sortOrder": 0,
+      "shotSize": "全景",
+      "cameraMove": "固定",
+      "visual": "海平线与人物背影",
+      "voiceover": "字幕：把片刻留给海风",
+      "expectedSeconds": 3,
+      "scene": "生活场景",
+      "emotion": "平静",
+      "scriptDetail": "{\"schemaVersion\":\"1.0\",\"artifactRevision\":1,\"shotId\":\"SHOT-01\",\"narrativeTask\":\"用空间建立开场\",\"subjectAction\":\"白裙女性面向海面停步\",\"sceneDetail\":\"阴天退潮海滩\",\"cameraDetail\":\"固定低机位，保持水平线一致\",\"lightColor\":\"冷灰蓝散射光\",\"subtitle\":\"把片刻留给海风\",\"narration\":\"\",\"music\":\"克制的器乐\",\"soundEffects\":\"\",\"sellingPoints\":[],\"claimEvidence\":[],\"materialUses\":[{\"sourceId\":\"M-333333333333333333333333\",\"locator\":\"拍摄参考.md，第1至4行\",\"purpose\":\"借鉴场景与色调\"}]}"
+    },
+    {
+      "_id": "888888888888888888888882",
+      "projectId": "111111111111111111111111",
+      "planId": "555555555555555555555555",
+      "spaceId": "222222222222222222222222",
+      "code": "SHOT-02",
+      "sortOrder": 1,
+      "shotSize": "全景",
+      "cameraMove": "固定",
+      "visual": "人物与真实产品外观交替呈现",
+      "voiceover": "",
+      "expectedSeconds": 3,
+      "scene": "生活场景",
+      "emotion": "平静",
+      "scriptDetail": "{\"schemaVersion\":\"1.0\",\"artifactRevision\":1,\"shotId\":\"SHOT-02\",\"narrativeTask\":\"展开人物与产品的联系\",\"subjectAction\":\"白裙女性面向海面停步\",\"sceneDetail\":\"阴天退潮海滩\",\"cameraDetail\":\"固定低机位，保持水平线一致\",\"lightColor\":\"冷灰蓝散射光\",\"subtitle\":\"\",\"narration\":\"\",\"music\":\"克制的器乐\",\"soundEffects\":\"\",\"sellingPoints\":[],\"claimEvidence\":[],\"materialUses\":[{\"sourceId\":\"M-333333333333333333333333\",\"locator\":\"拍摄参考.md，第1至4行\",\"purpose\":\"借鉴场景与色调\"}]}"
+    },
+    {
+      "_id": "888888888888888888888883",
+      "projectId": "111111111111111111111111",
+      "planId": "555555555555555555555555",
+      "spaceId": "222222222222222222222222",
+      "code": "SHOT-03",
+      "sortOrder": 2,
+      "shotSize": "全景",
+      "cameraMove": "固定",
+      "visual": "人物与真实产品外观交替呈现",
+      "voiceover": "",
+      "expectedSeconds": 3,
+      "scene": "生活场景",
+      "emotion": "平静",
+      "scriptDetail": "{\"schemaVersion\":\"1.0\",\"artifactRevision\":1,\"shotId\":\"SHOT-03\",\"narrativeTask\":\"展开人物与产品的联系\",\"subjectAction\":\"白裙女性面向海面停步\",\"sceneDetail\":\"阴天退潮海滩\",\"cameraDetail\":\"固定低机位，保持水平线一致\",\"lightColor\":\"冷灰蓝散射光\",\"subtitle\":\"\",\"narration\":\"\",\"music\":\"克制的器乐\",\"soundEffects\":\"\",\"sellingPoints\":[],\"claimEvidence\":[],\"materialUses\":[{\"sourceId\":\"M-333333333333333333333333\",\"locator\":\"拍摄参考.md，第1至4行\",\"purpose\":\"借鉴场景与色调\"}]}"
+    },
+    {
+      "_id": "888888888888888888888884",
+      "projectId": "111111111111111111111111",
+      "planId": "555555555555555555555555",
+      "spaceId": "222222222222222222222222",
+      "code": "SHOT-04",
+      "sortOrder": 3,
+      "shotSize": "全景",
+      "cameraMove": "固定",
+      "visual": "人物与真实产品外观交替呈现",
+      "voiceover": "",
+      "expectedSeconds": 3,
+      "scene": "生活场景",
+      "emotion": "平静",
+      "scriptDetail": "{\"schemaVersion\":\"1.0\",\"artifactRevision\":1,\"shotId\":\"SHOT-04\",\"narrativeTask\":\"展开人物与产品的联系\",\"subjectAction\":\"白裙女性面向海面停步\",\"sceneDetail\":\"阴天退潮海滩\",\"cameraDetail\":\"固定低机位，保持水平线一致\",\"lightColor\":\"冷灰蓝散射光\",\"subtitle\":\"\",\"narration\":\"\",\"music\":\"克制的器乐\",\"soundEffects\":\"\",\"sellingPoints\":[],\"claimEvidence\":[],\"materialUses\":[{\"sourceId\":\"M-333333333333333333333333\",\"locator\":\"拍摄参考.md，第1至4行\",\"purpose\":\"借鉴场景与色调\"}]}"
+    },
+    {
+      "_id": "888888888888888888888885",
+      "projectId": "111111111111111111111111",
+      "planId": "555555555555555555555555",
+      "spaceId": "222222222222222222222222",
+      "code": "SHOT-05",
+      "sortOrder": 4,
+      "shotSize": "全景",
+      "cameraMove": "固定",
+      "visual": "人物与真实产品外观交替呈现",
+      "voiceover": "",
+      "expectedSeconds": 3,
+      "scene": "生活场景",
+      "emotion": "平静",
+      "scriptDetail": "{\"schemaVersion\":\"1.0\",\"artifactRevision\":1,\"shotId\":\"SHOT-05\",\"narrativeTask\":\"展开人物与产品的联系\",\"subjectAction\":\"白裙女性面向海面停步\",\"sceneDetail\":\"阴天退潮海滩\",\"cameraDetail\":\"固定低机位，保持水平线一致\",\"lightColor\":\"冷灰蓝散射光\",\"subtitle\":\"\",\"narration\":\"\",\"music\":\"克制的器乐\",\"soundEffects\":\"\",\"sellingPoints\":[],\"claimEvidence\":[],\"materialUses\":[{\"sourceId\":\"M-333333333333333333333333\",\"locator\":\"拍摄参考.md，第1至4行\",\"purpose\":\"借鉴场景与色调\"}]}"
+    }
+  ],
+  "imageReferences": [
+    {
+      "relationId": "666666666666666666666666",
+      "materialId": "777777777777777777777777",
+      "fileId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceRevision": 1,
+      "origin": "requirement-image",
+      "name": "测试需求图片.png",
+      "mime": "image/png",
+      "width": 1080,
+      "height": 1920,
+      "authorization": "自有"
+    }
+  ]
+}

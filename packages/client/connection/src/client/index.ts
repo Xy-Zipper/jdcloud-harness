@@ -97,6 +97,8 @@ export interface ClientTransportHooks {
   authorizeWebSocketUrl?(url: string): string | Promise<string>
   /** Current Authorization header for a background carrier that cannot use this realm's Fetch. */
   authorizationHeader?(): Promise<string | undefined>
+  /** Authorize one same-origin URL handed to the browser download manager. */
+  authorizeDownloadUrl?(url: string): string | Promise<string>
   /**
    * Bundle transport for the module system, present when the carrier also owns
    * bundle bytes (the worker tunnel). Absent in the served web app, whose
@@ -163,6 +165,8 @@ export interface ConnectionHandle {
   readonly rpc: ClientConnectionRpc
   /** Current Authorization header for background carriers outside this realm's Fetch implementation. */
   readonly authorizationHeader?: () => Promise<string | undefined>
+  /** Add short-lived authentication to a URL opened by the browser download manager. */
+  readonly authorizeDownloadUrl?: (url: string) => Promise<string>
   /**
    * Create a socket on the selected carrier; the channel owns framing and closing.
    * @param path - absolute logical channel path, resolved beneath the Host mount.
@@ -233,6 +237,8 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   const recovery = options.recovery ?? {}
   const interactions = options.interactions ?? (pageLocation === undefined ? 'none' : 'answer')
   const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
+  const authorizationHeader = transport?.authorizationHeader?.bind(transport)
+  const authorizeDownloadUrl = transport?.authorizeDownloadUrl?.bind(transport)
   let generationSource: ConnectionGenerationSource | undefined
   let owner: ConnectionOwner | undefined
   let generationId = 0
@@ -272,7 +278,10 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   }
   const handle: ConnectionHandle = {
     interactions,
-    ...(transport?.authorizationHeader === undefined ? {} : { authorizationHeader: transport.authorizationHeader }),
+    ...(authorizationHeader === undefined ? {} : { authorizationHeader: async () => await authorizationHeader() }),
+    ...(authorizeDownloadUrl === undefined ? {} : {
+      authorizeDownloadUrl: async url => await authorizeDownloadUrl(url),
+    }),
     openWebSocket: path => openConnectionWebSocket(
       path, transport?.createWebSocket, transport?.streamBaseUrl, transport?.authorizeWebSocketUrl?.bind(transport),
     ),
@@ -362,6 +371,10 @@ export function apply(ctx: Context): void {
     const baseFetch = globalThis.fetch.bind(globalThis)
     const browserSession = createBrowserBearerSession(baseFetch, sessionStorage, document.baseURI)
     const authenticatedFetch = browserSession.fetch
+    const configuredFetch = configuredTransport?.fetch
+    const configuredSocketAuthorization = configuredTransport?.authorizeWebSocketUrl?.bind(configuredTransport)
+    const configuredHeader = configuredTransport?.authorizationHeader?.bind(configuredTransport)
+    const configuredDownloadAuthorization = configuredTransport?.authorizeDownloadUrl?.bind(configuredTransport)
     ctx.effect(() => {
       const previous = globalThis.fetch
       globalThis.fetch = authenticatedFetch
@@ -371,11 +384,16 @@ export function apply(ctx: Context): void {
     }, 'client-connection: browser Bearer Fetch')
     transport = {
       ...configuredTransport,
-      fetch: configuredTransport?.fetch ?? browserSession.fetch,
-      authorizeWebSocketUrl: configuredTransport?.authorizeWebSocketUrl
-        ?? browserSession.authorizeWebSocketUrl,
-      authorizationHeader: configuredTransport?.authorizationHeader
-        ?? browserSession.authorizationHeader,
+      fetch: configuredFetch ?? ((input, init) => browserSession.fetch(input, init)),
+      authorizeWebSocketUrl: configuredSocketAuthorization === undefined
+        ? url => browserSession.authorizeWebSocketUrl(url)
+        : url => configuredSocketAuthorization(url),
+      authorizationHeader: configuredHeader === undefined
+        ? () => browserSession.authorizationHeader()
+        : () => configuredHeader(),
+      authorizeDownloadUrl: configuredDownloadAuthorization === undefined
+        ? url => browserSession.authorizeDownloadUrl(url)
+        : url => configuredDownloadAuthorization(url),
     }
   }
   installConnection(ctx, {

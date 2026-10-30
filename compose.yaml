@@ -4,10 +4,10 @@ services:
   jdcloud-harness:
     # The image is built from this private repository by the accompanying Dockerfile.
     image: jdcloud-harness:local
-    extra_hosts:
-      - "mi.kindoucloud.com:172.20.46.20"
-      - "kindoucloud.com:172.20.46.20"
-      - "beta.kindoucloud.com:172.20.46.20"
+    # extra_hosts:
+    #   - "mi.kindoucloud.com:172.20.46.20"
+    #   - "kindoucloud.com:172.20.46.20"
+    #   - "beta.kindoucloud.com:172.20.46.20"
     build:
       context: .
       dockerfile: Dockerfile
@@ -38,6 +38,10 @@ services:
       # Keep the deployment's unified key while satisfying the shipped DeepSeek routes.
       GPT_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
       DEEPSEEK_API_KEY: ${GPT_API_KEY:?Set GPT_API_KEY in the server .env file}
+      # Media tools ship in the JDCloud bundle; keys stay on the Host.
+      GPT_IMAGE_API_KEY: ${GPT_IMAGE_API_KEY:-}
+      ARK_API_KEY: ${ARK_API_KEY:-}
+      CREATION_STUDIO_MEDIA_STATE_DIR: /var/lib/jdcloud-harness/creation-studio-media
       # Seed the JDCloud login form through the Host controller at process startup.
       JDCLOUD_DEFAULT_BASE_URL: ${JDCLOUD_DEFAULT_BASE_URL:-}
       # Allow one parent origin, or `*`, to embed the token-transfer page.

@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/jdcloud/creation-studio-media/README.md
+/:
+  en: d5904ff1b8b5d94b
+  zh: 23c547719e77c061
+/deepseek-ai-dsh-creation-studio-media:
+  en: a3e43aaee4164625
+  zh: f97d9074acfe72c2
+/deepseek-ai-dsh-creation-studio-media/summary:
+  en: 2601dfd2956985b3
+  zh: 8be5ae672fae24dd
+/deepseek-ai-dsh-creation-studio-media/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: db9fe422fbf0c530
+/deepseek-ai-dsh-creation-studio-media/use-this-package:
+  en: 170309d849b534fa
+  zh: f5931239844e12c0
+/deepseek-ai-dsh-creation-studio-media/understand-the-implementation:
+  en: 3a586d67fb54c01e
+  zh: 675fc206e2349322
+/deepseek-ai-dsh-creation-studio-media/further-exploration:
+  en: cf66b4c5801c056e
+  zh: cb034625ec6cc452
+/deepseek-ai-dsh-creation-studio-media/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-creation-studio-media/model-experience/media-tools:
+  en: 1e23cfddb2f25475
+  zh: c68c2bc0e73088f4
+/deepseek-ai-dsh-creation-studio-media/model-experience/media-tools/what-the-model-sees:
+  en: c5fdbdac5d658af6
+  zh: dd2e0ac3bb9ccf2a
+/deepseek-ai-dsh-creation-studio-media/model-experience/media-tools/token-effect:
+  en: b29f999b276fb927
+  zh: c99bf1fc70fc00ff
+/deepseek-ai-dsh-creation-studio-media/model-experience/media-tools/kv-cache-effect:
+  en: 55cc210f1c16f532
+  zh: adc25474e7a6fb12
+/deepseek-ai-dsh-creation-studio-media/known-limitations-and-deferred-work:
+  en: c09b4a919c130129
+  zh: 403b97c1891509fa
+/deepseek-ai-dsh-creation-studio-media/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

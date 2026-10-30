@@ -13,6 +13,7 @@ The External Integration API lets a trusted server manage account Skills and Wor
 - [Route summary](#route-summary)
 - [Skill APIs](#skill-apis)
 - [Workspace APIs](#workspace-apis)
+- [Session history API](#session-history-api)
 - [Conversation API](#conversation-api)
 - [Errors](#errors)
 - [Security and deployment](#security-and-deployment)
@@ -77,6 +78,10 @@ The Runtime user must be authorized to access the requested Project. Ontology re
 | `GET` | `/api/external/v1/workspaces` | List Workspaces visible to the current user and scope. |
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse a Workspace under the current account root. |
 | `GET` | `/api/external/v1/workspaces/files` | List direct children of one Workspace directory. |
+| `GET` | `/api/external/v1/sessions/history` | Read text-message history for one Session. |
+| `POST` | `/api/external/v1/sessions/create` | Create a Session in an owned Workspace without invoking a model. |
+| `GET` | `/api/external/v1/sessions/file` | Read a bounded UTF-8 file under Session ownership. |
+| `POST` | `/api/external/v1/sessions/files/upload` | Stage a Session file and return its upload receipt. |
 | `POST` | `/api/external/v1/chat` | Create or continue a Session and stream its result. |
 
 The following examples use JDCloud Headers. For Ontology, replace the two JDCloud scope Headers with `X-Project-Id` as described above.
@@ -264,8 +269,41 @@ Example response:
 
 This endpoint lists direct children only. It does not download file contents.
 
+<a id="session-history-api"></a>
+## Session History API
+
+```powershell
+curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/sessions/history?sessionId=session-id&maxMessages=100" `
+  --header "Authorization: Bearer <raw-low-code-token>" `
+  --header "X-Tenant-Id: 6ad80f2f1f280486bb45ac3a" `
+  --header "X-JDCloud-Base-Url: https://mi.kindoucloud.com"
+```
+
+`sessionId` is required. `maxMessages` is optional, defaults to `100`, and accepts `1` through `200`. The endpoint reuses Session Controller ownership checks, so the current platform identity can read only Sessions it owns. Results include assistant text and user text whose source kind is `user`; runtime context, skill catalogs, skill instructions, reasoning, tool calls, tool results, and other internal events are excluded.
+
+`data.running` reports whether the live Agent was running before or after the history snapshot. Optional `data.startedAt` is the current `turn/start` time when that event is present in the window. Poll history after a page reload or interrupted chat stream to follow the existing work without resubmitting a prompt; intermediate assistant messages are not completion.
+
+```json
+{
+  "code": 200,
+  "data": {
+    "sessionId": "session-id",
+    "cursor": 12,
+    "hasMore": false,
+    "messages": [
+      { "id": "message-id", "role": "user", "text": "Change the target platform", "createdAt": 1790000000000 },
+      { "id": "message-id-2", "role": "assistant", "text": "The proposed change is ready.", "createdAt": 1790000001000 }
+    ]
+  }
+}
+```
+
 <a id="conversation-api"></a>
 ## Conversation API
+
+To attach files, first POST JSON `{ "workspaceId": "..." }` to `/api/external/v1/sessions/create` and retain `data.sessionId`. POST raw file bytes with `Content-Type: application/octet-stream` to `/api/external/v1/sessions/files/upload?sessionId=...&name=brief.pdf`. The endpoint reuses current-identity ownership checks and the Session attachment service, returns `{ code: 200, data: { receiptId, file } }`, and accepts at most 30 MiB per request. The next `/chat` may supply `fileReceiptIds: ["..."]`; receipts are accepted only by the receiving Session. Plain text chats may omit this field.
+
+Read generated artifacts through `GET /api/external/v1/sessions/file?sessionId=...&path=artifact.json`, whose `data` contains `{ path, text, version }`. This endpoint reuses Session-history ownership and Workspace file-read policies without activating an Agent. Existing preview line and byte caps apply; a partial preview is rejected instead of returning truncated content. All endpoints use this document's authentication Headers; missing files return `404`.
 
 ### Create a Session and send its first message
 

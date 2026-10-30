@@ -14,8 +14,8 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { open, mkdir, readdir, realpath, link, rm, stat, lstat, truncate } from 'node:fs/promises'
+import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
@@ -559,6 +559,39 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     signal?.throwIfAborted()
     return snapshots
+  }
+
+  /**
+   * Remove all generations and files owned by one quiescent Session.
+   * @param id - Session to remove; missing Sessions are a no-op.
+   * @returns completion after removal and write-lock release.
+   */
+  async delete(id: SessionId): Promise<void> {
+    await this.tracker.closeWriter(id)
+    this.tracker.claimWrite(id)
+    let lease: SessionWriteLease | undefined
+    try {
+      const selected = await this.findLog(id)
+      if (selected === undefined) return
+      const directory = dirname(selected.sourcePath)
+      const root = await realpath(this.root)
+      const actual = await realpath(directory)
+      const within = relative(root, actual)
+      if (within === '' || within === '..' || within.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+        || isAbsolute(within) || (await lstat(directory)).isSymbolicLink()) {
+        throw new Error(`refusing to delete Session storage outside its root: "${directory}"`)
+      }
+      lease = await this.acquireLease(id, undefined, directory)
+      // Holding the writer lease excludes another process while every generation is removed.
+      await rm(directory, { recursive: true, force: true, maxRetries: 3 })
+      this.coldLogMemo.delete(id)
+    } finally {
+      try {
+        await lease?.release()
+      } finally {
+        this.tracker.releaseClaim(id)
+      }
+    }
   }
 
   // --- handle-facing storage internals (package-private via the handle class below) ---

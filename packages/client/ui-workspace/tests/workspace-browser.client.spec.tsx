@@ -2383,7 +2383,7 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(confirm)
     fireEvent.click(confirm)
     expect(deleteWorkspace).toHaveBeenCalledOnce()
-    expect(deleteWorkspace).toHaveBeenCalledWith(wid('alpha'))
+    expect(deleteWorkspace).toHaveBeenCalledWith(wid('alpha'), false)
     expect(confirm.disabled).toBe(true)
     expect(screen.getByRole<HTMLButtonElement>('button', { name: '取消' }).disabled).toBe(true)
     expect(screen.getByRole('status').textContent).toBe('正在删除工作区…')
@@ -2416,6 +2416,30 @@ describe('WorkspaceBrowser', () => {
     await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('denied') })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('dialog', { name: '删除工作区' })).toBeNull()
+  })
+
+  it('lets the user opt into Session deletion and resets the choice after cancellation', () => {
+    const deleteWorkspace = vi.fn(async () => {})
+    mount({
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['session'], 'Alpha')])),
+      deleteWorkspace,
+    })
+    const open = () => {
+      fireEvent.click(screen.getByRole('button', { name: '工作区“Alpha”的操作' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '删除工作区' }))
+    }
+    open()
+    const choice = screen.getByRole<HTMLInputElement>('checkbox')
+    expect(choice.checked).toBe(false)
+    fireEvent.click(choice)
+    expect(screen.getByRole('dialog').textContent).toContain('此操作无法撤销')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(deleteWorkspace).not.toHaveBeenCalled()
+    open()
+    expect(screen.getByRole<HTMLInputElement>('checkbox').checked).toBe(false)
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '删除工作区' }))
+    expect(deleteWorkspace).toHaveBeenCalledWith(wid('alpha'), true)
   })
 
   it('Cancel, Escape, and Close dismiss deletion without calling the action', () => {

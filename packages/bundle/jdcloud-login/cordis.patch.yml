@@ -39,6 +39,17 @@
     - id: external-api
       name: '@deepseek-ai/dsh-api-external'
 
+    # Media execution ships with Harness; Skills remain separate account installations.
+    - id: creation-studio-media
+      name: '@deepseek-ai/dsh-creation-studio-media'
+      config:
+        platformURL: https://mi.kindoucloud.com
+        tenantId: 6ad80f2f1f280486bb45ac3a
+        stateDirectory: !!js "process.env.CREATION_STUDIO_MEDIA_STATE_DIR || process.getBuiltinModule('node:path').join(process.env.DSH_HOME || process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'creation-studio-media')"
+        imageKeyRef: GPT_IMAGE_API_KEY
+        arkKeyRef: ARK_API_KEY
+        imageModel: gpt-image-2.5
+
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
 

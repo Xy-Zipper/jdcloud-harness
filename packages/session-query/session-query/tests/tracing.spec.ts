@@ -84,6 +84,7 @@ class TraceHandle implements SessionHandle {
 
 class TracePersistence extends SessionPersistence {
   static entries = new Map<SessionIdType, { meta: SessionHeader; events: SessionEvent[] }>()
+  async delete(id: SessionIdType): Promise<void> { TracePersistence.entries.delete(id) }
   static listCalls = 0
   static readCalls = 0
   static listFailure: Error | undefined

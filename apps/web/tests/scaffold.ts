@@ -58,6 +58,7 @@ import {
   type NormalizeContext,
 } from '@deepseek-ai/dsh-session-snapshot'
 import type { Profile, ProfileContext } from '@deepseek-ai/dsh-app-boot'
+import type { BrowserSessionService } from '@deepseek-ai/dsh-client-connection'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type {
@@ -280,7 +281,7 @@ export interface WebScaffold {
   mode: WebSnapshotMode
   /** Browser-facing origin for the bound test server (the mount root under `publicMount`). */
   baseUrl: string
-  /** Process-token URL that establishes this scaffold's browser session. */
+  /** Browser URL that establishes the configured launch-cookie or Bearer session. */
   authenticatedUrl: string
   /** Settled root context (the in-process readiness barrier; headless event subscription is its sanctioned use). */
   ctx: Context
@@ -290,7 +291,7 @@ export interface WebScaffold {
   persistenceRoot: string
   /** Isolated harness home the settings/credentials rows write ($DSH_HOME double). */
   harnessHome: string
-  /** Send a browser-equivalent Host request with this scaffold's authenticated cookie. */
+  /** Send a browser-equivalent Host request with this scaffold's configured identity. */
   hostFetch(path: string, init?: RequestInit): Promise<Response>
   /** Await a settled turn end: in-process turn/end, then the agent's idle flip (which follows the persistence flush). */
   whenTurnSettled(timeoutMs?: number): Promise<SessionId>
@@ -445,6 +446,8 @@ export interface LaunchOptions {
    * 127.0.0.1; a non-resolving authority fails before Host trust is exercised.
    */
   remoteAuthority?: string
+  /** Exercise the deployment-owned-login Bearer identity used by JDCloud Web containers. */
+  browserSessionTransport?: 'bearer'
   /**
    * Serve the same listener through the private plain-HTTP prefix-stripping
    * proxy in `./prefix-proxy.ts`, which owns the mount, upgrade, and cookie
@@ -658,11 +661,16 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // Preserve the composed surface-context choice because a patch replaces
     // the row's complete config.
     { id: 'web-runtime', config: { openBrowser: false, printUrl: false, surfaceContext } },
-    ...publicHost === undefined && options.remoteAuthority === undefined
+    ...publicHost === undefined && options.remoteAuthority === undefined && options.browserSessionTransport === undefined
       ? []
       : [{
         id: 'connection',
         config: {
+          ...options.browserSessionTransport === 'bearer' ? {
+            browserAuthentication: false,
+            browserSession: true,
+            browserSessionTransport: 'bearer',
+          } : {},
           trustedHosts: [
             ...publicHost === undefined ? [] : [publicHost],
             ...options.remoteAuthority === undefined ? [] : [options.remoteAuthority],
@@ -735,6 +743,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
   let baseUrl = ''
   let authenticatedUrl = ''
   let cookieHeader = ''
+  let authorizationHeader = ''
   let publicProxy: PrefixProxy | undefined
   let replayHandle: ReplayHandle | undefined
   try {
@@ -916,18 +925,25 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       baseUrl = `http://${publicHost}:${String(publicProxy.port)}${publicPrefix}`
     }
     authenticatedUrl = ctx.connection.authenticatedUrl(baseUrl)
-    // Chromium resolves *.localhost itself; Node may not. Both scaffold
-    // listeners bind loopback, including the optional prefix proxy.
-    const loginUrl = new URL(authenticatedUrl)
-    loginUrl.hostname = '127.0.0.1'
-    const login = await fetch(loginUrl, { redirect: 'manual' })
-    const setCookie = login.headers.get('set-cookie')
-    if (login.status !== 303 || login.headers.get('location') !== './' || setCookie === null) {
-      throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
-    }
-    cookieHeader = setCookie.split(';', 1)[0] ?? ''
-    if (cookieHeader.length === 0) {
-      throw new Error('web e2e scaffold: browser token exchange returned an empty session cookie')
+    const browserSession: BrowserSessionService | undefined = ctx.get('browserSession')
+    if (browserSession?.transport === 'bearer') {
+      authenticatedUrl = baseUrl
+      const session = browserSession.issueBearer({ headers: { host: new URL(baseUrl).host } })
+      authorizationHeader = `Bearer ${session.token}`
+    } else {
+      // Chromium resolves *.localhost itself; Node may not. Both scaffold
+      // listeners bind loopback, including the optional prefix proxy.
+      const loginUrl = new URL(authenticatedUrl)
+      loginUrl.hostname = '127.0.0.1'
+      const login = await fetch(loginUrl, { redirect: 'manual' })
+      const setCookie = login.headers.get('set-cookie')
+      if (login.status !== 303 || login.headers.get('location') !== './' || setCookie === null) {
+        throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
+      }
+      cookieHeader = setCookie.split(';', 1)[0] ?? ''
+      if (cookieHeader.length === 0) {
+        throw new Error('web e2e scaffold: browser token exchange returned an empty session cookie')
+      }
     }
   } catch (error) {
     if (process.cwd() !== originalCwd) process.chdir(originalCwd)
@@ -955,7 +971,8 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     persistenceRoot,
     hostFetch(path: string, init: RequestInit = {}): Promise<Response> {
       const headers = new Headers(init.headers)
-      headers.set('cookie', cookieHeader)
+      if (authorizationHeader !== '') headers.set('authorization', authorizationHeader)
+      else headers.set('cookie', cookieHeader)
       return fetch(new URL(path, baseUrl), { ...init, headers })
     },
     // Barrier stack: the in-process turn/end identifies the session, its

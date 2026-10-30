@@ -1,0 +1,6 @@
+- dialog "Delete session":
+  - heading "Delete session" [level=2]
+  - button "Close"
+  - paragraph: Permanently delete “Delete this conversation”? The session history and files in its storage directory will be removed. This cannot be undone. The project folder is unaffected.
+  - button "Cancel"
+  - button "Delete session"

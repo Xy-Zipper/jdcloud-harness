@@ -115,6 +115,7 @@ function entryRevision(entry: { events: SessionEvent[] }): SessionPersistenceRev
 
 class TestPersistence extends SessionPersistence {
   static entries = new Map<SessionIdType, { meta: SessionHeader; events: SessionEvent[] }>()
+  async delete(id: SessionIdType): Promise<void> { TestPersistence.entries.delete(id) }
   static listFailure: unknown
   static listOverride: ((signal?: AbortSignal) => Promise<SessionPersistenceSnapshot[]>) | undefined
   static readFailure: unknown

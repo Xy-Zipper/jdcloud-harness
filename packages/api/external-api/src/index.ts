@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-api-session-controller'
 import {
   SKILL_INSTALL_MAX_FILES,
@@ -12,6 +13,8 @@ import {
   type AccountSkillDeleteRequest,
   type AccountSkillInstallRequest,
   type SessionFollowFrame,
+  type SessionHistoryRecord,
+  type PromptContentPart,
   type SessionRequestId,
   type SkillInstallFile,
 } from '@deepseek-ai/dsh-api-session-controller/types'
@@ -27,6 +30,7 @@ import { unzipSync } from 'fflate'
 
 export const name = 'external-api'
 export const inject = [
+  'agents',
   'sessionController',
   'sessionSkillCatalog',
   'webServer',
@@ -65,6 +69,14 @@ interface ChatRequest {
   readonly sessionId?: string
   readonly workspaceId?: string
   readonly skillNames: readonly string[]
+  readonly fileReceiptIds: readonly string[]
+}
+
+interface ExternalSessionMessage {
+  readonly id: string
+  readonly role: 'user' | 'assistant'
+  readonly text: string
+  readonly createdAt: number
 }
 
 const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Response>>([
@@ -74,6 +86,10 @@ const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Respo
   [`${API_PREFIX}/workspaces`, workspacesList],
   [`${API_PREFIX}/workspaces/create`, workspacesCreate],
   [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
+  [`${API_PREFIX}/sessions/history`, sessionHistory],
+  [`${API_PREFIX}/sessions/create`, sessionCreate],
+  [`${API_PREFIX}/sessions/file`, sessionFile],
+  [`${API_PREFIX}/sessions/files/upload`, sessionFileUpload],
   [`${API_PREFIX}/chat`, chat],
 ])
 
@@ -190,6 +206,112 @@ async function workspaceFilesList(ctx: Context, request: Request): Promise<Respo
   })
 }
 
+/** Read one owned Session's latest user and assistant text messages without activating its Agent. */
+async function sessionHistory(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, async () => {
+    const url = new URL(request.url)
+    const sessionId = requiredValue(url.searchParams.get('sessionId') || undefined, 'sessionId query parameter is required')
+    const maxMessages = historyLimit(url.searchParams.get('maxMessages'))
+    const id = brandString<SessionId>(sessionId)
+    // An intermediate Assistant message does not settle the Agent's running interval.
+    const wasRunning = ctx.agents.get(id)?.status === 'running'
+    const iterator = ctx.sessionController.follow({
+      address: { kind: 'session', sessionId: id },
+      maxMessages,
+    }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') {
+        throw new Error('Session history did not open with a snapshot')
+      }
+      const running = wasRunning || ctx.agents.get(id)?.status === 'running'
+      const startedAt = running ? opening.value.records.findLast(record => record.event.type === 'turn/start')?.event.time : undefined
+      return {
+        sessionId,
+        cursor: opening.value.cursor,
+        hasMore: opening.value.hasMore,
+        running,
+        ...(startedAt === undefined ? {} : { startedAt }),
+        messages: externalSessionMessages(opening.value.records),
+      }
+    } finally {
+      await iterator.return?.()
+    }
+  })
+}
+
+/** Create an owned Session without submitting a model turn, so files can be staged first. */
+async function sessionCreate(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    const body = await jsonBody(request)
+    return ctx.sessionController.create({ workspaceId: brandString<WorkspaceId>(requiredString(body['workspaceId'], 'workspaceId')) })
+  })
+}
+
+/** Read bounded UTF-8 text through the existing Session ownership and filesystem policies. */
+async function sessionFile(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, async () => {
+    const url = new URL(request.url)
+    const sessionId = brandString<SessionId>(requiredValue(url.searchParams.get('sessionId') || undefined, 'sessionId is required'))
+    const path = requiredValue(url.searchParams.get('path') || undefined, 'path is required')
+    const iterator = ctx.sessionController.follow({ address: { kind: 'session', sessionId }, maxMessages: 1 }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') throw new Error('Session file read did not open with a snapshot')
+      const workspaceRoot = requiredValue(opening.value.header.cwd, 'Session has no workspace directory')
+      const file = await ctx.workspaceFiles.read({ sessionId, workspaceRoot }, path, {}, request.signal)
+      if (!file.eof) throw badRequest('File exceeds the complete text preview limit')
+      return { path, text: file.text, version: file.version }
+    } finally {
+      await iterator.return?.()
+    }
+  })
+}
+
+/** Stage one bounded raw file for an owned Session; the receipt is accepted only by that Session. */
+async function sessionFileUpload(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    if (request.headers.get('content-type')?.split(';', 1)[0]?.trim() !== 'application/octet-stream') {
+      throw badRequest('content type must be application/octet-stream')
+    }
+    const url = new URL(request.url)
+    const sessionId = brandString<SessionId>(requiredValue(url.searchParams.get('sessionId') || undefined, 'sessionId is required'))
+    const iterator = ctx.sessionController.follow({ address: { kind: 'session', sessionId }, maxMessages: 1 }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') throw new Error('Session upload did not open with a snapshot')
+    } finally {
+      await iterator.return?.()
+    }
+    const uploads = ctx.get('fileUploads')
+    if (uploads === undefined) throw badRequest('Session file uploads are unavailable')
+    const name = url.searchParams.get('name') ?? 'attachment'
+    return uploads.uploadStream({ sessionId, name, data: requestFileChunks(request), signal: request.signal })
+  })
+}
+
+async function* requestFileChunks(request: Request): AsyncIterable<Uint8Array> {
+  if (request.body === null) throw badRequest('file body is required')
+  const reader = request.body.getReader()
+  let bytes = 0
+  try {
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      bytes += next.value.byteLength
+      if (bytes > MAX_REQUEST_BODY_BYTES) throw badRequest('file exceeds the external request byte limit')
+      yield next.value
+    }
+    if (bytes === 0) throw badRequest('file must not be empty')
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 async function chat(ctx: Context, request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed('POST')
   const authenticator = externalAuthenticator(ctx)
@@ -273,7 +395,10 @@ async function pumpChat(
       requestId,
       sessionId,
       mode: 'queue',
-      content: [{ type: 'text', text }],
+      content: [
+        { type: 'text', text },
+        ...input.fileReceiptIds.map((receiptId): PromptContentPart => ({ type: 'file', receiptId: brandString<Extract<PromptContentPart, { type: 'file' }>['receiptId']>(receiptId) })),
+      ],
     }, signal)
     for (;;) {
       const next = await iterator.next()
@@ -303,7 +428,66 @@ function isSubmittedUserMessage(frame: Extract<SessionFollowFrame, { type: 'even
   const data = frame.event.data
   if (typeof data !== 'object' || data === null || Array.isArray(data)) return false
   const source = Reflect.get(data, 'source')
-  return typeof source === 'object' && source !== null && Reflect.get(source, 'rpcId') === requestId
+  return typeof source === 'object'
+    && source !== null
+    && Reflect.get(source, 'kind') === 'user'
+    && Reflect.get(source, 'rpcId') === requestId
+}
+
+/** Parse and bound the public history page size. */
+function historyLimit(raw: string | null): number {
+  if (raw === null || raw === '') return 100
+  const parsed = Number(raw)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 200) {
+    throw badRequest('maxMessages must be an integer between 1 and 200')
+  }
+  return parsed
+}
+
+/** Project durable Session events into the text-only history creation-studio can render. */
+function externalSessionMessages(records: readonly SessionHistoryRecord[]): ExternalSessionMessage[] {
+  return records.flatMap<ExternalSessionMessage>(({ event }) => {
+    if (event.type === 'user/message') {
+      const source = isPlainRecord(event.data) ? Reflect.get(event.data, 'source') : undefined
+      if (!isPlainRecord(source) || Reflect.get(source, 'kind') !== 'user') return []
+      const message = sessionMessage(event.data)
+      return message === undefined ? [] : [{
+        id: message.id || `user-${String(event.seq)}`,
+        role: 'user' as const,
+        text: message.text,
+        createdAt: event.time,
+      }]
+    }
+    if (event.type === 'assistant/message') {
+      const data = isPlainRecord(event.data) ? Reflect.get(event.data, 'message') : undefined
+      const message = sessionMessage(data)
+      return message === undefined ? [] : [{
+        id: message.id || `assistant-${String(event.seq)}`,
+        role: 'assistant' as const,
+        text: message.text,
+        createdAt: event.time,
+      }]
+    }
+    return []
+  })
+}
+
+function sessionMessage(value: unknown): { readonly id: string; readonly text: string } | undefined {
+  if (!isPlainRecord(value)) return undefined
+  const content = Reflect.get(value, 'content')
+  if (!Array.isArray(content)) return undefined
+  const parts = content.flatMap((block) => {
+    if (!isPlainRecord(block) || Reflect.get(block, 'type') !== 'text') return []
+    const text = Reflect.get(block, 'text')
+    return typeof text === 'string' && text !== '' ? [text] : []
+  })
+  if (parts.length === 0) return undefined
+  const id = Reflect.get(value, 'id')
+  return { id: typeof id === 'string' ? id : '', text: parts.join('\n') }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function sendEvent(
@@ -416,11 +600,16 @@ function parseChatRequest(body: Record<string, unknown>): ChatRequest {
   if (!Array.isArray(rawSkills)) throw badRequest('skillNames must be an array')
   const skillNames = rawSkills.map((value, index) => requiredString(value, `skillNames[${String(index)}]`))
   if (new Set(skillNames).size !== skillNames.length) throw badRequest('skillNames must not contain duplicates')
+  const rawReceipts = body['fileReceiptIds'] ?? []
+  if (!Array.isArray(rawReceipts)) throw badRequest('fileReceiptIds must be an array')
+  const fileReceiptIds = rawReceipts.map((value, index) => requiredString(value, `fileReceiptIds[${String(index)}]`))
+  if (new Set(fileReceiptIds).size !== fileReceiptIds.length) throw badRequest('fileReceiptIds must not contain duplicates')
   return {
     message,
     ...sessionId === undefined ? {} : { sessionId },
     ...workspaceId === undefined ? {} : { workspaceId },
     skillNames,
+    fileReceiptIds,
   }
 }
 

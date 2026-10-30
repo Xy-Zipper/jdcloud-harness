@@ -17,7 +17,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
+  Button, Checkbox, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
   IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
@@ -1231,6 +1231,7 @@ export function WorkspaceBrowser({
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
   const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+  const [deleteSessions, setDeleteSessions] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -1252,7 +1253,7 @@ export function WorkspaceBrowser({
     setDeleting(true)
     setDeleteCommittedId(null)
     setDeleteError(null)
-    deleteWorkspace(deleteTarget.workspaceId).then(() => {
+    deleteWorkspace(deleteTarget.workspaceId, deleteSessions).then(() => {
       // Keep the confirmation pending until this component has rendered the
       // committed list projection without the deleted id. Closing earlier
       // exposes one stale React frame to the next Create Workspace gesture.
@@ -1471,6 +1472,7 @@ export function WorkspaceBrowser({
                   setRenameError(null)
                 }}
                 onDeleteRequest={(workspaceId, title) => {
+                  setDeleteSessions(false)
                   setDeleteTarget({ workspaceId, title })
                   setDeleteError(null)
                 }}
@@ -1520,7 +1522,7 @@ export function WorkspaceBrowser({
         title={t('delete.workspace')}
         {...deleteTarget === null
           ? {}
-          : { description: t('delete.desc', { name: deleteTarget.title }) }}
+          : { description: t(deleteSessions ? 'delete.desc.withSessions' : 'delete.desc', { name: deleteTarget.title }) }}
         footer={(
           <>
             <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
@@ -1535,6 +1537,7 @@ export function WorkspaceBrowser({
           </>
         )}
       >
+        <Checkbox checked={deleteSessions} onChange={setDeleteSessions} disabled={deleting} label={t('delete.sessions')} />
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
       </Modal>

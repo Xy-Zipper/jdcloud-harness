@@ -4,4 +4,5 @@
     browserAuthentication: false
     browserSession: true
     browserSessionTransport: bearer
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    # The Web connection row injects webStartup, which owns --trusted-host values.
+    trustedHosts: !!js ctx.webStartup.trustedHosts

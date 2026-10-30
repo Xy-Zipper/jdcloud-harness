@@ -1,6 +1,40 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/api/external-api/README.md
-README.md: fc01b18281bc97a73b2e3c9eec6c5272f24091ab
-README.zh.md: 92292c5f9dd7cb54252351ce267bc748cf698224
+/:
+  en: 443beca59cef026b
+  zh: ae8cbaa7a89f6965
+/external-api:
+  en: 11720d3b7f044894
+  zh: a531024317abf9a5
+/external-api/summary:
+  en: 5571bcacfaac368d
+  zh: 78c98e7c5ac1ce7a
+/external-api/table-of-contents:
+  en: 27bb495f965d72c8
+  zh: 3ea6435d70704ac3
+/external-api/routes:
+  en: 9e208454ac935d7a
+  zh: 7af45603bd73f4c3
+/external-api/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/external-api/model-experience/selected-skills:
+  en: a07caa0f264360dc
+  zh: dccc3aa0a46834ad
+/external-api/model-experience/selected-skills/what-the-model-sees:
+  en: f9a43d1e34362cfa
+  zh: 7e482b0ba6ac6c71
+/external-api/model-experience/selected-skills/token-effect:
+  en: fe031d7ac459c4ca
+  zh: 645fcea13948c16a
+/external-api/model-experience/selected-skills/kv-cache-effect:
+  en: 895fb7296ecda17c
+  zh: 367c336dd0fdbc58
+/external-api/known-limitations-and-deferred-work:
+  en: 69448a4f000cc726
+  zh: f7249fb62bac231a
+/external-api/known-limitations-and-deferred-work/dev-note:
+  en: 707301b23d0ab646
+  zh: c4d73ee8fc7fd813

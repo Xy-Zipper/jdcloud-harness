@@ -127,10 +127,11 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   /**
    * Delete a Workspace and remove it from the local projection immediately.
    * @param workspaceId - target Workspace.
+   * @param options - omitted retains Sessions; `deleteSessions` removes their storage before the Workspace.
    * @returns generated Remote result.
    */
-  async delete(workspaceId: WorkspaceId): Promise<RemoteResult<WorkspaceDeleteValue>> {
-    const result = await this.remote.delete({ workspaceId })
+  async delete(workspaceId: WorkspaceId, options: { readonly deleteSessions?: boolean } = {}): Promise<RemoteResult<WorkspaceDeleteValue>> {
+    const result = await this.remote.delete({ workspaceId, ...options })
     if (result.ok) this.remove(workspaceId, true)
     return result
   }

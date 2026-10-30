@@ -2,6 +2,8 @@
 
 import {
   BROWSER_SESSION_BOOTSTRAP_PATH,
+  BROWSER_SESSION_DOWNLOAD_TICKET_PATH,
+  BROWSER_SESSION_DOWNLOAD_TICKET_QUERY,
   BROWSER_SESSION_STORAGE_KEY,
   BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
 } from '../browser-session-protocol.ts'
@@ -16,6 +18,7 @@ interface StoredBrowserSession {
 export interface BrowserBearerSession {
   readonly fetch: typeof globalThis.fetch
   authorizationHeader(): Promise<string>
+  authorizeDownloadUrl(url: string): Promise<string>
   authorizeWebSocketUrl(url: string): Promise<string>
 }
 
@@ -85,8 +88,8 @@ export function createBrowserBearerSession(
     if (response.status === 401) storage.removeItem(BROWSER_SESSION_STORAGE_KEY)
     return response
   }
-  const requestTicket = async (retry: boolean): Promise<string> => {
-    const response = await baseFetch(BROWSER_SESSION_WEBSOCKET_TICKET_PATH.slice(1), {
+  const requestTicket = async (path: string, kind: 'download' | 'WebSocket', retry: boolean): Promise<string> => {
+    const response = await baseFetch(path, {
       method: 'POST',
       headers: {
         accept: 'application/json',
@@ -95,14 +98,14 @@ export function createBrowserBearerSession(
     })
     if (response.status === 401 && retry) {
       storage.removeItem(BROWSER_SESSION_STORAGE_KEY)
-      return requestTicket(false)
+      return requestTicket(path, kind, false)
     }
     if (!response.ok) {
-      throw new Error(`browser WebSocket ticket failed with HTTP ${String(response.status)}`)
+      throw new Error(`browser ${kind} ticket failed with HTTP ${String(response.status)}`)
     }
     const value: unknown = await response.json()
     if (!isRecord(value) || typeof value.ticket !== 'string' || value.ticket.length === 0) {
-      throw new TypeError('browser WebSocket ticket returned an invalid response')
+      throw new TypeError(`browser ${kind} ticket returned an invalid response`)
     }
     return value.ticket
   }
@@ -110,9 +113,26 @@ export function createBrowserBearerSession(
   return {
     fetch,
     authorizationHeader,
+    async authorizeDownloadUrl(url) {
+      const base = new URL(baseUrl)
+      const target = new URL(url, base)
+      if (target.origin !== base.origin) throw new Error('browser download target must be same-origin')
+      const mount = base.pathname.endsWith('/') ? base.pathname : `${base.pathname}/`
+      if (!target.pathname.startsWith(mount)) throw new Error('browser download target must be under the application mount')
+      const hostTarget = `/${target.pathname.slice(mount.length)}${target.search}`
+      const request = new URL(BROWSER_SESSION_DOWNLOAD_TICKET_PATH.slice(1), baseUrl)
+      request.searchParams.set('target', hostTarget)
+      target.searchParams.set(
+        BROWSER_SESSION_DOWNLOAD_TICKET_QUERY,
+        await requestTicket(request.href, 'download', true),
+      )
+      return target.href
+    },
     async authorizeWebSocketUrl(url) {
       const target = new URL(url)
-      target.searchParams.set('ticket', await requestTicket(true))
+      target.searchParams.set('ticket', await requestTicket(
+        BROWSER_SESSION_WEBSOCKET_TICKET_PATH.slice(1), 'WebSocket', true,
+      ))
       return target.href
     },
   }

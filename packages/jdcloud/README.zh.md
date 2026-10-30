@@ -25,6 +25,7 @@ jdcloud 组让当前租户的低代码表单和流程可用于对话。其工具
 | 包 | 职责 |
 |---|---|
 | [`tool-jdcloud-lowcode`](tool-jdcloud-lowcode/README.zh.md) | 为每个用户 Prompt 注入 type 3/4 能力快照，并提供由 Host 强制校验的低代码数据工具 |
+| [`creation-studio-media`](creation-studio-media/README.zh.md) | 生成分镜图片和参考视频，并以认证身份保存项目素材 |
 
 -----
 

@@ -301,7 +301,7 @@ export class SessionCommandController {
     const composition = await this.agents.composeAgent(this.agents.presetForObservation(source))
     try {
       const { provider, model } = this.ctx.agentDefaultModel.currentSelection()
-      await this.ctx.agents.create({
+      this.agents.own(await this.ctx.agents.create({
         sessionId: childId,
         seed,
         inheritedEventCount: SessionLogOffset(boundary + 1),
@@ -315,7 +315,7 @@ export class SessionCommandController {
         },
         agentOptions: { provider, model },
         setup: composition.setup,
-      })
+      }))
     } catch (error) {
       throw new RemoteError(
         'gateway/internal',
@@ -342,7 +342,7 @@ export class SessionCommandController {
    * Admit one prompt after Agent and attachment validation; the Remote method
    * has already validated the content and built the durable message source.
    * @param request - Session identity, prompt content, and delivery mode.
-   * @param source - the `user-rpc` source recorded on the accepted message.
+   * @param source - the `user` source with an `rpcId` recorded on the accepted message.
    * @param signal - caller cancellation used by prompt-admission listeners.
    * @returns acknowledgement that the Agent accepted the prompt.
    */

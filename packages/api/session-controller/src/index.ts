@@ -43,6 +43,8 @@ import type {
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
+  SessionDeleteRequest,
+  SessionDeleteValue,
   SessionFollowFrame,
   SessionFollowRequest,
   SessionForkRequest,
@@ -196,7 +198,7 @@ export class SessionController extends TypertRemoteService {
       ctx.emit('api-session/added', this.listState.summaryFor(session))
     })
     ctx.on('session/disposed', (session) => {
-      ctx.emit('api-session/removed', session.id)
+      if (!this.agents.isDeleting(session.id)) ctx.emit('api-session/removed', session.id)
     })
     const publishAgentAvailability = ({ agent }: { agent: Agent }): undefined => {
       if (ctx.sessions.get(agent.id) === agent.session) {
@@ -246,6 +248,37 @@ export class SessionController extends TypertRemoteService {
    */
   resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult> {
     return this.assertOwned(sessionId).then(() => this.agents.resolveAgent(sessionId))
+  }
+
+  /**
+   * Permanently delete an inactive Session and its provider-owned files.
+   * Running turns, descendants, jobs or schedules refuse before mutation.
+   * Project files and globally shared attachments remain. A storage failure
+   * keeps the Session discoverable when its log remains; cleanup may be partial.
+   * @param request - Session identity authorized for the current caller.
+   * @returns receipt after storage and navigation cleanup.
+   */
+  @Remote('delete')
+  async delete(request: SessionDeleteRequest): Promise<SessionDeleteValue> {
+    const { sessionId } = request
+    await this.assertOwned(sessionId)
+    return this.agents.deleteSession(sessionId, async () => {
+      const persistence = this.ctx.get('sessionPersistence')
+      if (persistence === undefined) {
+        throw new RemoteError('gateway/internal', 'Session persistence is unavailable', {})
+      }
+      const activity = await this.ctx.waterfall(
+        'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
+      )
+      if (activity.length > 0) {
+        throw new RemoteError('session/delete-active', 'Stop the Session work before deleting it', { sessionId })
+      }
+      await this.agents.releaseForDeletion(sessionId)
+      await persistence.delete(sessionId)
+      await this.ctx.workspaceRegistry.forgetSession(sessionId)
+      this.ctx.emit('api-session/removed', sessionId)
+      return { deleted: true }
+    })
   }
 
   /**

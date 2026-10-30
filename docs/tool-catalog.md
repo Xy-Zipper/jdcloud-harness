@@ -15,6 +15,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
+| `@deepseek-ai/dsh-creation-studio-media` | `creation_studio_image_generate`, `creation_studio_image_task`, `creation_studio_video_task` | `ctx.tools`, `ctx.credentials`, `ctx.attachments`, `ctx.jdcloudAuthController`, `ctx.webServer` | `tool/call`, `tool/result`, `provider task receipts`, `authenticated project media uploads` | - | The JDCloud bundle ships media execution; Skills are installed separately. Tool execution rechecks project context, permissions, and confirmation before paid generation or uploads. |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-experimental-browser-use-stagehand-native` | `stagehand_act`, `stagehand_extract`, `stagehand_navigate`, `stagehand_observe`, `stagehand_screenshot`, `stagehand_tabs` | `ctx.browserUse`, `ctx.agents`, `ctx.tools`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | - |
@@ -46,6 +47,181 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+
+<a id="deepseek-aidsh-creation-studio-media"></a>
+
+## `@deepseek-ai/dsh-creation-studio-media`
+
+### `creation_studio_image_generate`
+
+为当前分镜或资产生成图片并上传项目素材；默认自有，仍须用户确认画面。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "当前项目的完整记录 ID。"
+    },
+    "planId": {
+      "type": "string",
+      "description": "当前采纳方案的完整记录 ID。"
+    },
+    "spaceId": {
+      "type": "string",
+      "description": "当前项目团队空间的完整记录 ID。"
+    },
+    "requestId": {
+      "type": "string",
+      "description": "稳定请求编号；重试必须沿用，不重新付费。"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "图片描述，说明各参考图片的职责。"
+    },
+    "size": {
+      "type": "string",
+      "enum": [
+        "1024x1024",
+        "1024x1536",
+        "1536x1024"
+      ]
+    },
+    "referenceIds": {
+      "type": "array",
+      "description": "当前项目真实图片引用 ID，按图1、图2顺序。",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "projectId",
+    "planId",
+    "spaceId",
+    "requestId",
+    "prompt",
+    "size",
+    "referenceIds"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/creation-studio-media/src/index.ts`](../packages/jdcloud/creation-studio-media/src/index.ts)
+
+### `creation_studio_image_task`
+
+提交、查询或列出 GPT Image 2.5 异步图片任务；多图先逐个提交，完成后上传项目素材，仍须人工确认。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "当前项目的完整记录 ID。"
+    },
+    "planId": {
+      "type": "string",
+      "description": "当前采纳方案的完整记录 ID。"
+    },
+    "spaceId": {
+      "type": "string",
+      "description": "当前项目团队空间的完整记录 ID。"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "submit",
+        "refresh",
+        "list"
+      ]
+    },
+    "requestId": {
+      "type": "string",
+      "description": "提交和查询必填，先写入分镜图片项的稳定 requestId；重试必须沿用。"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "提交必填，说明参考图片的职责和需要保持的产品外观。"
+    },
+    "size": {
+      "type": "string",
+      "enum": [
+        "1024x1024",
+        "1024x1536",
+        "1536x1024"
+      ]
+    },
+    "referenceIds": {
+      "type": "array",
+      "description": "提交必填，当前项目真实图片引用 ID，按顺序对应参考图；没有参考时传空数组。",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "projectId",
+    "planId",
+    "spaceId",
+    "action"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/creation-studio-media/src/index.ts`](../packages/jdcloud/creation-studio-media/src/index.ts)
+
+### `creation_studio_video_task`
+
+提交、查询或列出已保存批次的 Seedance 2.5 参考生视频任务；完成后上传项目素材。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "当前项目的完整记录 ID。"
+    },
+    "planId": {
+      "type": "string",
+      "description": "当前采纳方案的完整记录 ID。"
+    },
+    "spaceId": {
+      "type": "string",
+      "description": "当前项目团队空间的完整记录 ID。"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "submit",
+        "refresh",
+        "list"
+      ]
+    },
+    "requestId": {
+      "type": "string",
+      "description": "提交及查询使用的稳定请求编号。"
+    },
+    "batchId": {
+      "type": "string",
+      "description": "提交时必填，当前方案已保存的视频批次 ID。"
+    }
+  },
+  "required": [
+    "projectId",
+    "planId",
+    "spaceId",
+    "action"
+  ]
+}
+```
+
+Source: [`packages/jdcloud/creation-studio-media/src/index.ts`](../packages/jdcloud/creation-studio-media/src/index.ts)
+
+The JDCloud bundle ships media execution; Skills are installed separately. Tool execution rechecks project context, permissions, and confirmation before paid generation or uploads.
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 

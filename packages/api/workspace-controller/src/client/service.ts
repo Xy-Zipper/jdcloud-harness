@@ -31,6 +31,16 @@ export class WorkspaceArchiveError extends Error {
   }
 }
 
+/** Workspace deletion failed; earlier Session deletions may already be committed. */
+export class WorkspaceDeleteError extends Error {
+  override readonly name = 'WorkspaceDeleteError'
+
+  /** @param rpcError - Host business or carrier failure. */
+  constructor(readonly rpcError: RemoteFailure) {
+    super(`workspace delete failed: ${rpcError.code}: ${rpcError.message}`)
+  }
+}
+
 /** Bare observable source for the Workspace Controller snapshot. */
 export interface WorkspaceSource {
   /** Read the identity-stable current snapshot. */
@@ -67,10 +77,11 @@ export interface IWorkspaces {
    */
   rename(workspaceId: WorkspaceId, title: string): Promise<WorkspaceView>
   /**
-   * Delete a Workspace registration without deleting Sessions or files.
+   * Delete a Workspace registration, optionally deleting its Sessions and their storage.
    * @param workspaceId - target Workspace.
+   * @param options - omitted retains Sessions; `deleteSessions` removes them before the registration.
    */
-  delete(workspaceId: WorkspaceId): Promise<void>
+  delete(workspaceId: WorkspaceId, options?: { readonly deleteSessions?: boolean }): Promise<void>
   /**
    * Move a Workspace within the Host registry order.
    * @param workspaceId - Workspace to move.
@@ -146,9 +157,9 @@ export class WorkspaceController extends Service implements IWorkspaces {
     return result.value.workspace
   }
 
-  async delete(workspaceId: WorkspaceId): Promise<void> {
-    const result = await this.model.delete(workspaceId)
-    if (!result.ok) throw commandError('delete', result.error)
+  async delete(workspaceId: WorkspaceId, options: { readonly deleteSessions?: boolean } = {}): Promise<void> {
+    const result = await this.model.delete(workspaceId, options)
+    if (!result.ok) throw new WorkspaceDeleteError(result.error)
   }
 
   async insertBefore(workspaceId: WorkspaceId, beforeWorkspaceId?: WorkspaceId): Promise<void> {

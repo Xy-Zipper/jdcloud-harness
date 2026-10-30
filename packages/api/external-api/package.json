@@ -30,6 +30,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/dsh-agent": "workspace:*",
     "@deepseek-ai/dsh-api-session-controller": "workspace:*",
     "@deepseek-ai/dsh-api-workspace-controller": "workspace:*",
     "@deepseek-ai/dsh-api-workspace-files": "workspace:*",

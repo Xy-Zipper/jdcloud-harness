@@ -27,6 +27,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+`session.delete({ sessionId })` 永久删除空闲会话、其持久化目录、工作区成员关系、归档标记与置顶。仍有回合、子代理、后台任务或定时任务运行时，以 `session/delete-active` 拒绝。控制器先释放自己持有的 Agent，再删除文件，清理成功后发布移除通知。项目文件与共享附件对象保留；其他运行环境持有的 Agent 必须先由其所有者关闭。存储失败可能留下部分文件，可以重试清理。
+
 历史页与 follow opening 快照为每个持久 Session 事件携带一条 `{ type: 'event', event: SessionWireEvent }` record。Client 把每条已接受 record 保留为一个持久 `SessionEventLikeEntry`；Assistant token 边界保留在 `assistant/message` 或 `assistant/attempt` 的紧凑流内。工具参数、结果内容、失败信息和 `tool/result.data.meta` 原样通过；控制器不解析工具定义、不运行展示转换器，也不附加 UI 数据。
 
 Client journal 在发布 follow 快照、live entry 或历史页之前验证当前 Session 事件 envelope。它复用浏览器安全的 Session validator，检查必需的 surface marker、精确的 replacement endpoint、更早且唯一的 source seq、内嵌 Assistant 提供方元数据、request header 可选字段的省略规则以及工具错误一致性。无效 record 直接失败，不删除字段或归一化；范围成员与来源存在性仍由 Host 的持久日志检查。

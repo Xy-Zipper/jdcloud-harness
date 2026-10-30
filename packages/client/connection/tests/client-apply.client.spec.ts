@@ -512,6 +512,9 @@ describe('connection client apply', () => {
         return Response.json({ token: 'browser-token', expiresAt: Date.now() + 60_000 })
       }
       if (url === 'api/browser-session/websocket-ticket') return Response.json({ ticket: 'one-use' })
+      if (url.startsWith('http://harness.example/api/browser-session/download-ticket?')) {
+        return Response.json({ ticket: 'download-once' })
+      }
       if (url === 'https://outside.example/data') return new Response('outside')
       if (typeof init?.body !== 'string') throw new TypeError('expected a JSON request body')
       const request = JSON.parse(init.body) as { rpcId: string }
@@ -526,18 +529,21 @@ describe('connection client apply', () => {
     try {
       const handle = ctx.get('connection') as ConnectionHandle
       await expect(handle.rpc.call('/api', 'goals/create', {})).resolves.toEqual({ ok: true, value: null })
+      await expect(handle.authorizeDownloadUrl?.('api/session.export?sessionId=one')).resolves.toBe(
+        'http://harness.example/api/session.export?sessionId=one&downloadTicket=download-once',
+      )
       await globalThis.fetch('https://outside.example/data')
       expect(session.setItem).toHaveBeenCalledOnce()
       expect(local.setItem).not.toHaveBeenCalled()
       expect(baseFetch.mock.calls[0]?.[1]).not.toHaveProperty('headers.authorization')
       expect(new Headers(baseFetch.mock.calls[1]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
-      expect(new Headers(baseFetch.mock.calls[2]?.[1]?.headers).get('authorization')).toBeNull()
+      expect(new Headers(baseFetch.mock.calls[3]?.[1]?.headers).get('authorization')).toBeNull()
       const socket = handle.openWebSocket('/api/remote.mux')
       try {
         await vi.waitFor(() => {
           expect(createSocket).toHaveBeenCalledExactlyOnceWith('ws://harness.example/api/remote.mux?ticket=one-use')
         })
-        expect(new Headers(baseFetch.mock.calls[3]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
+        expect(new Headers(baseFetch.mock.calls[4]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
         expect(session.setItem).toHaveBeenCalledOnce()
       } finally {
         socket.close()

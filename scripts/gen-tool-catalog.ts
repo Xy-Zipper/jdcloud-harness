@@ -57,6 +57,7 @@ import TerminalSessionService from '@deepseek-ai/dsh-terminal'
 import * as ToolPty from '@deepseek-ai/dsh-tool-terminal'
 import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as ToolJdcloudLowcode from '../packages/jdcloud/tool-jdcloud-lowcode/src/index.ts'
+import * as CreationStudioMedia from '../packages/jdcloud/creation-studio-media/src/index.ts'
 import * as ToolSchedule from '@deepseek-ai/dsh-tool-schedule'
 import type ScheduleService from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
@@ -202,6 +203,26 @@ export interface ToolPackage {
  * guard proves it is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
+  {
+    pkg: '@deepseek-ai/dsh-creation-studio-media',
+    dir: 'creation-studio-media',
+    source: 'packages/jdcloud/creation-studio-media/src/index.ts',
+    requires: ['ctx.tools', 'ctx.credentials', 'ctx.attachments', 'ctx.jdcloudAuthController', 'ctx.webServer'],
+    writes: ['tool/call', 'tool/result', 'provider task receipts', 'authenticated project media uploads'],
+    async mount(ctx) {
+      // Schema collection never resolves keys, opens a listener, or performs media operations.
+      ctx.provide('credentials', {} as never)
+      ctx.provide('webServer', { register: () => () => {} } as never)
+      await ctx.plugin(CatalogAttachmentStore)
+      await ctx.plugin(CatalogJdcloudAuthController)
+      await ctx.plugin(CreationStudioMedia, {
+        platformURL: 'https://mi.kindoucloud.com',
+        tenantId: '6ad80f2f1f280486bb45ac3a',
+        stateDirectory: '/catalog/creation-studio-media',
+      })
+    },
+    note: 'The JDCloud bundle ships media execution; Skills are installed separately. Tool execution rechecks project context, permissions, and confirmation before paid generation or uploads.',
+  },
   {
     pkg: '@deepseek-ai/dsh-plugin-manager',
     dir: 'plugin-manager',

@@ -38,13 +38,13 @@ kind: "package-reference"
 
 每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的应用 URL，保留调用方的 authority 与挂载；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `./`，移除令牌并保留请求目录。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。该启动认证流程不在根路径交换之外接受 query token，也不接受 Authorization header token。
 
-当部署自己的访问控制替代 Harness 启动令牌时，设置 `browserAuthentication: false`。Connection 仍要求独立的浏览器身份，避免 Host 状态回退到进程级共享登录；需要在启动认证之外获得同等隔离的部署可以显式启用 `browserSession`。`browserSessionTransport` 默认为 `cookie`，会签发 `dsh-user-session`；`browserSessionCookieSameSite` 默认为 `strict`，而 `none` 会添加 `Secure`，因此要求 HTTPS。`bearer` 载体只能与 `browserAuthentication: false` 一起使用：根页面直接打开，Client 从 `/api/browser-session` 获取绑定 authority 的 token，将其保存在当前标签页的 `sessionStorage`，并添加到同源 Fetch 与 RPC 请求。每次 WebSocket 升级前会立即用该 token 换取一个有效期 30 秒、只能使用一次的 ticket。Host/Origin 校验仍然生效：不可信或跨站请求返回 403，缺少浏览器身份时返回 401。
+当部署自己的访问控制替代 Harness 启动令牌时，设置 `browserAuthentication: false`。Connection 仍要求独立的浏览器身份，避免 Host 状态回退到进程级共享登录；需要在启动认证之外获得同等隔离的部署可以显式启用 `browserSession`。`browserSessionTransport` 默认为 `cookie`，会签发 `dsh-user-session`；`browserSessionCookieSameSite` 默认为 `strict`，而 `none` 会添加 `Secure`，因此要求 HTTPS。`bearer` 载体只能与 `browserAuthentication: false` 一起使用：根页面直接打开，Client 从 `/api/browser-session` 获取绑定 authority 的 token，将其保存在当前标签页的 `sessionStorage`，并添加到同源 Fetch 与 RPC 请求。WebSocket 连接与由浏览器管理的下载会在打开原生载体前立即用该 token 换取绑定 authority、有效期 30 秒且只能使用一次的 ticket；下载 ticket 还会绑定精确的 `/api/` 路径和查询。Host/Origin 校验仍然生效：不可信或跨站请求返回 403，缺少浏览器身份时返回 401。
 
 浏览器会话签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；Connection 在激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。独立 cookie 与 Bearer token 都携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在签名 payload 中绑定规范化 hostname 和 port。cookie 是 host-only、`Path=/` 和 `HttpOnly`；配置的 SameSite 策略决定是否同时设置 `Secure`。单独的启动认证 cookie 仍为 host-only、`Path=/`、`HttpOnly` 和 `SameSite=Strict`，并且因随附服务器使用 loopback HTTP 而刻意不设置 `Secure`。
 
 认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。`dsh web --host 0.0.0.0` 仍不受支持。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
 
-每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与 HTTP 认证检查；配置 Bearer 载体时，`admitWebSocket(request)` 还会消费对应的 ticket。两种方法都以拒绝状态或操作者作答。`/api` 路由与 Gateway WebSocket 升级分别使用对应的接纳方法，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
+每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与 HTTP 认证检查并消费请求携带的下载 ticket，`admitWebSocket(request)` 则消费 WebSocket ticket。两种方法都以拒绝状态或操作者作答。`/api` 路由与 Gateway WebSocket 升级分别使用对应的接纳方法，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
 
 通过认证的共享 HTTP 请求在传输请求体之前经过 `connection/request` waterfall。监听器可以拒绝新请求，或等待 `next()` 直到响应完成；释放所属 fiber 会移除准入行为。Desktop 使用此扩展点，在已批准的安装期间锁住新的 API 工作，而不取消已接纳的工作。客户端断开会中止处理函数的信号；桥接器停止写入 socket，并排空剩余响应块。WebSocket 流仍由 API Gateway 负责。
 
@@ -53,7 +53,7 @@ kind: "package-reference"
 
 API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation source，与有无 `$on` 订阅无关。Host 在 API Remotes source factory 同步挂好所有增量 listener 后，先发送唯一 `{ type: 'ready', clientId, host: { home } }` 项，再发送事件。`ConnectionController` 仅在收到该 ready 项后发布 generation 并调用 `onConnected`，因此 baseline 不会跑在增量 listener 前面。
 
-`$events` 结束、Remote 流报错、收到非 ready 首项或畸形事件项，都会使当前 generation 失效。默认情况下，挂起的握手在 3 秒后记录 Host 响应缓慢告警，在 15 秒后记录就绪超时并中止，包含等待物理 socket 的时间。取消后，source 必须停止投递、释放资源并结束，替换 source 才能启动；已取消 source 迟到的 ready 不能发布 generation。浏览器报告网络可用时，Controller 发布 `connecting`，并在 500ms、1s、2s、4s、8s 与 10s 上限内采用 50%–100% 抖动重试，达到终档后继续尝试直到恢复。每次重试都要求 Gateway 替换一次物理 WebSocket，再重开 `$events`。[持续恢复决策](../../../.agents/notes/implemented/bug-fix/2026-09-05-continuous-client-recovery.zh.md)规定握手期限与重试策略。
+`$events` 结束、Remote 流报错、收到非 ready 首项或畸形事件项，都会使当前 generation 失效。默认情况下，挂起的握手在 3 秒后记录 Host 响应缓慢告警，在 15 秒后记录就绪超时并中止，包含等待物理 socket 的时间。取消后，source 必须停止投递、释放资源并结束，替换 source 才能启动；已取消 source 迟到的 ready 不能发布 generation。浏览器报告网络可用时，Controller 发布 `connecting`，并在 500ms、1s、2s、4s、8s 与 10s 上限内采用 50%–100% 抖动重试，达到终档后继续尝试直到恢复。每次重试都要求 Gateway 替换一次物理 WebSocket，再重开 `$events`。
 
 `ctx.connection.reconnect()` 会中断活动工作、重置序列，并立即开始 retry 1。浏览器 `offline` 会中断活动工作、发布 `disconnected` 并暂停自动尝试；下一次 `online` 转换会重置序列并从 500ms 档开始。只有 ready 项会发布 `connected`。Gateway mux 不拥有独立重试调度。
 
@@ -75,7 +75,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
 - **明文 HTTP 无法保护传输中的浏览器凭证**：Bearer 载体允许跨站 iframe 在没有第三方 cookie 或 HTTPS 的情况下工作，但网络观察者或中间节点可以窃取 Authorization token 或 WebSocket ticket。安全部署仍应使用 HTTPS。
-- **原生 URL 元素不会经过 Fetch 包装层**：`<img src>` 等浏览器请求无法添加 Bearer header。Client 功能若要让这类元素读取受认证路由，必须先获取字节并使用 blob URL，而不能把长期 token 暴露在 query string 中。
+- **原生 URL 元素不会经过 Fetch 包装层**：`<img src>` 等浏览器请求无法添加 Bearer header。浏览器下载通过 `ctx.connection.authorizeDownloadUrl()` 为一个精确 URL 获取短期 ticket；可重复使用的元素必须先获取字节并使用 blob URL，而不能把长期 token 放入 query string。
 - **没有浏览器会话 logout 操作**：清除 cookie 或当前标签页的 `sessionStorage` 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 

@@ -1204,6 +1204,22 @@ describe('registry-global session archive', () => {
 })
 
 describe('registry-global session unarchive', () => {
+  it('forgets permanently deleted Sessions from membership, pins and archives', async () => {
+    const dir = await makeDir('deleted-sessions')
+    const result = await harness({ sessions: [header('archived', dir), header('pinned', dir), header('kept', dir)] })
+    const workspace = result.registry.list()[0]!
+    await result.registry.archiveSession(SessionId('archived'))
+    await result.registry.pinSession(SessionId('pinned'))
+    await result.registry.forgetSession(SessionId('archived'))
+    await result.registry.forgetSession(SessionId('pinned'))
+    expect(workspace.sessionIds).toEqual(['kept'])
+    expect(result.registry.archivedSessionIds).toEqual([])
+    expect(result.registry.pinnedSessionIds).toEqual([])
+    expect(storedState(result.pool).archivedSessionIds).toEqual([])
+    expect(storedState(result.pool).pinnedSessionIds).toEqual([])
+    await expect(result.registry.forgetSession(SessionId('archived'))).resolves.toBeUndefined()
+  })
+
   it('unarchives durably in order, idempotently skips absent ids, and leaves accounting untouched', async () => {
     const dir = await makeDir('unarchive-home')
     const result = await harness({

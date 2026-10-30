@@ -22,6 +22,7 @@ export interface SessionLogDownloadState {
 /** HTTP carrier for the export route. */
 type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 type Save = (url: string, filename: string) => void
+type Authorize = (url: string) => string | Promise<string>
 
 const INITIAL: SessionLogDownloadState = { bySession: {} }
 
@@ -62,10 +63,12 @@ export class SessionLogDownloadController {
   /**
    * @param fetcher - HTTP carrier used to read the host-streamed ZIP.
    * @param save - browser save operation.
+   * @param authorize - optional browser-managed download URL authorization.
    */
   constructor(
     private readonly fetcher: Fetch = (input, init) => fetch(input, init),
     private readonly save: Save = downloadUrl,
+    private readonly authorize: Authorize = url => url,
   ) {}
 
   /**
@@ -116,7 +119,7 @@ export class SessionLogDownloadController {
         const detail = await response.text().catch(() => '')
         throw new Error(`Export failed: HTTP ${response.status}${detail === '' ? '' : ` ${detail}`}`)
       }
-      this.save(route, sessionLogZipFilename(sessionId))
+      this.save(await this.authorize(route), sessionLogZipFilename(sessionId))
       const open = this.store.getSnapshot().bySession[String(sessionId)]?.open ?? true
       this.publish(sessionId, { open, status: 'success', error: null })
     } catch (error: unknown) {

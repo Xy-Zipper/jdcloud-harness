@@ -9,6 +9,7 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent" },
     { "path": "../../util/brand" },
     { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../host/webserver" },

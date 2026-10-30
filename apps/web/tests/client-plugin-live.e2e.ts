@@ -49,7 +49,7 @@ it('places dynamic Session menu rows by order among the shipped ones and removes
     await trigger.click()
     const menu = page.getByRole('menu')
     await menu.waitFor()
-    expect(await menu.getByRole('separator').count()).toBe(1)
+    expect(await menu.getByRole('separator').count()).toBe(2)
     await compareOrRefreshGolden(
       SESSION_ACTION_EXPECTED,
       await captureStableAria(page, '[role="menu"]', scaffold.workspaceCwd),
@@ -71,13 +71,13 @@ it('places dynamic Session menu rows by order among the shipped ones and removes
     await row.hover()
     await trigger.click()
     await menu.waitFor()
-    const remainingNames = ['Pin session', 'Rename', 'Fork session', 'Archive session', 'Copy Session ID']
+    const remainingNames = ['Pin session', 'Rename', 'Fork session', 'Archive session', 'Copy Session ID', 'Delete session']
     const remainingItems = menu.getByRole('menuitem')
     expect(await remainingItems.count()).toBe(remainingNames.length)
     for (const [index, name] of remainingNames.entries()) {
       expect(await remainingItems.nth(index).and(menu.getByRole('menuitem', { name, exact: true })).count()).toBe(1)
     }
-    expect(await menu.getByRole('separator').count()).toBe(0)
+    expect(await menu.getByRole('separator').count()).toBe(1)
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await menu.getByRole('menuitem', { name: 'Copy Session ID', exact: true }).click()
     await expect.poll(() => menu.count()).toBe(0)

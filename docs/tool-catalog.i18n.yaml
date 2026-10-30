@@ -1,6 +1,358 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for tool-catalog.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/tool-catalog.md
-tool-catalog.md: e06685cc0ab6034ca755c039f9002ffdebb2c1d3
-tool-catalog.zh.md: 8ecb4488a14e6c2ad15545a1e66c29ec7b80c412
+/:
+  en: 0be8ffbf23193557
+  zh: ce2c69aa86875171
+/tool-schema-catalog:
+  en: 6cc2cd9ced70bb09
+  zh: 1c0e6cb4ba2ed637
+/tool-schema-catalog/tool-package-map:
+  en: d30ae6221b5c40f2
+  zh: ebab31628f3a271c
+/tool-schema-catalog/deepseek-ai-dsh-creation-studio-media:
+  en: c9dcb0c85326d753
+  zh: c9dcb0c85326d753
+/tool-schema-catalog/deepseek-ai-dsh-creation-studio-media/creation-studio-image-generate:
+  en: f0164ebc38f887a4
+  zh: 39eb4145d3c9e283
+/tool-schema-catalog/deepseek-ai-dsh-creation-studio-media/creation-studio-image-task:
+  en: 8df68dc421a16cfa
+  zh: ee1688d76f5253b5
+/tool-schema-catalog/deepseek-ai-dsh-creation-studio-media/creation-studio-video-task:
+  en: 98e520dbd28df452
+  zh: 9350d250341bc288
+/tool-schema-catalog/deepseek-ai-dsh-plugin-manager:
+  en: e0143916bb634762
+  zh: e0143916bb634762
+/tool-schema-catalog/deepseek-ai-dsh-plugin-manager/plugin-manager:
+  en: 28fac5614188ecd4
+  zh: 449b177071aaafa7
+/tool-schema-catalog/deepseek-ai-dsh-mcp-resources:
+  en: dd78bd55ec83a539
+  zh: dd78bd55ec83a539
+/tool-schema-catalog/deepseek-ai-dsh-mcp-resources/list-mcp-resource-templates:
+  en: 96275ece9d040944
+  zh: 1fa9744642601ece
+/tool-schema-catalog/deepseek-ai-dsh-mcp-resources/list-mcp-resources:
+  en: bf4236607199d61e
+  zh: 82f4f749dcabc89f
+/tool-schema-catalog/deepseek-ai-dsh-mcp-resources/read-mcp-resource:
+  en: 5d92c07fa062734f
+  zh: 2d6f0cb8116cf567
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native:
+  en: 19e7df8d692b4375
+  zh: 19e7df8d692b4375
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-act:
+  en: c4b27bf62c534dcc
+  zh: 70c53824ed57ac23
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-extract:
+  en: ec7462ab99848155
+  zh: 632fe0249040708e
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-navigate:
+  en: ef97f063a037a006
+  zh: 27727ccc908e007f
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-observe:
+  en: 2068f1baa0a59e1b
+  zh: 5743c7b33e2c5ccb
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-screenshot:
+  en: 4910ab327694ee97
+  zh: 17e79e4366cb636d
+/tool-schema-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native/stagehand-tabs:
+  en: 095b18f9376e073d
+  zh: abd8785f8acaa555
+/tool-schema-catalog/deepseek-ai-dsh-tool-ask-user:
+  en: e713a4a11a15d13c
+  zh: e713a4a11a15d13c
+/tool-schema-catalog/deepseek-ai-dsh-tool-ask-user/ask-user-question:
+  en: 3d5e09e59e7d5274
+  zh: 624c14da73524315
+/tool-schema-catalog/deepseek-ai-dsh-tools:
+  en: 76fbbf0fe38aef10
+  zh: 76fbbf0fe38aef10
+/tool-schema-catalog/deepseek-ai-dsh-tools/run-code:
+  en: 8358b1f3dd09e202
+  zh: 0dbce569ba4b4c76
+/tool-schema-catalog/deepseek-ai-dsh-plan-mode:
+  en: b500b530845e26a9
+  zh: b500b530845e26a9
+/tool-schema-catalog/deepseek-ai-dsh-plan-mode/exit-plan-mode:
+  en: a4bf2ed3f9f55ff1
+  zh: ce7b136d3ad3946a
+/tool-schema-catalog/deepseek-ai-dsh-tool-bash:
+  en: 408ff0a5189bd7ec
+  zh: 408ff0a5189bd7ec
+/tool-schema-catalog/deepseek-ai-dsh-tool-bash/bash:
+  en: 70add265cf4cfda5
+  zh: 47c2e23d50557d10
+/tool-schema-catalog/deepseek-ai-dsh-tool-present:
+  en: f656575e6df094f6
+  zh: f656575e6df094f6
+/tool-schema-catalog/deepseek-ai-dsh-tool-present/present:
+  en: 4af0d859e1d39dc5
+  zh: 780e75b1b42a6410
+/tool-schema-catalog/deepseek-ai-dsh-tool-pwsh:
+  en: b222fc05f3f8ee4a
+  zh: b222fc05f3f8ee4a
+/tool-schema-catalog/deepseek-ai-dsh-tool-pwsh/pwsh:
+  en: 775abe9511776e1d
+  zh: 76ae33dab0dd399a
+/tool-schema-catalog/deepseek-ai-dsh-tool-cordis:
+  en: 76c7c62f9029b6f5
+  zh: 76c7c62f9029b6f5
+/tool-schema-catalog/deepseek-ai-dsh-tool-cordis/cordis-inspect-list:
+  en: 594e5b42047969cc
+  zh: 72189ca21345c210
+/tool-schema-catalog/deepseek-ai-dsh-tool-cordis/cordis-inspect-query:
+  en: 8321129f661db9f7
+  zh: 6d9c220c84d47b06
+/tool-schema-catalog/deepseek-ai-dsh-tool-bash-persistent:
+  en: bdd9e88c49029e05
+  zh: bdd9e88c49029e05
+/tool-schema-catalog/deepseek-ai-dsh-tool-bash-persistent/bash:
+  en: 86421501a9d65ccc
+  zh: d1dc400507952331
+/tool-schema-catalog/deepseek-ai-dsh-tool-pwsh-persistent:
+  en: 40a053607298a4c5
+  zh: 40a053607298a4c5
+/tool-schema-catalog/deepseek-ai-dsh-tool-pwsh-persistent/pwsh:
+  en: 214866b3419c8e12
+  zh: c23368fc61772d52
+/tool-schema-catalog/deepseek-ai-dsh-tool-str-replace-editor:
+  en: 591f6e54dbbc38fe
+  zh: 591f6e54dbbc38fe
+/tool-schema-catalog/deepseek-ai-dsh-tool-str-replace-editor/str-replace-editor:
+  en: 3d11196a13e69228
+  zh: 56019c74cf0633cd
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs:
+  en: 07d595ce1f1a5184
+  zh: 07d595ce1f1a5184
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs/edit:
+  en: 5b6a252adde51af6
+  zh: 7aa172a5d8b9cbd2
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs/read:
+  en: 94bfc5b03c63baef
+  zh: 339338a0e74696c3
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs/read-image:
+  en: 4e82f36d958c9c1c
+  zh: 1f87182c327bec10
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs/write:
+  en: f80700c5d57e8d87
+  zh: fb7cccbba0d8d486
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs-search:
+  en: 703fea005ce84c50
+  zh: 703fea005ce84c50
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs-search/glob:
+  en: 418d627507ddd693
+  zh: 85f14b433c93efbe
+/tool-schema-catalog/deepseek-ai-dsh-tool-fs-search/grep:
+  en: 224288aaf3fbd214
+  zh: 9e39dadfaa3768e7
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal:
+  en: 77501c1b592b6a88
+  zh: 77501c1b592b6a88
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-close:
+  en: 6d6e428c866ac6c1
+  zh: 8033539fcdcb6e7b
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-list:
+  en: ae7d5bce32142aa5
+  zh: e956a650a5bf294b
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-open:
+  en: c542bd7f7e872441
+  zh: 14731de81780b518
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-read:
+  en: 6a7491d2436e4404
+  zh: 772ff408ec0a67e3
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-send:
+  en: e24ca8735dd59adb
+  zh: 24f7140a0aed0968
+/tool-schema-catalog/deepseek-ai-dsh-tool-terminal/terminal-signal:
+  en: 36a7f502acf00049
+  zh: 00b4567b534eb7b2
+/tool-schema-catalog/deepseek-ai-dsh-tool-goal:
+  en: 74fff3741e7c13de
+  zh: 74fff3741e7c13de
+/tool-schema-catalog/deepseek-ai-dsh-tool-goal/create-goal:
+  en: b22408124a0a6f34
+  zh: 7b3bf9ceb5d7f1dc
+/tool-schema-catalog/deepseek-ai-dsh-tool-goal/get-goal:
+  en: 73ab2b24d4de682d
+  zh: 82c42a427774c67d
+/tool-schema-catalog/deepseek-ai-dsh-tool-goal/update-goal:
+  en: 5773f499d0b2523d
+  zh: 516499659daf7924
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode:
+  en: 6f5541c28164e437
+  zh: 6f5541c28164e437
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-create:
+  en: 6976fecc414b928a
+  zh: 15fc867c38fe88c3
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-create-table:
+  en: a5a2521d85791b60
+  zh: 413e10ef70fef12e
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-delete:
+  en: 580af42202b1b237
+  zh: a027a31d44acc5a8
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-describe:
+  en: a8da93ff80cbfd7d
+  zh: 014c64d76746ec66
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-find-department:
+  en: 14957452b5a0dc99
+  zh: a3b42be223f0c13d
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-find-role:
+  en: 9e8e7497697f0f28
+  zh: 2a06b5b87e72e3fc
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-find-user:
+  en: e2add1bd633d2b2b
+  zh: cac00eca66c78556
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-get:
+  en: c950ed558f35ef90
+  zh: cd572b16755d47f6
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-query:
+  en: fb6db0f62bf52bee
+  zh: 8608ab5497e10406
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-update:
+  en: 18af68bf8c1b7274
+  zh: f357a0a9daa046b0
+/tool-schema-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode/jdcloud-lowcode-upload-file:
+  en: 728bc92d48eba7ff
+  zh: 669a4c795daeda15
+/tool-schema-catalog/deepseek-ai-dsh-schedule:
+  en: 573da0cf49b1eed6
+  zh: 573da0cf49b1eed6
+/tool-schema-catalog/deepseek-ai-dsh-schedule/schedule-create:
+  en: d9ff99ac30a603eb
+  zh: 15e658a8f7003e90
+/tool-schema-catalog/deepseek-ai-dsh-schedule/schedule-delete:
+  en: 8b37dec413d42cd7
+  zh: 292685c19ab48260
+/tool-schema-catalog/deepseek-ai-dsh-schedule/schedule-list:
+  en: 3c18d46b1371641e
+  zh: 13f0d78532bdec8b
+/tool-schema-catalog/deepseek-ai-dsh-tool-lsp:
+  en: 32982123b1f0e5bc
+  zh: 32982123b1f0e5bc
+/tool-schema-catalog/deepseek-ai-dsh-tool-lsp/lsp:
+  en: 877f1dc0f69e2038
+  zh: 2fa570020f87919c
+/tool-schema-catalog/deepseek-ai-dsh-tool-ralph:
+  en: 45bd083870e2c92d
+  zh: 45bd083870e2c92d
+/tool-schema-catalog/deepseek-ai-dsh-tool-ralph/ralph:
+  en: a14c562ee26ddfd8
+  zh: caa6d1acf95a8199
+/tool-schema-catalog/deepseek-ai-dsh-tool-skill:
+  en: 927a5ac0974b7642
+  zh: 927a5ac0974b7642
+/tool-schema-catalog/deepseek-ai-dsh-tool-skill/skill:
+  en: cd716dc11308817d
+  zh: 08b4ed76101642a2
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query:
+  en: eac1dff4b6d9e195
+  zh: eac1dff4b6d9e195
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query/session-event-read:
+  en: 6687105065ac3a5f
+  zh: 48b2f4d38536e4c7
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query/session-event-search:
+  en: 41251b4cbe9af70d
+  zh: 8855a5f32b4720e5
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query/session-event-trace:
+  en: 14b5ec05fa8c0932
+  zh: 3c85d44c13cc42c5
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query/session-search:
+  en: 8263202c97568fc3
+  zh: 92067337294c7a00
+/tool-schema-catalog/deepseek-ai-dsh-tool-session-query/session-trace:
+  en: 22866623e207d94e
+  zh: 59f4f8eadcdba85c
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent:
+  en: 841abe0dd5913ea7
+  zh: 841abe0dd5913ea7
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent/list-subagent-models:
+  en: c89084b31ffccbce
+  zh: d7b3b7000f2d2be9
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent/subagent:
+  en: df17e5091f9cdfc9
+  zh: 3b31fe9df04242f2
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control:
+  en: ab82e130c3413f04
+  zh: ab82e130c3413f04
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control/interrupt-agent:
+  en: 3eb5ac28342e354f
+  zh: 91ca5628d8e333f0
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control/list-agents:
+  en: e688153e9ba4a684
+  zh: 56c36cb0140c9202
+/tool-schema-catalog/deepseek-ai-dsh-tool-subagent-control/send-message:
+  en: b4d8ffa51c3c9cce
+  zh: 32d5281b2dec0d81
+/tool-schema-catalog/deepseek-ai-dsh-tool-jobs:
+  en: 9be673b1604d0114
+  zh: 9be673b1604d0114
+/tool-schema-catalog/deepseek-ai-dsh-tool-jobs/job-kill:
+  en: 39e53ddd7ea31c2d
+  zh: 16640c2952c263b6
+/tool-schema-catalog/deepseek-ai-dsh-tool-jobs/job-list:
+  en: 0c37fb1fed979d72
+  zh: 5ea9d07f5a4a8a6c
+/tool-schema-catalog/deepseek-ai-dsh-tool-jobs/job-output:
+  en: 2a1d3887688abd05
+  zh: c1cafbabccc2e021
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team:
+  en: 6b1106f417b50db6
+  zh: 6b1106f417b50db6
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/interrupt-agent:
+  en: c3c7af05ceb9f8c9
+  zh: ec379e0b42110c6a
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/list-agents:
+  en: f9457f033f75f00a
+  zh: a2d60ec44118c34c
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/send-message:
+  en: e99455aec4656ff2
+  zh: a8f88ec35cfe38b8
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/spawn-teammate:
+  en: 02d6cc746e234b99
+  zh: 49bc60ac098bca48
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/team-task-create:
+  en: 91e84febe063c3bd
+  zh: 550555d0f44f603b
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/team-task-get:
+  en: 1c6ae0aba0b8041d
+  zh: f8d634387b74121d
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/team-task-list:
+  en: 2084d494aae8798a
+  zh: e4c136c91028a7b1
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/team-task-update:
+  en: 2eac7360ba68b1bd
+  zh: b5d676bf288c245e
+/tool-schema-catalog/deepseek-ai-dsh-experimental-tool-agent-team/wait-agent:
+  en: fbc4d75a9bcf6816
+  zh: 672131ac2705f411
+/tool-schema-catalog/deepseek-ai-dsh-tool-todo:
+  en: dea62d26fb18ff68
+  zh: dea62d26fb18ff68
+/tool-schema-catalog/deepseek-ai-dsh-tool-todo/todo-write:
+  en: 3e63adceedda7304
+  zh: bc20a7b69ce2cddd
+/tool-schema-catalog/deepseek-ai-dsh-tool-workflow:
+  en: bb38a9d29f46563c
+  zh: bb38a9d29f46563c
+/tool-schema-catalog/deepseek-ai-dsh-tool-workflow/workflow:
+  en: 4ca5c5f9ebc188e5
+  zh: 98bbc45e441019af
+/tool-schema-catalog/deepseek-ai-dsh-tool-workspace-dependencies:
+  en: 96bffc40b80df4b8
+  zh: 96bffc40b80df4b8
+/tool-schema-catalog/deepseek-ai-dsh-tool-workspace-dependencies/load-workspace-dependencies:
+  en: 77b88764ff3464e9
+  zh: a9ca7eeb15ada747
+/tool-schema-catalog/deepseek-ai-dsh-tool-web:
+  en: 4b9918342d3aa931
+  zh: 4b9918342d3aa931
+/tool-schema-catalog/deepseek-ai-dsh-tool-web/web-fetch:
+  en: 8673f203aea9bdf2
+  zh: 4e17783ffdf34c83
+/tool-schema-catalog/deepseek-ai-dsh-tool-web/web-search:
+  en: 096d6a19c83af773
+  zh: fa5213caf9401216

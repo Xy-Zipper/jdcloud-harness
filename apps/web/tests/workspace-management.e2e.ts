@@ -18,7 +18,7 @@ import type { Browser, Locator, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { logPath } from '../../../packages/session/session-persistence-jsonl/src/format.ts'
+import { logPath, sessionDir } from '../../../packages/session/session-persistence-jsonl/src/format.ts'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, readPersistedEvents, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
@@ -994,6 +994,85 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await expect.poll(() => parentWorkspace.sessionIds).toHaveLength(previousParentSessionIds.length + 1)
     expect(parentWorkspace.sessionIds).toEqual(expect.arrayContaining([...previousParentSessionIds, createdSessionId]))
     expect([...childWorkspace.sessionIds]).toEqual(childSessionIds)
+    expect(tripwire.pageErrors).toEqual([])
+  })
+
+  it('permanently deletes a Session and optionally the Workspace’s remaining Sessions with their files', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-session-delete'))
+    const workspace = await scaffold.ctx.workspaceRegistry.resolveByPath(scaffold.workspaceCwd)
+      ?? await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd)
+    await workspace.setTitle('deletion-workspace')
+    const fixture = await readFile(SEED, 'utf8')
+    const singleId = await seedSession(scaffold, fixture, 'delete-single-session')
+    const cascadeId = await seedSession(scaffold, fixture, 'delete-workspace-session')
+    for (const id of [singleId, cascadeId]) await workspace.attachSession(id)
+    await scaffold.ctx.sessionController.rename({ sessionId: singleId, title: 'Delete this conversation' })
+    await scaffold.ctx.sessionController.rename({ sessionId: cascadeId, title: 'Delete with workspace' })
+    const files = sessionDir(scaffold.persistenceRoot, scaffold.workspaceCwd, singleId)
+    await mkdir(join(files, 'files'))
+    await writeFile(join(files, 'files', 'owned.txt'), 'session file')
+    await writeFile(join(scaffold.workspaceCwd, 'preserved-project.txt'), 'project file')
+    const warningStart = tripwire.warnings.length
+    await page.reload({ waitUntil: 'load' })
+    acknowledgeReloadConnectionLoss(tripwire, warningStart)
+    const group = page.locator(`[data-row-key="workspace:${workspace.id}"]`)
+    await group.waitFor()
+    const row = page.getByRole('treeitem').filter({ has: page.getByText('Delete this conversation', { exact: true }) })
+    await expect.poll(async () => {
+      if (await group.getAttribute('aria-expanded') !== 'true') await group.click()
+      return await row.count()
+    }, { timeout: 15_000 }).toBe(1)
+    await row.click()
+    await clickHoverAction(row, 'Session actions for Delete this conversation')
+    await page.getByRole('menuitem', { name: 'Delete session', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Delete session', exact: true })
+    await dialog.waitFor()
+    await compareOrRefreshGolden(
+      fileURLToPath(new URL('./expected/workspace-management/delete-session.expected.md', import.meta.url)),
+      await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), MODE,
+    )
+    await page.setViewportSize({ width: 390, height: 844 })
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      const bounds = await dialog.boundingBox()
+      expect(bounds?.x).toBeGreaterThanOrEqual(0)
+      expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(390)
+      expect(await dialog.getByRole('button', { name: 'Delete session', exact: true }).isVisible()).toBe(true)
+    }
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    expect(await scaffold.ctx.sessionPersistence.stat(singleId)).toBeDefined()
+    await page.setViewportSize({ width: 1280, height: 1000 })
+    await clickHoverAction(row, 'Session actions for Delete this conversation')
+    await page.getByRole('menuitem', { name: 'Delete session', exact: true }).click()
+    await dialog.getByRole('button', { name: 'Delete session', exact: true }).click()
+    await dialog.waitFor({ state: 'hidden' })
+    await expect.poll(() => scaffold.ctx.sessionPersistence.stat(singleId)).toBeUndefined()
+    await expect(stat(files)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await scaffold.ctx.sessionPersistence.stat(cascadeId)).toBeDefined()
+    expect(await row.count()).toBe(0)
+
+    const members = [...workspace.sessionIds]
+    await clickHoverAction(group, 'Workspace actions for deletion-workspace')
+    await page.getByRole('menuitem', { name: 'Delete workspace', exact: true }).click()
+    const workspaceDialog = page.getByRole('dialog', { name: 'Delete workspace', exact: true })
+    await workspaceDialog.getByRole('checkbox').check()
+    await compareOrRefreshGolden(
+      fileURLToPath(new URL('./expected/workspace-management/delete-workspace-sessions.expected.md', import.meta.url)),
+      await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd), MODE,
+    )
+    await workspaceDialog.getByRole('button', { name: 'Delete workspace', exact: true }).click()
+    await workspaceDialog.waitFor({ state: 'hidden' })
+    expect(scaffold.ctx.workspaceRegistry.get(workspace.id)).toBeUndefined()
+    for (const id of members) expect(await scaffold.ctx.sessionPersistence.stat(id)).toBeUndefined()
+    expect(await scaffold.ctx.sessionPersistence.stat(SessionId(SEED_ID))).toBeDefined()
+    expect(await readFile(join(scaffold.workspaceCwd, 'preserved-project.txt'), 'utf8')).toBe('project file')
+    const reloadWarnings = tripwire.warnings.length
+    await page.reload({ waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]')
+    acknowledgeReloadConnectionLoss(tripwire, reloadWarnings)
+    const remaining = (await scaffold.ctx.sessionPersistence.list()).map(item => item.header.id)
+    expect(remaining).not.toContain(singleId)
+    expect(remaining).not.toContain(cascadeId)
     expect(tripwire.pageErrors).toEqual([])
   })
 

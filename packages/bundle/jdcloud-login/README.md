@@ -13,6 +13,8 @@ English | [中文](README.zh.md)
 
 The bundle also installs the external API. Those routes authenticate the raw JDCloud token against `JDCLOUD_DEFAULT_BASE_URL` and require the token's current tenant to match `X-Tenant-Id`; they do not reuse or mutate browser login state.
 
+The bundle includes [Creation Studio media tools](../../jdcloud/creation-studio-media/README.md) in the Harness build and deployment. Provider keys belong on the Host; Creation Studio Skills remain separate account installations.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)

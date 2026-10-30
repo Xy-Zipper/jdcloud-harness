@@ -22,6 +22,8 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
+`workspace.delete({ workspaceId })` 保留会话。设置 `deleteSessions: true` 会先永久删除工作区的成员会话，再移除登记；每个会话都必须归当前调用方所有且处于空闲状态。项目目录保留。清理逐个执行：失败时保留工作区登记，但此前完成的会话删除不会回滚。Client 服务通过 `workspaces.delete(id, { deleteSessions: true })` 接收相同选项。
+
 启用 JDCloud 所有权时，`create` 只接受当前租户用户目录内的路径，并且只复用当前所有者的 Workspace。目录选择器从该目录开始，隐藏指向目录外的符号链接，拒绝跳转或在目录外创建。按 Workspace 或 Session ID 修改时也必须属于当前用户。
 
 经过认证的 Host 集成可调用 `listVisible()`，只读取属于当前账号范围的 Workspace 独立投影。该方法不要求 Session；认证控制器没有活动范围时返回空列表。

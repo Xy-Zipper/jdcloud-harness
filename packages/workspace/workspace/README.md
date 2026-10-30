@@ -66,7 +66,7 @@ ctx.workspaceRegistry.list() // shows the project, newest first
 
 The directory resolver runs inside the mutation queue only when creation is eligible. It returns an absolute path and initial title; the registry creates missing parent directories, canonicalizes the path, rechecks Session history, and commits the Workspace with its initialization marker. An existing directory is reused; a file conflict or directory failure rejects initialization. The [Host controller](../../api/workspace-controller/README.md#first-use-workspace) supplies the Documents path policy.
 
-The first successful registration records its identity durably. Repeated calls return it without resolving a directory again; renaming keeps that identity, and deleting its registration does not permit another automatic creation. Directory or registration failure leaves initialization unset for retry. Directories created before a later failure remain on disk. Once directory resolution succeeds, caller cancellation does not roll back directory creation or registration. The [first-use decision](../../../.agents/notes/implemented/feature/2026-09-20-default-workspace.md) explains this lifetime.
+The first successful registration records its identity durably. Repeated calls return it without resolving a directory again; renaming keeps that identity, and deleting its registration does not permit another automatic creation. Directory or registration failure leaves initialization unset for retry. Directories created before a later failure remain on disk. Once directory resolution succeeds, caller cancellation does not roll back directory creation or registration. The [first-use decision](../../../.agents/notes/archived/feature/2026-09-20-default-workspace.md) explains this lifetime.
 
 ### Grouping sessions under a project
 
@@ -140,7 +140,7 @@ Read these pages when this package's view is not enough: the subsystem reference
 - [Workspace package map](../README.md) — the group's single package and its repository position.
 - [domain KV storage Agent Note](../../../.agents/notes/proposed/architecture/2026-07-24-domain-kv-storage-and-workspace.md) — why project records use the domain data form.
 - [Workspace UI product-flow Agent Note](../../../.agents/notes/archived/feature/2026-07-25-workspace-ui-product-flow.md) — how the first start builds projects from session history and how the GUI orders them.
-- [Workspace registration deletion decision](../../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md) — why removing a project never deletes its folder or sessions.
+- [Workspace registration deletion decision](../../../.agents/notes/archived/feature/2026-07-27-workspace-registration-deletion.md) — why removing a project never deletes its folder or sessions.
 
 -----
 
@@ -168,7 +168,7 @@ Independent of live requests: the package never touches a request prefix, so it 
 
 These limits define when the project list is a poor fit or needs special operational care. They are current package constraints, not a task backlog.
 
-- **Removal never deletes data** — removing a project leaves its folder, files, and session histories in place; those sessions become ungrouped, and session deletion or folder removal are separate, absent capabilities ([decision](../../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md)).
+- **Registry removal retains data** — removing a project through this registry leaves its folder, files, and session histories in place; those sessions become ungrouped. [Workspace Controller](../../api/workspace-controller/README.md) can explicitly delete member Sessions before removing a registration. `forgetSession(id)` cleans membership, archives and pins after Session storage is deleted.
 - **A session joins only with a recorded directory** — a session belongs to a project only when its record carries a directory that resolves to the project's path; sessions without one stay ungrouped, and a session from another directory cannot be moved in.
 - **External changes are seen late** — if another process deletes or damages a directory, the project reflects it only at the next refresh or restart.
 - **Archive and unarchive enforce different session checks** — a restore only drops an id from the archive set, so an entry whose session is gone still unarchives and leaves no unknown referent; a restore of an id that is not archived resolves without writing, while `archiveSession` rejects a session that is neither live nor persisted.

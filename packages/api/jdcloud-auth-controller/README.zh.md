@@ -32,6 +32,8 @@ kind: "package-reference"
 
 Session Controller 在持久化附件或投递浏览器 Prompt 前，controller 会使用已保存的 Token 调用租户列表与当前用户接口，并在放行 Prompt 前同步变化的租户列表或管理员标记。业务码 `600`、`601`、`602` 会删除登录记录，并以 Token 过期拒绝本次 Prompt。网络失败和其他业务码只拒绝本次提交，不删除登录状态。
 
+网络传输失败会保留底层原因到错误消息中，因此可以区分 DNS、代理、TLS、连接失败与 JDCloud 业务错误码。
+
 Session Controller 修改 Session 模型前，controller 通过 `api-session/model-selection-admission` 读取已保存的管理员标记。缺少登录时返回 `jdcloud/auth-required`；非管理员返回 `jdcloud/administrator-required`，且不修改 Session 或部署默认模型。
 
 在 JDCloud 部署中，登录记录按不透明的浏览器会话键保存。稳定归属由外部 `userInfo.id`、规范化服务地址和当前租户 ID 共同决定；用户名只用于显示。每台浏览器必须独立登录，同一租户和用户在不同电脑登录后可共享新创建的 Session 与 Workspace；没有归属记录的旧数据会被忽略。
@@ -45,6 +47,8 @@ Session Controller 修改 Session 模型前，controller 通过 `api-session/mod
 Host 插件可以使用 `requestAuthenticated({ path, method, body? | multipartFile? }, signal)` 请求固定的 `/api/...` 路径。controller 会在内部读取当前 credential、添加 authorization header、应用 `requestTimeoutMs`，并只返回成功响应中的 `data`，不会返回 Token。该方法接受 JSON `GET`、`POST`、`PUT` 和 `DELETE` 请求，或在 `file` 字段中携带一个文件的 `POST` multipart 请求；multipart 文件可以携带 Host 持有的字节，也可以携带长度明确的异步字节流，controller 转发后者时不会缓冲完整文件。JSON 与 multipart body 互斥，`GET` 会绕过缓存。业务码 `600`、`601`、`602` 会删除登录并转换为 `jdcloud/auth-required`，其他业务错误保留登录状态。
 
 外部服务集成把低代码原始 Token、`X-Tenant-Id` 指定的租户与 `X-JDCloud-Base-Url` 指定的服务地址传给 `runExternalRequest()`。controller 会规范化调用方选择的地址，校验租户列表与当前用户响应均指向该租户，只在请求级异步存储中设置包含地址的身份，并在操作结束时自动移除。外部请求不会读取 `defaultBaseUrl`，不会切换 Token 的租户，也不会写入浏览器登录状态；外部 API 组合会拒绝 `X-Project-Id`。
+
+Host 消费方使用 `downloadFileAuthenticated(fileId, signal)` 获取当前租户文件的原始响应，无需读取 Token。方法校验文件 ID，固定当前服务与租户的文件路径，禁止重定向与缓存，并应用请求超时；消费方负责文件权限、响应状态、字节上限和解码。该方法仅供 Host 使用，不暴露为 Remote 接口。
 
 <a id="configuration"></a>
 ## 配置

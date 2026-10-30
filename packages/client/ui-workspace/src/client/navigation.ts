@@ -410,6 +410,15 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     if (this.mainReference?.sessionId === sessionId) this.clearMain()
   }
 
+  /**
+   * Release the selected conversation after its permanent deletion commits.
+   * @param sessionIds - identities removed by the completed user operation.
+   */
+  clearDeletedSessions(sessionIds: readonly SessionId[]): void {
+    const current = this.mainReference?.sessionId
+    if (current !== undefined && sessionIds.includes(current)) this.clearMain()
+  }
+
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.unarchiveSession(sessionId)
   }

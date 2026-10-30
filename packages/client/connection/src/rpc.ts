@@ -98,16 +98,17 @@ export type RpcMessage = ClientRequest | ServerResponse
 export interface ConnectionTrustRequest {
   /** Request headers supplied by either the Fetch or node:http representation. */
   readonly headers: Headers | Readonly<Record<string, string | readonly string[] | undefined>>
+  /** HTTP method when authentication is restricted to a native carrier operation. */
+  readonly method?: string | undefined
+  /** Request target used when a browser-managed download presents a one-use ticket. */
+  readonly url?: string | undefined
 }
 
 /** HTTP status returned before dispatch, or undefined when the request may proceed. */
 export type ConnectionRequestRejection = 401 | 403 | undefined
 
 /** Root/index request facts used by the browser-token exchange. */
-export interface ConnectionIndexRequest extends ConnectionTrustRequest {
-  readonly method?: string | undefined
-  readonly url?: string | undefined
-}
+export type ConnectionIndexRequest = ConnectionTrustRequest
 
 /** Root/index response operations owned by the browser-token exchange. */
 export interface ConnectionIndexResponse {

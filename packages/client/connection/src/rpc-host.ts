@@ -152,7 +152,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
 
   /** The independent browser-session cookie gate, when the deployment requires one. */
   private sessionAdmits(request: ConnectionTrustRequest): boolean {
-    return this.browserSession === undefined || this.browserSession.accepts(request)
+    return this.browserSession === undefined || this.browserSession.admitHttp(request)
   }
 
   /** Run one admitted operation with its optional JDCloud browser identity. */

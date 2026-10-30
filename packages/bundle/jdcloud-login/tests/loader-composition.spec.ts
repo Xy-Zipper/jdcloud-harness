@@ -10,6 +10,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import * as ExternalApi from '@deepseek-ai/dsh-api-external'
+import * as Media from '@deepseek-ai/dsh-creation-studio-media'
 import * as yaml from 'js-yaml'
 import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
 import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
@@ -24,6 +25,7 @@ import WebServer from '../../../host/webserver/src/index.ts'
 
 let directory: string | undefined
 let ctx: Context | undefined
+const localFetch = globalThis.fetch
 
 afterEach(async () => {
   await ctx?.fiber.dispose()
@@ -48,7 +50,7 @@ function corpData(): Record<string, unknown> {
 }
 
 /** Create the real Loader tree used by both composition assertions. */
-async function bootComposition(fetcher?: typeof fetch, externalApi = false): Promise<Context> {
+async function bootComposition(fetcher?: typeof fetch, externalApi = false, media = false): Promise<Context> {
   if (fetcher !== undefined) vi.stubGlobal('fetch', fetcher)
   const lowcodeEntry = pathToFileURL(join(
     import.meta.dirname,
@@ -94,6 +96,13 @@ async function bootComposition(fetcher?: typeof fetch, externalApi = false): Pro
     '    defaultBaseUrl: https://kindoucloud.com',
     '    requestTimeoutMs: 15000',
     ...externalApi ? ["- name: '@deepseek-ai/dsh-api-external'"] : [],
+    ...media ? [
+      "- name: '@deepseek-ai/dsh-creation-studio-media'",
+      '  config:',
+      '    platformURL: https://kindoucloud.com',
+      `    tenantId: ${'a'.repeat(24)}`,
+      `    stateDirectory: ${JSON.stringify(join(directory, 'media'))}`,
+    ] : [],
     "- name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'",
     "- name: '@deepseek-ai/dsh-client-ui-jdcloud-login'",
     "- name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'",
@@ -131,6 +140,7 @@ async function bootComposition(fetcher?: typeof fetch, externalApi = false): Pro
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-api-jdcloud-auth-controller', JdcloudAuthController],
     ['@deepseek-ai/dsh-api-external', ExternalApi],
+    ['@deepseek-ai/dsh-creation-studio-media', Media],
     ['@deepseek-ai/dsh-tool-jdcloud-lowcode', lowcodeModule],
     ['@deepseek-ai/dsh-client-ui-jdcloud-login', loginUiModule],
     ['@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions', lowcodeActionsUiModule],
@@ -203,6 +213,8 @@ describe('JDCloud login through a real Loader composition', () => {
       .toBe('@deepseek-ai/dsh-client-ui-directory-picker-browse')
     expect(rows.find(row => row.id === 'external-api')?.name)
       .toBe('@deepseek-ai/dsh-api-external')
+    expect(rows.find(row => row.id === 'creation-studio-media')?.name)
+      .toBe('@deepseek-ai/dsh-creation-studio-media')
     expect(jdcloud.find(row => row.id === 'skill-filesystem')).toMatchObject({
       disabled: false,
       config: {
@@ -217,6 +229,52 @@ describe('JDCloud login through a real Loader composition', () => {
         transferFrameAncestorOrigin: { __jsExpr: 'process.env.JDCLOUD_IFRAME_PARENT_ORIGIN' },
       },
     })
+  })
+
+  it('loads media tools and authenticated routes from the JDCloud bundle and removes them on unload', async () => {
+    const tenantId = 'a'.repeat(24)
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.pathname === '/api/system/corp/getCorpList')
+        return json({ corpId: tenantId, corpList: [{ corpId: tenantId, corpName: 'Media' }], joinCorpList: [] })
+      if (url.pathname === '/api/oauth/currentUser')
+        return json({ userInfo: { id: 'media-user', corpId: tenantId }, userPermission: {} })
+      throw new Error(`unexpected media request: ${url.pathname}`)
+    })
+    const context = await bootComposition(fetcher, true, true)
+    expect('default' in Media).toBe(false)
+    expect(context.tools.schemas().map(schema => schema.name)).toEqual(expect.arrayContaining([
+      'creation_studio_image_generate', 'creation_studio_image_task', 'creation_studio_video_task',
+    ]))
+    const address = `http://127.0.0.1:${context.webServer.port}/api/external/v1/creation-studio/media/config`
+    const headers = {
+      authorization: 'Bearer media-token',
+      'x-tenant-id': tenantId,
+      'x-jdcloud-base-url': 'https://kindoucloud.com',
+    }
+    // Only the remote platform is mocked; the listener, Loader, auth, and registry are real.
+    expect((await localFetch(address, { method: 'POST' })).status).toBe(401)
+    for (const operation of ['images/tasks', 'images/refresh', 'images/list']) {
+      const route = address.replace(/config$/u, operation)
+      expect((await localFetch(route, { method: 'POST' })).status).toBe(401)
+      expect((await localFetch(route, { method: 'GET' })).status).toBe(405)
+    }
+    const response = await localFetch(address, { method: 'POST', headers, body: '{}' })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      code: 200,
+      data: { image: { model: 'gpt-image-2.5' }, video: { model: 'doubao-seedance-2-5-260628' } },
+    })
+    const batch = await localFetch(address.replace(/config$/u, 'images/refresh'), {
+      method: 'POST', headers, body: JSON.stringify({ taskIds: [] }),
+    })
+    expect(batch.status).toBe(400)
+    expect(await batch.json()).toMatchObject({ code: 400, message: '请传入非空且不重复的 taskIds 数组。' })
+    const entry = [...context.loader.entries()].find(row => row.options.name === '@deepseek-ai/dsh-creation-studio-media')
+    expect(entry?.fiber).toBeDefined()
+    await entry!.fiber!.dispose()
+    expect(context.tools.schemas().some(schema => schema.name.startsWith('creation_studio_'))).toBe(false)
+    expect((await localFetch(address, { method: 'POST', headers })).status).toBe(404)
   })
 
   it('activates the foundation services, Host controller, low-code tools, and login UI node half', async () => {

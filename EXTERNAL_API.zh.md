@@ -13,6 +13,7 @@
 - [接口汇总](#route-summary)
 - [Skill 接口](#skill-apis)
 - [工作区接口](#workspace-apis)
+- [Session 历史接口](#session-history-api)
 - [对话接口](#conversation-api)
 - [错误处理](#errors)
 - [安全与部署](#security-and-deployment)
@@ -77,6 +78,10 @@ Runtime 用户必须有权访问指定项目。Ontology 会拒绝 `X-Tenant-Id` 
 | `GET` | `/api/external/v1/workspaces` | 查询当前用户和范围内可见的工作区。 |
 | `POST` | `/api/external/v1/workspaces/create` | 在当前账号目录下创建或复用工作区。 |
 | `GET` | `/api/external/v1/workspaces/files` | 查询一个工作区目录的直接子项。 |
+| `GET` | `/api/external/v1/sessions/history` | 查询一个 Session 的文本消息历史。 |
+| `POST` | `/api/external/v1/sessions/create` | 在所属工作区创建 Session，不调用模型。 |
+| `GET` | `/api/external/v1/sessions/file` | 按 Session 归属读取有界 UTF-8 文件。 |
+| `POST` | `/api/external/v1/sessions/files/upload` | 暂存 Session 附件并返回上传凭据。 |
 | `POST` | `/api/external/v1/chat` | 创建或继续 Session，并流式返回结果。 |
 
 下面的示例使用 JDCloud Header。Ontology 调用方应按照前文说明，把两个 JDCloud 范围 Header 替换为 `X-Project-Id`。
@@ -264,8 +269,41 @@ curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/workspaces/files?w
 
 该接口只列出目录的直接子项，不提供文件内容下载。
 
+<a id="session-history-api"></a>
+## Session 历史接口
+
+```powershell
+curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/sessions/history?sessionId=session-id&maxMessages=100" `
+  --header "Authorization: Bearer <raw-low-code-token>" `
+  --header "X-Tenant-Id: 6ad80f2f1f280486bb45ac3a" `
+  --header "X-JDCloud-Base-Url: https://mi.kindoucloud.com"
+```
+
+`sessionId` 必填。`maxMessages` 可选，默认 `100`，范围为 `1` 到 `200`。接口复用 Session Controller 的归属检查，只允许当前平台身份读取自己拥有的 Session。返回值包含 assistant 文本，以及来源类型为 `user` 的用户文本；runtime context、Skill 目录、Skill 指令、reasoning、工具调用、工具结果和其他内部事件不会返回。
+
+`data.running` 表示实时 Agent 在历史快照前或快照后是否处于运行状态。可选 `data.startedAt` 是窗口中当前 turn/start 的时间。页面重载或聊天流中断后，轮询历史即可跟踪已有工作，不再提交 prompt；中途 assistant 消息不代表完成。
+
+```json
+{
+  "code": 200,
+  "data": {
+    "sessionId": "session-id",
+    "cursor": 12,
+    "hasMore": false,
+    "messages": [
+      { "id": "message-id", "role": "user", "text": "调整平台", "createdAt": 1790000000000 },
+      { "id": "message-id-2", "role": "assistant", "text": "已生成候选修改。", "createdAt": 1790000001000 }
+    ]
+  }
+}
+```
+
 <a id="conversation-api"></a>
 ## 对话接口
+
+需附加文件时，先用 `POST /api/external/v1/sessions/create` 提交 JSON `{ "workspaceId": "..." }`，取得 `data.sessionId`；再向 `/api/external/v1/sessions/files/upload?sessionId=...&name=brief.pdf` 发送 `Content-Type: application/octet-stream` 的原始文件字节。接口复用当前身份归属检查及 Session 附件服务，返回 `{ code: 200, data: { receiptId, file } }`，请求体最大 30 MiB。随后 `/chat` 可带 `fileReceiptIds: ["..."]`，凭据仅由接收该文件的同一 Session 接受；普通文本对话可省略该字段。
+
+读取产物使用 `GET /api/external/v1/sessions/file?sessionId=...&path=创意方案.json`，响应 `data` 为 `{ path, text, version }`。接口复用 Session 历史归属和 Workspace 文件读取策略，不激活 Agent；超过现有文件预览的行数或字节上限时拒绝，不返回截断文件。所有接口沿用本页认证 Header，文件不存在返回 `404`。
 
 ### 创建 Session 并发送第一条消息
 

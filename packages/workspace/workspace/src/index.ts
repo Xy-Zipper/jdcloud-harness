@@ -319,6 +319,29 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
+   * Remove a permanently deleted Session from memberships, archives and pins.
+   * @param sessionId - Session whose producers and durable storage are already removed.
+   * @returns completion after navigation records are durable; failures reject for retry.
+   */
+  forgetSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      for (const workspace of this.entities.values()) await workspace.detachSession(sessionId)
+      const state = this.requireState()
+      if (state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)) {
+        await this.setState({
+          ...state,
+          archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+        })
+      }
+      this.headers.delete(sessionId)
+      this.sessionPaths.delete(sessionId)
+      this.missingSessionPaths.delete(sessionId)
+      this.invalidSessionPaths.delete(sessionId)
+    })
+  }
+
+  /**
    * Move one workspace within the durable display order, DOM-insertBefore-like.
    * With an anchor it lands before that workspace; without one it appends.
    * @param id - Workspace to move.

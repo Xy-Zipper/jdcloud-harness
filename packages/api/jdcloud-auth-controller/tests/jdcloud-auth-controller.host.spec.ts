@@ -22,6 +22,26 @@ import type { JdcloudAuthenticatedRequest, JdcloudLoginRequest } from '../src/in
 const contexts: Context[] = []
 const tempDirs: string[] = []
 
+describe('Host file download', () => {
+  it('keeps file authorization inside the current account and refuses invalid ids or missing login', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])))
+    const ctx = await boot(fetcher as typeof fetch)
+    const signal = AbortSignal.timeout(1000)
+    await expect(ctx.jdcloudAuthController.downloadFileAuthenticated('bad/../id', signal)).rejects.toMatchObject({ code: 'gateway/bad-request' })
+    await expect(ctx.jdcloudAuthController.downloadFileAuthenticated('a'.repeat(24), signal)).rejects.toMatchObject({ code: 'jdcloud/auth-required' })
+    await ctx.credentials.modifyRecord(credentialKey('jdcloud-auth-controller', 'login'), () => Promise.resolve({
+      kind: 'grant',
+      payload: { version: 4, baseUrl: 'https://files.example', token: 'private-file-token', username: 'user', userId: 'user-a',
+        corpId: 'tenant-a', corpName: 'Tenant A', corps: [{ corpId: 'tenant-a', corpName: 'Tenant A' }], systemAdministrator: false },
+    }))
+    const response = await ctx.jdcloudAuthController.downloadFileAuthenticated('a'.repeat(24), signal)
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3])
+    expect(fetcher).toHaveBeenCalledWith(`https://files.example/api/file/dowloadFile/tenant-a/${'a'.repeat(24)}`,
+      expect.objectContaining({ headers: { authorization: 'private-file-token' }, redirect: 'error', cache: 'no-store' }))
+    expect(JSON.stringify(await ctx.jdcloudAuthController.status())).not.toContain('private-file-token')
+  })
+})
+
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true })
@@ -1422,13 +1442,17 @@ describe('JDCloud authentication controller', () => {
   it('reports login business and transport failures without storing a token', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ code: 500, msg: 'login failed', data: null }))
-      .mockRejectedValueOnce('offline')
+      .mockRejectedValueOnce(new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 127.0.0.1:443') }))
     const ctx = await boot(fetcher as typeof fetch)
     const request = { baseUrl: 'https://kindoucloud.com', username: 'user', password: 'secret' }
     await expect(ctx.jdcloudAuthController.login(request, AbortSignal.timeout(1000)))
       .rejects.toMatchObject({ code: 'jdcloud/auth-failed', details: { code: 500 } })
     await expect(ctx.jdcloudAuthController.login(request, AbortSignal.timeout(1000)))
-      .rejects.toMatchObject({ code: 'jdcloud/auth-failed', message: 'offline', details: { code: null } })
+      .rejects.toMatchObject({
+        code: 'jdcloud/auth-failed',
+        message: 'fetch failed: connect ECONNREFUSED 127.0.0.1:443',
+        details: { code: null },
+      })
     expect(await ctx.credentials.readRecord(credentialKey('jdcloud-auth-controller', 'login'))).toBeUndefined()
   })
 

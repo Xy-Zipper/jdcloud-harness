@@ -349,6 +349,28 @@ export class JdcloudAuthController extends TypertRemoteService {
   }
 
   /**
+   * Read a current-tenant file without disclosing its authorization header to a Host consumer.
+   * @param fileId - JDCloud file record id, validated before URL construction.
+   * @param signal - Caller cancellation signal.
+   * @returns Raw file response; the consumer owns byte limits and decoding.
+   */
+  async downloadFileAuthenticated(fileId: string, signal: AbortSignal): Promise<Response> {
+    if (!/^[a-f0-9]{24}$/iu.test(fileId)) {
+      throw new RemoteError('gateway/bad-request', 'JDCloud file id is invalid', {})
+    }
+    const auth = await this.readAuth()
+    if (auth === undefined) {
+      throw new RemoteError('jdcloud/auth-required', 'JDCloud login is required', { reason: 'missing' })
+    }
+    return this.fetcher(`${auth.baseUrl}/api/file/dowloadFile/${encodeURIComponent(auth.corpId)}/${fileId}`, {
+      headers: { authorization: auth.token },
+      redirect: 'error',
+      cache: 'no-store',
+      signal: this.operationSignal(signal),
+    })
+  }
+
+  /**
    * Select the request header that identifies the external JDCloud tenant scope.
    * @returns The required external tenant header.
    */
@@ -623,7 +645,7 @@ export class JdcloudAuthController extends TypertRemoteService {
 
   private requestError(operation: 'login' | 'switch' | 'validate', error: unknown): RemoteError {
     const code = error instanceof JdcloudApiError ? error.code : null
-    const message = error instanceof Error ? error.message : String(error)
+    const message = jdcloudRequestErrorMessage(error)
     if (operation === 'login') return new RemoteError('jdcloud/auth-failed', message, { code })
     if (operation === 'switch') return new RemoteError('jdcloud/switch-failed', message, { code })
     return new RemoteError('jdcloud/validation-failed', message, { code })
@@ -692,6 +714,16 @@ export class JdcloudAuthController extends TypertRemoteService {
     }
     return committed
   }
+}
+
+/** Preserve the underlying network reason hidden by Node's generic fetch error. */
+function jdcloudRequestErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const message = error.message || error.name
+  const cause = error.cause
+  if (cause === undefined || cause === null) return message
+  const causeMessage = cause instanceof Error ? cause.message || cause.name : String(cause)
+  return causeMessage && causeMessage !== message ? `${message}: ${causeMessage}` : message
 }
 
 /** Validate the durable owner-defined grant payload before use. */

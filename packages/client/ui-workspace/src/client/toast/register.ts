@@ -22,6 +22,18 @@ export function registerToasts(
   ctx.slots.registerFactory({ name: 'workspace.toast.content', scope: 'root' }, WorkspaceToast)
   ctx.slots.inject('workspace.toast', function* () {
     yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sessionDeleted', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sessionDeleted'> => ({
+        display: (_notice, t) => ({ text: t('toast.sessionDeleted'), tone: 'success' }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleted'>>)
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'workspaceDeleted', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'workspaceDeleted'> => ({
+        display: (_notice, t) => ({ text: t('toast.workspaceDeleted'), tone: 'success' }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'workspaceDeleted'>>)
+    yield ctx.slots.register({
       name: 'workspace.toast', key: 'sessionIdCopied', locale: 'workspace',
       inject: (): ToastDisplayInjected<'sessionIdCopied'> => ({
         display: (_notice, t) => ({ text: t('toast.sessionIdCopied'), tone: 'success' }),

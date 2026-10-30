@@ -16,7 +16,8 @@ describe('SessionLogDownloadController', () => {
   it('downloads the host ZIP and publishes one shared success state', async () => {
     const fetcher = vi.fn(async () => new Response('zip', { status: 200 }))
     const save = vi.fn()
-    const controller = new SessionLogDownloadController(fetcher, save)
+    const authorize = vi.fn(async (url: string) => `${url}&downloadTicket=once`)
+    const controller = new SessionLogDownloadController(fetcher, save, authorize)
 
     await controller.download(SID)
 
@@ -26,9 +27,10 @@ describe('SessionLogDownloadController', () => {
     expect(init.method).toBe('HEAD')
     expect(init.signal).toBeInstanceOf(AbortSignal)
     expect(save).toHaveBeenCalledWith(
-      route,
+      `${route}&downloadTicket=once`,
       'dsh-session-session-export-controller.zip',
     )
+    expect(authorize).toHaveBeenCalledExactlyOnceWith(route)
     expect(controller.store.getSnapshot().bySession[SID]).toEqual({
       open: true, status: 'success', error: null,
     })
@@ -76,6 +78,12 @@ describe('SessionLogDownloadController', () => {
     )
     await emptyDetail.download(SID)
     expect(emptyDetail.store.getSnapshot().bySession[SID]?.error).toBe('Export failed: HTTP 503')
+
+    const authorization = new SessionLogDownloadController(
+      async () => new Response('zip'), vi.fn(), async () => { throw new Error('download ticket refused') },
+    )
+    await authorization.download(SID)
+    expect(authorization.store.getSnapshot().bySession[SID]?.error).toBe('download ticket refused')
   })
 
   it('aborts active fetches on disposal and rejects later requests', async () => {
