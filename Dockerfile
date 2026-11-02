@@ -53,7 +53,8 @@ RUN npm install --global pnpm@11.7.0 --registry "$NPM_REGISTRY" \
 COPY --from=builder --chown=node:node /app /app
 
 # Runtime mounts use these writable roots and the node user's numeric ownership.
-RUN mkdir -p /var/lib/jdcloud-harness /workspace \
+RUN command -v flock >/dev/null \
+  && mkdir -p /var/lib/jdcloud-harness /workspace \
   && chown -R node:node /var/lib/jdcloud-harness /workspace \
   && chmod +x /app/docker-entrypoint.sh
 

@@ -125,3 +125,19 @@ docker compose up -d --no-build --pull never --force-recreate
 ```
 
 不要执行 `docker compose down -v`，否则会删除名为 `jdcloud_harness_workspace` 的工作目录卷。
+
+## 启动时提示 package.json.lock 超时
+
+`atomic-write: timed out waiting for the writer lock at /var/lib/jdcloud-harness/profiles/web/package.json.lock` 表示插件注册未能取得配置写锁。容器异常退出可能留下记录旧 PID 的锁；重建容器后，该 PID 可能被新进程复用，因此不能仅凭 PID 判断它已失效。
+
+镜像入口使用 `$DSH_HOME/.docker-runtime.lock` 的内核锁，在整个应用进程存活期间独占数据目录。取得独占权后，入口只清理 Web profile 遗留的 `package.json.lock` 和对应的 takeover 文件，再注册插件并启动应用。同一个 `data/` 不能同时供两个容器运行；第二个实例会报告 `DSH_HOME is already in use`。不要手工删除 `.docker-runtime.lock` 文件：进程退出会自动释放内核锁，文件保留用于后续启动。
+
+旧镜像可在确认没有其他实例使用同一数据目录后，先停止服务，再通过覆盖入口清理安装锁。以下命令在包含 `compose.yaml` 和 `.env` 的部署目录执行，PowerShell 与 Linux shell 均可使用；它们保留配置文件、会话、附件与工作目录卷。
+
+```text
+docker compose stop
+docker compose run --rm --no-deps --pull never --entrypoint sh jdcloud-harness -c 'rm -f -- /var/lib/jdcloud-harness/profiles/web/package.json.lock /var/lib/jdcloud-harness/profiles/web/package.json.lock.takeover-*'
+docker compose up -d --no-build --pull never --force-recreate
+```
+
+重新构建并加载包含入口修复的镜像后，单实例启动会自动清理这些遗留安装锁。构建上下文排除本机 `data/`，用户数据只通过运行时挂载提供。

@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .dsh
+data
 
 # Install Linux dependencies inside the builder instead of copying host artifacts.
 node_modules
