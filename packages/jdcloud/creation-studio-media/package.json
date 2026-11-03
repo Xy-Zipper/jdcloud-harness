@@ -20,7 +20,9 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/schemastery": "workspace:~",
-    "music-metadata": "^12.3.2"
+    "@volcengine/openapi": "1.36.2",
+    "music-metadata": "^12.3.2",
+    "sharp": "0.35.5"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:~",

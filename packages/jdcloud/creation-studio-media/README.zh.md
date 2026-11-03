@@ -34,6 +34,8 @@ kind: "package-reference"
 | `imageModel` | `gpt-image-2.5` | 图片供应商模型 |
 | `imageRetryLimit` | `2` | 供应商指定可重试错误后的最大自动重提次数 |
 | `imageKeyRef` / `arkKeyRef` | `GPT_IMAGE_API_KEY` / `ARK_API_KEY` | Host 凭据引用 |
+| `billingWriterKeyRef` | `CREATION_STUDIO_BILLING_WRITER_TOKEN` | 可选的受限 JDCloud 凭据，用于影子用量同步 |
+| `jimengAccessKeyRef` / `jimengSecretKeyRef` | `JIMENG_ACCESS_KEY_ID` / `JIMENG_SECRET_ACCESS_KEY` | 仅在 Host 使用的即梦 Visual API 签名凭据 |
 
 在 Harness 服务器环境或凭据存储中配置 `GPT_IMAGE_API_KEY` 和 `ARK_API_KEY`。Compose 将变量传入容器，并把媒体状态保存在既有持久化目录 `data/creation-studio-media` 中。造物片场 Skill ZIP 仍通过 Skill 管理单独安装。
 
@@ -49,7 +51,13 @@ Refresh 查询已保存的供应商编号，只有 completed 才下载内容；H
 
 Seedance 视频任务保留已确认脚本的旁白、字幕、音乐与音效。分镜说话人设置对应租户音色目录中当前可读的记录；共享音色不带空间 ID，私有音色须与项目空间一致。Host 下载所选音频文件并实测时长，以 audio_url 和 reference_audio 提交。样音须为 MP3 或 WAV，每条2–30秒且不超过15MB，总长不超过30秒；每次请求最多十种不同音色。提示词将说话人及原台词映射到 @音频N，样音仅作音色参考。音色无效、缺失或不可读时，在发出付费供应商请求前停止；已有任务刷新保留原参数。
 
+即梦白底图使用已认证 POST `white-background/tasks`、`white-background/refresh`、`white-background/list`。Host 需要配置两个即梦凭据引用，与 ARK 的 Bearer 密钥不同。提交需要当前空间的项目和自有或可商用图片素材，不要求已采纳方案。Host 单独生成 JPEG 参考图，使用官方签名器调用 Visual API，并让必需的 `content-type` 头参与签名，固定 `req_key=jimeng_t2i_v40`、`force_single=true` 和2048×2048输出，并把用户指定的主体要求追加到白底图提示词。提示词要求移除海报文案、悬浮标识和商品外文字，保留实际印在商品或包装上的文字，包括键盘键帽字符。原图保持不变。返回的单张图片经核验、上传后关联为生成的项目素材，保存原始素材来源；同空间其他项目可以复用。稳定请求编号恢复生成与上传进度，未知付费提交不自动重发。用量记录的供应商为 `jimeng`；没有匹配的已发布价格时费用保持待计算。
+
 -----
+
+影子计费从持久 assistant 事件采集已认证造物片场调用尝试，不增加模型消息。正常供应商用量归属于提交用户和空间，推荐请求及供应商错误尝试由平台承担。缺用量或价格保持待核对。视频回执先于下载保存 completion_tokens，不再加一次 total_tokens。图片和视频仅在项目入库后将客户费用标为可核对；不写余额、预留或账本流水。
+
+每次模型调用结束后自动向低代码用量表同步回执。配置受限服务写入凭据时优先使用；它仅需读取租户身份、查询用量表以及新增/更新用量记录。未配置时，使用原发起人当前认证请求已有的权限，不额外保存用户 Token，账号变化时拒绝继续写入。权限或网络失败保留持久待同步回执。本轮结束后在后台补同步绑定空间和项目的待处理记录；已认证 POST billing/list 也会先补同步、重算待处理记录，再按每页50条返回当前空间的本地回执。billing/sync 显式执行同样的恢复，每次最多处理50条。回执和已核验会话绑定保存在 stateDirectory/billing。更新使用 PUT；创建响应丢失时按原事件键核对，不盲目再次创建。每个状态目录由一个 Host 独占，多写入端在财务使用前须补平台唯一键。
 
 <a id="understand-the-implementation"></a>
 ## 实现说明

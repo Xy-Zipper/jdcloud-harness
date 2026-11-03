@@ -7,17 +7,19 @@ import { join } from 'node:path'
 import { createImageService } from './images.mjs'
 import { createSeedanceService } from './seedance.mjs'
 import { generatedImagePending, imageGenerationSource } from './image-generation.mjs'
+import { createWhiteBackgroundService } from './white-background.mjs'
 
 const MATERIAL = '6ad81c871f280486bb45ac43'
 const RELATION = '6ad81c871f280486bb45ac45'
 const recordId = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
 
 /** 已成功的文件、素材与引用 ID 逐步落盘，失败后继续原步骤，不重新付费生成。 */
-export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetcher = fetch) {
+export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetcher = fetch, billing) {
   const active = new Map()
   const owners = new AsyncLocalStorage()
   let closing = false
   const platform = config.platformURL.replace(/\/$/u, '')
+  const whiteBackground = createWhiteBackgroundService(config, auth, keys, billing, fetcher)
   async function transport(url, init = {}) {
     if (await auth.currentScopeKey() !== owners.getStore())
       throw new Error('媒体执行期间账号已变化，已停止后续请求和写入；已生成结果可用原编号恢复。')
@@ -152,10 +154,15 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     }
   }
   async function execute(operation, input) {
+    // 白底图可在需求阶段运行，不要求已创建方案；拥有独立的项目、角色与素材校验。
+    if (operation.startsWith('white-background/')) return whiteBackground.run(operation.slice('white-background/'.length), input)
     const env = { CREATION_STUDIO_PLATFORM_URL: platform, CREATION_STUDIO_TENANT_ID: config.tenantId, CREATION_STUDIO_IMAGE_STATE_DIR: join(config.stateDirectory, 'images'), CREATION_STUDIO_IMAGE_RETRY_LIMIT: config.imageRetryLimit, CREATION_STUDIO_VIDEO_STATE_DIR: join(config.stateDirectory, 'seedance'), GPT_IMAGE_MODEL: config.imageModel, GPT_IMAGE_API_KEY: await keys(config.imageKeyRef), ARK_API_KEY: await keys(config.arkKeyRef) }
     if (operation === 'config') {
-      return { image: { configured: Boolean(env.GPT_IMAGE_API_KEY), model: config.imageModel }, video: { configured: Boolean(env.ARK_API_KEY), model: 'doubao-seedance-2-5-260628' } }
+      return { image: { configured: Boolean(env.GPT_IMAGE_API_KEY), model: config.imageModel }, video: { configured: Boolean(env.ARK_API_KEY), model: 'doubao-seedance-2-5-260628' },
+        whiteBackground: { configured: Boolean(await keys(config.jimengAccessKeyRef) && await keys(config.jimengSecretKeyRef)), model: 'jimeng_t2i_v40' } }
     }
+    if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'shadow', rows: [], total: 0 }
+    if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'shadow', processed: 0 }
     const images = createImageService(env, transport)
     const videos = createSeedanceService(env, transport)
     if (operation === 'images/tasks') {
@@ -264,9 +271,30 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
         throw new Error('Harness 媒体插件正在停止，请稍后重试。')
       if (!scope)
         throw new Error('请先登录 Harness。')
-      const key = JSON.stringify([scope, operation, input.projectId, input.planId, input.spaceId, input.requestId, input.taskIds, ...(['images/generate', 'images/tasks'].includes(operation) ? [input.prompt, input.size, input.referenceIds] : []), ...(operation === 'video/tasks' ? [input.batchId] : [])])
-      if (!active.has(key))
-        active.set(key, owners.run(scope, () => execute(operation, input)).finally(() => active.delete(key)))
+      const key = JSON.stringify([scope, operation, input.projectId, input.planId, input.spaceId, input.requestId, input.taskIds, ...(['images/generate', 'images/tasks'].includes(operation) ? [input.prompt, input.size, input.referenceIds] : []), ...(operation === 'video/tasks' ? [input.batchId] : []), ...(operation.startsWith('white-background/') ? [input.materialId, input.prompt] : [])])
+      if (!active.has(key)) {
+        active.set(key, owners.run(scope, async () => {
+          const scenario = operation.startsWith('images/') ? 'image' : 'video'
+          const metered = billing && ['images/generate', 'images/tasks', 'images/refresh', 'video/tasks', 'video/refresh'].includes(operation) && !input.taskIds
+          const binding = metered ? await billing.beginMedia(input) : undefined
+          const parameters = scenario === 'image'
+            ? { ...(Array.isArray(input.referenceIds) ? { imageOperation: input.referenceIds.length ? 'edit' : 'generation' } : {}),
+                ...(input.size ? { imageSize: input.size } : {}), imageQuality: 'high' } : {}
+          // 首次提交前固定操作者和价格，恢复查询不重新采用当日售价。
+          if (binding && ['images/tasks', 'images/generate', 'video/tasks'].includes(operation))
+            await billing.media(input, binding, scenario, { status: 'submitting' }, parameters)
+          const result = await execute(operation, input)
+          if (binding) {
+            const billingParameters = result.billingParameters ?? parameters
+            // 同步生图返回的是已上传素材引用，转为与异步图片一致的完成回执再计量。
+            const task = operation === 'images/generate'
+              ? { status: 'succeeded', createdAt: result.generation?.createdAt, result } : result
+            try { await billing.media(input, binding, scenario, task, billingParameters) }
+            catch (error) { return { ...result, billingWarning: `生成状态已保存，但用量记录待恢复：${error.message}` } }
+          }
+          return result
+        }).finally(() => active.delete(key)))
+      }
       return active.get(key)
     },
     /** 卸载先拒绝新操作，再等待在途生成和上传落盘，不把未完成回执丢成成功。 */

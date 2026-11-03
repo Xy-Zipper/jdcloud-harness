@@ -41,6 +41,11 @@ services:
       # Media tools ship in the JDCloud bundle; keys stay on the Host.
       GPT_IMAGE_API_KEY: ${GPT_IMAGE_API_KEY:-}
       ARK_API_KEY: ${ARK_API_KEY:-}
+      # Jimeng Visual API uses Host-only access-key signing for white-background pictures.
+      JIMENG_ACCESS_KEY_ID: ${JIMENG_ACCESS_KEY_ID:-}
+      JIMENG_SECRET_ACCESS_KEY: ${JIMENG_SECRET_ACCESS_KEY:-}
+      # Optional restricted writer; without it, usage sync uses the original caller's current permissions.
+      CREATION_STUDIO_BILLING_WRITER_TOKEN: ${CREATION_STUDIO_BILLING_WRITER_TOKEN:-}
       CREATION_STUDIO_MEDIA_STATE_DIR: /var/lib/jdcloud-harness/creation-studio-media
       # Seed the JDCloud login form through the Host controller at process startup.
       JDCLOUD_DEFAULT_BASE_URL: ${JDCLOUD_DEFAULT_BASE_URL:-}

@@ -14,7 +14,7 @@ import * as Media from '@deepseek-ai/dsh-creation-studio-media'
 import * as yaml from 'js-yaml'
 import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
 import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
-import { createUserMessage } from '../../../llm/llm/src/index.ts'
+import { createAssistantMessage, createUserMessage } from '../../../llm/llm/src/index.ts'
 import { Session, SessionId } from '../../../core/session/src/index.ts'
 import SessionProjectionRegistry from '../../../session/session-projection/src/index.ts'
 import SystemPrompt from '../../../core/system-prompt/src/index.ts'
@@ -233,12 +233,38 @@ describe('JDCloud login through a real Loader composition', () => {
 
   it('loads media tools and authenticated routes from the JDCloud bundle and removes them on unload', async () => {
     const tenantId = 'a'.repeat(24)
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
+    const usageRows: Record<string, unknown>[] = []
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input))
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : {}
       if (url.pathname === '/api/system/corp/getCorpList')
         return json({ corpId: tenantId, corpList: [{ corpId: tenantId, corpName: 'Media' }], joinCorpList: [] })
       if (url.pathname === '/api/oauth/currentUser')
         return json({ userInfo: { id: 'media-user', corpId: tenantId }, userPermission: {} })
+      if (url.pathname === '/api/visualdev/form/info')
+        return json({ _id: 'c'.repeat(24), ownerUserId: 'media-user', status: 'active' })
+      if (url.pathname === '/api/visualdev/form/list') {
+        if (body.menuId === '6ad81c871f280486bb45ac59') return json({ list: [{
+          _id: 'd'.repeat(24), scenario: 'agent', provider: 'deepseek-official', modelKey: 'deepseek-flash',
+          currency: 'CNY', pricingStatus: 'published', billingUnit: 'million_tokens',
+          inputPerMillionYuan: '4', cacheReadPerMillionYuan: '0.1', cacheWritePerMillionYuan: '4', outputPerMillionYuan: '16',
+        }] })
+        const filters = body.filter as Array<{ enCode: string; value: unknown }> | undefined
+        return json({ list: usageRows.filter(row => filters?.every(item => row[item.enCode] === item.value)) })
+      }
+      if (url.pathname === '/api/visualdev/form/create') {
+        expect(init?.method).toBe('POST')
+        expect(body.menuId).toBe('6ad81c871f280486bb45ac5b')
+        const payload = JSON.parse(String(body.data)) as Record<string, unknown>
+        const row: Record<string, unknown> = { _id: `${'f'.repeat(23)}${usageRows.length}`, ...payload }
+        usageRows.push(row)
+        return json(row._id)
+      }
+      if (url.pathname === '/api/visualdev/form/update') {
+        expect(init?.method).toBe('PUT')
+        Object.assign(usageRows.find(row => row._id === body._id)!, JSON.parse(String(body.data)))
+        return json(body._id)
+      }
       throw new Error(`unexpected media request: ${url.pathname}`)
     })
     const context = await bootComposition(fetcher, true, true)
@@ -254,7 +280,8 @@ describe('JDCloud login through a real Loader composition', () => {
     }
     // Only the remote platform is mocked; the listener, Loader, auth, and registry are real.
     expect((await localFetch(address, { method: 'POST' })).status).toBe(401)
-    for (const operation of ['images/tasks', 'images/refresh', 'images/list']) {
+    for (const operation of ['images/tasks', 'images/refresh', 'images/list', 'billing/list', 'billing/sync',
+      'white-background/tasks', 'white-background/refresh', 'white-background/list']) {
       const route = address.replace(/config$/u, operation)
       expect((await localFetch(route, { method: 'POST' })).status).toBe(401)
       expect((await localFetch(route, { method: 'GET' })).status).toBe(405)
@@ -270,6 +297,43 @@ describe('JDCloud login through a real Loader composition', () => {
     })
     expect(batch.status).toBe(400)
     expect(await batch.json()).toMatchObject({ code: 400, message: '请传入非空且不重复的 taskIds 数组。' })
+    const usage = await localFetch(address.replace(/config$/u, 'billing/list'), {
+      method: 'POST', headers, body: JSON.stringify({ spaceId: 'c'.repeat(24) }),
+    })
+    expect(usage.status).toBe(200)
+    expect(await usage.json()).toMatchObject({ code: 200, data: { mode: 'shadow', rows: [] } })
+    const agent = runningAgent(context)
+    const direct = createUserMessage({
+      source: { kind: 'user' },
+      content: [{ type: 'text', text: `/creation-studio-creative-plans\n${JSON.stringify({
+        context: { tenantId, spaceId: 'c'.repeat(24), billingRequestId: 'loader-operation' },
+      })}` }],
+    })
+    await context.jdcloudAuthController.runExternalRequest('media-token', tenantId, 'https://kindoucloud.com', new AbortController().signal, async () => {
+      await context.jdcloudAuthController.claimOwned('session', agent.session.id)
+      await agentEvents(context, agent).waterfall('agent/pre-step', {
+        messages: [direct], turn: 1, step: 1, signal: new AbortController().signal,
+      }, () => Promise.resolve({ kind: 'enter' as const, messages: [direct] }))
+    })
+    await context.jdcloudAuthController.runExternalRequest('media-token', tenantId, 'https://kindoucloud.com', new AbortController().signal, async () => {
+      agent.session.append('assistant/message', {
+        turn: 1, step: 1,
+        message: createAssistantMessage({ source: { provider: 'deepseek-official', model: 'deepseek-flash' },
+          content: [{ type: 'text', text: '完成' }] }),
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        stream: [{ type: 'chunk', time: 0, chunk: { type: 'usage', usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 } } }],
+      }, { surfaceOp: 'append' })
+      await context.serial('agent/turn-stopping', { agent, turn: 1, signal: new AbortController().signal })
+    })
+    const recorded = await localFetch(address.replace(/config$/u, 'billing/list'), {
+      method: 'POST', headers, body: JSON.stringify({ spaceId: 'c'.repeat(24) }),
+    })
+    expect(await recorded.json()).toMatchObject({ code: 200, data: { rows: [
+      { requestId: 'loader-operation', inputTokens: 100, outputTokens: 20, initiatedByUserId: 'media-user', syncStatus: 'synced' },
+    ] } })
+    expect(usageRows).toHaveLength(1)
+    expect(usageRows[0]).toMatchObject({ initiatedByUserId: 'media-user', spaceId: 'c'.repeat(24),
+      scenario: 'agent', customerChargeMicros: '720', chargeStatus: 'ready', billingMode: 'shadow' })
     const entry = [...context.loader.entries()].find(row => row.options.name === '@deepseek-ai/dsh-creation-studio-media')
     expect(entry?.fiber).toBeDefined()
     await entry!.fiber!.dispose()

@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 // The migrated JavaScript is loaded from source; URL imports avoid built declarations in source tests.
 const { createHarnessMediaRuntime } = await import(new URL('../src/runtime.mjs', import.meta.url).href);
 const { requestGptImage } = await import(new URL('../src/images.mjs', import.meta.url).href);
+const { createBillingRecorder } = await import(new URL('../src/billing-recorder.mjs', import.meta.url).href);
 const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const { frontendHash } = await import(new URL('../src/upstream.mjs', import.meta.url).href);
@@ -46,6 +47,10 @@ async function setup() {
         [ref.relationId, { _id: ref.relationId, materialId: ref.materialId, projectId: f.project._id, spaceId: f.project.spaceId, sourceRevision: 1 }],
         [ref.materialId, { _id: ref.materialId, spaceId: f.project.spaceId, ...ref, library: 'project', sourceKind: 'uploaded', revision: 1 }],
     ]);
+    const priceRows = [
+        { scenario: 'image', provider: 'gpt-image', modelKey: 'gpt-image-2.5', billingUnit: 'image', imagePerUnitYuan: '2' },
+        { scenario: 'video', provider: 'ark', modelKey: 'doubao-seedance-2-5-260628', billingUnit: 'million_tokens', videoPerMillionYuan: '100' },
+    ].map((row, index) => ({ ...row, _id: String(index).repeat(24), pricingStatus: 'published', currency: 'CNY' }));
     let counter = 0, imageCalls = 0, videoCalls = 0, uploads = 0;
     let failRelation = false, denyWrite = false;
     const auth = {
@@ -65,8 +70,17 @@ async function setup() {
             }
             if (request.path.endsWith('/form/info'))
                 return records.get(request.body._id);
-            if (request.path.endsWith('/form/list'))
+            if (request.path.endsWith('/form/list')) {
+                if (request.body.menuId === '6ad81c871f280486bb45ac59') return { list: priceRows };
+                if (request.body.menuId === '6ad81c871f280486bb45ac5b') return { list: [...records.values()].filter(row => row.usageEventKey
+                    && request.body.filter.every(item => row[item.enCode] === item.value)) };
                 return { list: request.body.menuId === '6ad81c871f280486bb45ac4b' ? f.rows : [] };
+            }
+            if (request.path.endsWith('/form/update')) {
+                expect(request.method).toBe('PUT');
+                Object.assign(records.get(request.body._id), JSON.parse(request.body.data));
+                return request.body._id;
+            }
             if (request.path.endsWith('/form/create')) {
                 if (failRelation && request.body.menuId === '6ad81c871f280486bb45ac45') {
                     failRelation = false;
@@ -92,13 +106,15 @@ async function setup() {
                 videoCalls++;
                 return Response.json({ id: 'task-id' });
             }
-            return Response.json({ status: 'succeeded', content: { video_url: 'https://result.tos-cn-beijing.volces.com/result.mp4' } });
+            return Response.json({ status: 'succeeded', usage: { completion_tokens: 144512, total_tokens: 144512 },
+                resolution: '480p', generate_audio: true, service_tier: 'default',
+                content: { video_url: 'https://result.tos-cn-beijing.volces.com/result.mp4' } });
         }
         return new Response(Buffer.from('0000ftypisom-video-bytes'), { headers: { 'content-type': 'video/mp4' } });
     });
     const config = { platformURL: 'https://platform.example', tenantId: f.requirement._meta.tenantId, stateDirectory: directory,
         imageModel: 'gpt-image-2.5', imageKeyRef: 'GPT_IMAGE_API_KEY', arkKeyRef: 'ARK_API_KEY' };
-    const runtime = () => createHarnessMediaRuntime(config, auth, async (key) => key === 'ARK_API_KEY' ? 'ark-key' : 'gpt-key', async () => ({ width: 1024, height: 1024 }), provider);
+    const runtime = (billing) => createHarnessMediaRuntime(config, auth, async (key) => key === 'ARK_API_KEY' ? 'ark-key' : 'gpt-key', async () => ({ width: 1024, height: 1024 }), provider, billing);
     const input = { projectId: f.project._id, planId: f.plan._id, spaceId: f.project.spaceId, requestId: 'request-test-001' };
     return { ...f, config, auth, provider, records, runtime, input, batchId,
         failNextRelation() { failRelation = true; }, denyWrites() { denyWrite = true; },
@@ -133,7 +149,8 @@ it('enforces table writes and current project scope before a paid request', asyn
 it('submits official 2.5 reference tasks, uploads completed videos, and restores platform results without another paid request', async () => {
     const f = await setup();
     const request = { ...f.input, batchId: f.batchId };
-    const runtime = f.runtime();
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const runtime = f.runtime(billing);
     const task = await runtime.run('video/tasks', request);
     expect(task.status).toBe('queued');
     const body = JSON.parse(f.provider.mock.calls.find(([, init]) => init?.method === 'POST')[1].body);
@@ -146,9 +163,30 @@ it('submits official 2.5 reference tasks, uploads completed videos, and restores
     expect(saved.status).toBe('succeeded');
     expect(saved.videoRefId).toHaveLength(24);
     expect(saved.videoUrl).toContain('platform.example/api/file/');
+    expect(saved.usage).toEqual({ completion_tokens: 144512, total_tokens: 144512 });
+    expect(saved.billingParameters).toMatchObject({ resolution: '480p', inputVideoMode: 'none', audioMode: 'enabled' });
     const restored = await f.runtime().run('video/list', f.input);
     expect(restored[0].videoRefId).toBe(saved.videoRefId);
+    expect(restored[0].usage.completion_tokens).toBe(144512);
     expect(f.counts()).toEqual({ imageCalls: 0, videoCalls: 1, uploads: 1 });
+    await runtime.run('video/refresh', request);
+    const usage = [...f.records.values()].filter(row => row.usageEventKey);
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({ videoOutputTokens: 144512, customerChargeMicros: '14451200', deliveryStatus: 'delivered' });
+});
+
+it('automatically stores synchronous image usage after upload and updates the same low-code row on recovery', async () => {
+    const f = await setup();
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const runtime = f.runtime(billing);
+    const request = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
+    await runtime.run('images/generate', request);
+    await runtime.run('images/generate', request);
+    const usage = [...f.records.values()].filter(row => row.usageEventKey);
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({ scenario: 'image', imageCount: 1, customerChargeMicros: '2000000',
+        usageStatus: 'reported', chargeStatus: 'ready', deliveryStatus: 'delivered' });
+    expect(f.counts().imageCalls).toBe(1);
 });
 it('waits for a started generation to finish saving when the plugin is disposed', async () => {
     const f = await setup();
@@ -258,7 +296,8 @@ it('refreshes scoped task ID arrays and uploads each completed image without wai
             await release.promise;
         return Response.json({ id: url.split('/').at(-1), status: url.endsWith('img_batch_2') ? 'pending' : 'completed' });
     });
-    const runtime = f.runtime();
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const runtime = f.runtime(billing);
     const requests = [1, 2].map(index => ({ ...f.input, requestId: `batch-request-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] }));
     await Promise.all(requests.map(input => runtime.run('images/tasks', input)));
     const batch = runtime.run('images/refresh', { ...f.input, taskIds: ['img_batch_1', 'img_batch_2'] });
@@ -271,6 +310,10 @@ it('refreshes scoped task ID arrays and uploads each completed image without wai
     await expect(runtime.run('images/refresh', { ...f.input, taskIds: ['img_batch_2', 'img_other_project'] })).rejects.toThrow('任务');
     expect(f.provider.mock.calls.length).toBe(before);
     expect(created).toBe(2);
+    const usage = [...f.records.values()].filter(row => row.usageEventKey);
+    expect(usage).toHaveLength(2);
+    expect(usage.find(row => row.requestId === result[0].requestId)).toMatchObject({ imageCount: 1, customerChargeMicros: '2000000' });
+    expect(usage.find(row => row.requestId === result[1].requestId)).toMatchObject({ usageStatus: 'pending', chargeStatus: 'pending' });
 });
 
 it('reports one failed refresh without discarding another uploaded image', async () => {
@@ -286,11 +329,12 @@ it('reports one failed refresh without discarding another uploaded image', async
         return Response.json({ id: url.split('/').at(-1), status: 'completed' });
     });
     const runtime = f.runtime();
-    await Promise.all([1, 2].map(index => runtime.run('images/tasks', { ...f.input, requestId: `partial-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] })));
+    const submitted = await Promise.all([1, 2].map(index => runtime.run('images/tasks', { ...f.input, requestId: `partial-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] })));
     const result = await runtime.run('images/refresh', { ...f.input, taskIds: ['img_partial_1', 'img_partial_2'] });
     expect(result[0].status).toBe('succeeded');
-    expect(result[1]).toMatchObject({ requestId: 'partial-2', taskId: 'img_partial_2', status: 'refresh_failed', error: 'provider unavailable' });
-    expect((await runtime.run('images/list', f.input)).find(task => task.requestId === 'partial-2').status).toBe('pending');
+    const failedRequest = submitted.find(task => task.taskId === 'img_partial_2').requestId;
+    expect(result[1]).toMatchObject({ requestId: failedRequest, taskId: 'img_partial_2', status: 'refresh_failed', error: 'provider unavailable' });
+    expect((await runtime.run('images/list', f.input)).find(task => task.requestId === failedRequest).status).toBe('pending');
     expect(created).toBe(2);
 });
 

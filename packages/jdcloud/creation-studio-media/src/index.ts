@@ -16,6 +16,9 @@ export interface Config {
   imageRetryLimit: number
   imageKeyRef: string
   arkKeyRef: string
+  billingWriterKeyRef: string
+  jimengAccessKeyRef: string
+  jimengSecretKeyRef: string
 }
 
 export const name = media.name

@@ -5,6 +5,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import z from '@deepseek-ai/schemastery';
 import { createHarnessMediaRuntime } from './runtime.mjs';
+import { createBillingRecorder } from './billing-recorder.mjs';
 export const name = 'creation-studio-media';
 export const inject = ['attachments', 'credentials', 'jdcloudAuthController', 'tools', 'webServer'];
 export const Config = z.object({
@@ -15,9 +16,12 @@ export const Config = z.object({
     imageRetryLimit: z.natural().default(2),
     imageKeyRef: z.string().default('GPT_IMAGE_API_KEY'),
     arkKeyRef: z.string().default('ARK_API_KEY'),
+    billingWriterKeyRef: z.string().default('CREATION_STUDIO_BILLING_WRITER_TOKEN'),
+    jimengAccessKeyRef: z.string().default('JIMENG_ACCESS_KEY_ID'),
+    jimengSecretKeyRef: z.string().default('JIMENG_SECRET_ACCESS_KEY'),
 });
 const prefix = '/api/external/v1/creation-studio/media/';
-const operations = ['config', 'images/generate', 'images/tasks', 'images/refresh', 'images/list', 'video/tasks', 'video/refresh', 'video/list'];
+const operations = ['config', 'images/generate', 'images/tasks', 'images/refresh', 'images/list', 'video/tasks', 'video/refresh', 'video/list', 'billing/list', 'billing/sync', 'white-background/tasks', 'white-background/refresh', 'white-background/list'];
 /** 工具只能操作本轮真实用户消息绑定的项目，工具结果不能重绑定项目上下文。 */
 function assertProjectTurn(exec, args, tenantId) {
     const event = exec.agent?.session.snapshotEvents().findLast((event) => event.type === 'user/message' && event.data.source?.kind === 'user');
@@ -46,12 +50,37 @@ export function apply(ctx, config) {
         || !/^[a-f0-9]{24}$/iu.test(config.tenantId)) {
         throw new Error('媒体插件平台地址或租户配置无效。');
     }
-    const runtime = createHarnessMediaRuntime({ ...config, stateDirectory: resolve(config.stateDirectory) }, ctx.jdcloudAuthController, async (ref) => (await ctx.credentials.resolve(credentialRef(ref)))?.value || '', async (bytes, mediaType) => {
+    const keys = async (ref) => (await ctx.credentials.resolve(credentialRef(ref)))?.value || '';
+    const billing = createBillingRecorder(config, ctx.jdcloudAuthController, keys);
+    const pending = new Set();
+    const observe = (operation) => {
+        const task = operation.catch(error => { ctx.logger.warn('影子计量待恢复：%s', error.message); }).finally(() => pending.delete(task));
+        pending.add(task);
+    };
+    ctx.on('agent/pre-step', async ({ agent, turn }, next) => {
+        const decision = await next();
+        if (decision.kind !== 'reject') {
+            const parent = agent.session.header.parentSession ? ctx.get('agents')?.get(agent.session.header.parentSession)?.session : undefined;
+            await billing.bind(agent.session, decision.messages, parent, turn);
+        }
+        return decision;
+    });
+    ctx.on('session/event', (session, event) => observe(billing.capture(session, event)));
+    ctx.on('agent/turn-stopping', async ({ agent }) => {
+        // 重读本次已落盘事件，恢复因进程内通知失败而未完成的计量；固定事件键去重。
+        try {
+            for (const event of agent.session.snapshotEvents()) await billing.capture(agent.session, event);
+            // 补同步由插件持有到完成，不延迟本轮回复，也不重新发起模型请求。
+            observe(billing.recover(agent.session));
+        } catch (error) { ctx.logger.warn('影子计量待恢复：%s', error.message); }
+    });
+    ctx.effect(() => async () => { await Promise.allSettled([...pending]); await billing.close(); }, 'creation-studio-media:billing');
+    const runtime = createHarnessMediaRuntime({ ...config, stateDirectory: resolve(config.stateDirectory) }, ctx.jdcloudAuthController, keys, async (bytes, mediaType) => {
         // 复用 Harness 的真实图片解码与尺寸核验，入库仍上传原始生成字节。
         const image = await ctx.attachments.saveImage({ data: bytes, mediaType });
         const dimensions = image.originalDimensions ?? image;
         return { width: dimensions.width, height: dimensions.height };
-    });
+    }, fetch, billing);
     ctx.effect(() => () => runtime.close(), 'creation-studio-media:pending-operations');
     for (const operation of operations) {
         ctx.effect(() => ctx.webServer.register({

@@ -128,6 +128,8 @@ export function createSeedanceService(env, transport = fetch) {
 		error: task.error,
 		createdAt: task.createdAt,
 		duration: task.duration,
+		usage: task.usage,
+		billingParameters: task.billingParameters,
 		...(task.storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt: task.storyboardConfirmedAt })
 	});
 	/** 每张图从当前平台引用读取，认证头仅发送给固定平台，不将私有URL交给方舟拉取。 */
@@ -310,6 +312,8 @@ export function createSeedanceService(env, transport = fetch) {
 			status: "submitting",
 			createdAt: (/* @__PURE__ */ new Date()).toISOString(),
 			duration,
+			billingParameters: { resolution: generation.resolution, audioMode: generation.generateAudio ? "enabled" : "disabled",
+				inputVideoMode: "none", serviceTier: "default" },
 			storyboardConfirmedAt: Number(stamps.storyboard.at)
 		};
 		await mkdir(directory, { recursive: true });
@@ -349,7 +353,8 @@ export function createSeedanceService(env, transport = fetch) {
 		await authorize(token, input);
 		const task = await readTask(input, input.requestId);
 		if (!task) throw new ApiError("没有找到当前项目的生成任务。", 404);
-		if (!task.id || terminal.has(task.status)) return view(task);
+		// 旧成功任务缺usage时允许只读补取原回执；不新建供应商任务。
+		if (!task.id || (terminal.has(task.status) && !(task.status === "succeeded" && task.usage === undefined))) return view(task);
 		if (!apiKey) throw new ApiError("视频服务尚未配置 ARK_API_KEY。", 503);
 		const response = await transport(`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/${encodeURIComponent(task.id)}`, {
 			headers: { Authorization: `Bearer ${apiKey}` },
@@ -359,6 +364,12 @@ export function createSeedanceService(env, transport = fetch) {
 		if (!response.ok) throw new ApiError(data.error?.message || "查询方舟任务失败。", 502);
 		task.status = data.status;
 		task.error = data.error?.message || "";
+		// 用量在下载之前落盘；total_tokens仅核对，不与completion_tokens重复相加。
+		if (data.usage !== undefined) task.usage = data.usage;
+		task.billingParameters = { ...task.billingParameters,
+			...(data.resolution ? { resolution: data.resolution } : {}),
+			...(data.service_tier ? { serviceTier: data.service_tier } : {}),
+			...(typeof data.generate_audio === "boolean" ? { audioMode: data.generate_audio ? "enabled" : "disabled" } : {}) };
 		if (data.status === "succeeded") task.videoUrl = data.content?.video_url || "";
 		await store(input, task);
 		return view(task);
