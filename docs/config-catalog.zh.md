@@ -721,6 +721,49 @@ export interface Config {
 
 来源： [`packages/extensions/cordis-host-runner/src/index.ts:93`](../packages/extensions/cordis-host-runner/src/index.ts)
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-creation-studio-media -->
+<a id="deepseek-aidsh-creation-studio-media"></a>
+
+## `@deepseek-ai/dsh-creation-studio-media`
+
+- `inject`: `attachments` · `credentials` · `jdcloudAuthController` · `tools` · `webServer`
+- `source`: [`packages/jdcloud/creation-studio-media/src/index.ts:12`](../packages/jdcloud/creation-studio-media/src/index.ts)
+
+```ts config-catalog
+/** Fixed platform, persistent receipts, and Host-only credential references. */
+export interface Config {
+  /** Fixed HTTPS low-code platform origin. */
+  platformURL: string
+  /** Tenant owning the project, account pool, and usage tables. */
+  tenantId: string
+  /** Private directory exclusively owned by one Host for tasks, reservations, and uploads. */
+  stateDirectory: string
+  /** Default Seedream model when a new request omits model selection. */
+  imageModel: string
+  /** Automatic replacement budget for already-persisted legacy GPT tasks. */
+  imageRetryLimit: number
+  /** Host credential reference used only to recover legacy GPT tasks. */
+  imageKeyRef: string
+  /** Single Ark credential used when the private account-pool reader is absent. */
+  arkKeyRef: string
+  /** Administrator-only table containing numbered Ark and Jimeng credentials. */
+  accountPoolTableId: string
+  /** Optional legacy token reference; password login takes priority when configured. */
+  accountPoolKeyRef: string
+  /** Host credential reference for the account-table service login name. */
+  accountPoolUsernameRef: string
+  /** Host credential reference for its password; expiry triggers one shared login and read retry. */
+  accountPoolPasswordRef: string
+  /** Optional restricted service credential for shadow usage synchronization. */
+  billingWriterKeyRef: string
+  /** Legacy Jimeng access-key reference used without a private pool reader. */
+  jimengAccessKeyRef: string
+  /** Legacy Jimeng secret-key reference used without a private pool reader. */
+  jimengSecretKeyRef: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-creation-studio-media -->
+
 <a id="deepseek-aidsh-credentials-local"></a>
 
 ## `@deepseek-ai/dsh-credentials-local`

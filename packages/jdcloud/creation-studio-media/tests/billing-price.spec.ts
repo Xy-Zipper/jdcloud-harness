@@ -10,6 +10,15 @@ it('prices 144512 video tokens exactly once and waits for delivery', () => {
   expect(calculateShadowCharge(video, [price]).customerChargeMicros).toBe('14451200')
   expect(calculateShadowCharge({ ...video, delivered: false }, [price]).chargeStatus).toBe('pending')
 })
+it('selects the actual image pixel tier and charges only references beyond the free first image', () => {
+  const row = { ...video, scenario: 'image', modelKey: 'seedream', imageCount: 1, imageInputCount: 3, parameters: { imagePixels: 2610000 } }
+  const imagePrice = { ...price, scenario: 'image', modelKey: 'seedream', billingUnit: 'image', imagePerUnitYuan: '0.3', imageInputPerUnitYuan: '0.02', imageFreeInputCount: 1, imageMinPixels: 0, imageMaxPixels: 2610000 }
+  const high = { ...imagePrice, imageMinPixels: 2610001, imageMaxPixels: 4624220, imagePerUnitYuan: '0.6' }
+  expect(calculateShadowCharge(row, [imagePrice, high]).customerChargeMicros).toBe('340000')
+  expect(calculateShadowCharge({ ...row, parameters: { imagePixels: 2610001 } }, [imagePrice, high]).customerChargeMicros).toBe('640000')
+  expect(calculateShadowCharge({ ...row, imageInputCount: undefined }, [imagePrice, high]).chargeStatus).toBe('pending')
+  expect(calculateShadowCharge({ ...row, status: 'failed' }, [imagePrice, high]).customerChargeMicros).toBe('0')
+})
 it('does not infer free prices, select an overlapping version, or bill estimated usage', () => {
   for (const prices of [[], [price, price], [{ ...price, videoPerMillionYuan: '' }]])
     expect(calculateShadowCharge(video, prices).customerChargeMicros).toBeUndefined()

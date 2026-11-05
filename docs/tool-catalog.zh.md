@@ -76,6 +76,14 @@
       "type": "string",
       "description": "当前项目团队空间的完整记录 ID。"
     },
+    "model": {
+      "type": "string",
+      "description": "用户选择的即梦模型；未指定时使用 Seedream 5.0 pro。",
+      "enum": [
+        "doubao-seedream-5-0-pro-260628",
+        "doubao-seedream-5-0-flash-260915"
+      ]
+    },
     "requestId": {
       "type": "string",
       "description": "稳定请求编号；重试必须沿用，不重新付费。"
@@ -88,13 +96,34 @@
       "type": "string",
       "enum": [
         "1024x1024",
+        "1536x1536",
+        "2048x2048",
+        "864x1152",
+        "1344x1792",
+        "1776x2368",
+        "1536x864",
+        "2048x1152",
+        "2816x1584",
+        "1152x864",
+        "1792x1344",
+        "2368x1776",
+        "864x1536",
+        "1152x2048",
+        "1584x2816",
         "1024x1536",
-        "1536x1024"
+        "1248x1872",
+        "1664x2496",
+        "1536x1024",
+        "1872x1248",
+        "2496x1664",
+        "1792x768",
+        "2352x1008",
+        "3136x1344"
       ]
     },
     "referenceIds": {
       "type": "array",
-      "description": "当前项目真实图片引用 ID，按图1、图2顺序。",
+      "description": "最多10张当前项目真实图片引用 ID，按图1、图2顺序。",
       "items": {
         "type": "string"
       }
@@ -116,7 +145,7 @@
 
 ### `creation_studio_image_task`
 
-提交、查询或列出 GPT Image 2.5 异步图片任务；多图先逐个提交，完成后上传项目素材，仍须人工确认。
+报价、提交、查询或列出即梦 Seedream 5.0 图片任务；生成前报价，完成后返回实际积分，仍须人工确认。
 
 ```json
 {
@@ -139,7 +168,8 @@
       "enum": [
         "submit",
         "refresh",
-        "list"
+        "list",
+        "quote"
       ]
     },
     "requestId": {
@@ -150,12 +180,41 @@
       "type": "string",
       "description": "提交必填，说明参考图片的职责和需要保持的产品外观。"
     },
+    "model": {
+      "type": "string",
+      "description": "用户选择的即梦模型；未指定时使用 Seedream 5.0 pro。",
+      "enum": [
+        "doubao-seedream-5-0-pro-260628",
+        "doubao-seedream-5-0-flash-260915"
+      ]
+    },
     "size": {
       "type": "string",
       "enum": [
         "1024x1024",
+        "1536x1536",
+        "2048x2048",
+        "864x1152",
+        "1344x1792",
+        "1776x2368",
+        "1536x864",
+        "2048x1152",
+        "2816x1584",
+        "1152x864",
+        "1792x1344",
+        "2368x1776",
+        "864x1536",
+        "1152x2048",
+        "1584x2816",
         "1024x1536",
-        "1536x1024"
+        "1248x1872",
+        "1664x2496",
+        "1536x1024",
+        "1872x1248",
+        "2496x1664",
+        "1792x768",
+        "2352x1008",
+        "3136x1344"
       ]
     },
     "referenceIds": {
@@ -225,7 +284,7 @@
 
 源码： [`packages/jdcloud/creation-studio-media/src/index.ts`](../packages/jdcloud/creation-studio-media/src/index.ts)
 
-JDCloud bundle 随 Harness 部署媒体执行，Skill 单独安装。工具在付费生成或上传前重读项目上下文、权限和确认链。
+The JDCloud bundle ships media execution; Skills are installed separately. Tool execution rechecks project context, permissions, and confirmation before paid generation or uploads.
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 

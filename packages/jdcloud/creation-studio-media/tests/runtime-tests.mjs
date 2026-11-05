@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { readFile, rm, mkdtemp } from 'node:fs/promises';
+import { readFile, rm, mkdtemp, mkdir, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 // The migrated JavaScript is loaded from source; URL imports avoid built declarations in source tests.
 const { createHarnessMediaRuntime } = await import(new URL('../src/runtime.mjs', import.meta.url).href);
@@ -48,7 +49,7 @@ async function setup() {
         [ref.materialId, { _id: ref.materialId, spaceId: f.project.spaceId, ...ref, library: 'project', sourceKind: 'uploaded', revision: 1 }],
     ]);
     const priceRows = [
-        { scenario: 'image', provider: 'gpt-image', modelKey: 'gpt-image-2.5', billingUnit: 'image', imagePerUnitYuan: '2' },
+        { scenario: 'image', provider: 'ark', modelKey: 'doubao-seedream-5-0-pro-260628', billingUnit: 'image', imagePerUnitYuan: '2' },
         { scenario: 'video', provider: 'ark', modelKey: 'doubao-seedance-2-5-260628', billingUnit: 'million_tokens', videoPerMillionYuan: '100' },
     ].map((row, index) => ({ ...row, _id: String(index).repeat(24), pricingStatus: 'published', currency: 'CNY' }));
     let counter = 0, imageCalls = 0, videoCalls = 0, uploads = 0;
@@ -97,7 +98,7 @@ async function setup() {
     records.set(f.project.spaceId, { _id: f.project.spaceId, ownerUserId: 'owner', status: 'active' });
     const provider = vi.fn(async (url, init = {}) => {
         expect(String(init.headers?.Authorization || '')).not.toContain('platform');
-        if (url.startsWith('https://api.kbsfdxc.net')) {
+        if (url.endsWith('/images/generations')) {
             imageCalls++;
             return Response.json({ data: [{ b64_json: png }] });
         }
@@ -113,12 +114,35 @@ async function setup() {
         return new Response(Buffer.from('0000ftypisom-video-bytes'), { headers: { 'content-type': 'video/mp4' } });
     });
     const config = { platformURL: 'https://platform.example', tenantId: f.requirement._meta.tenantId, stateDirectory: directory,
-        imageModel: 'gpt-image-2.5', imageKeyRef: 'GPT_IMAGE_API_KEY', arkKeyRef: 'ARK_API_KEY' };
-    const runtime = (billing) => createHarnessMediaRuntime(config, auth, async (key) => key === 'ARK_API_KEY' ? 'ark-key' : 'gpt-key', async () => ({ width: 1024, height: 1024 }), provider, billing);
+        imageModel: 'doubao-seedream-5-0-pro-260628', imageKeyRef: 'GPT_IMAGE_API_KEY', arkKeyRef: 'ARK_API_KEY' };
+    const runtime = (billing, poolRows) => createHarnessMediaRuntime(config, auth, async (key) =>
+        key === 'ARK_API_KEY' ? 'ark-key' : key === 'GPT_IMAGE_API_KEY' ? 'gpt-key'
+            : key === 'CREATION_STUDIO_ACCOUNT_POOL_TOKEN' && poolRows ? 'reader-token' : '',
+        async () => ({ width: 1024, height: 1024 }), async (url, init = {}) => {
+            if (poolRows && url.startsWith('https://platform.example')) {
+                expect(init.headers.Authorization).toBe('reader-token');
+                return Response.json({ code: 200, data: init.method === 'GET'
+                    ? { userInfo: { corpId: config.tenantId } } : { list: poolRows } });
+            }
+            return provider(url, init);
+        }, billing);
     const input = { projectId: f.project._id, planId: f.plan._id, spaceId: f.project.spaceId, requestId: 'request-test-001' };
     return { ...f, config, auth, provider, records, runtime, input, batchId,
         failNextRelation() { failRelation = true; }, denyWrites() { denyWrite = true; },
         counts: () => ({ imageCalls, videoCalls, uploads }) };
+}
+// Receipts written by the released GPT executor remain readable after the provider switch.
+async function seedLegacy(f, input) {
+    const source = { requestId: input.requestId, model: 'gpt-image-2.5', prompt: input.prompt,
+        size: input.size, referenceIds: input.referenceIds, createdAt: new Date().toISOString(), confirmedAt: '' };
+    const data = await (await f.provider('https://api.kbsfdxc.net/v1/images/generations', {
+        method: 'POST', headers: { Authorization: 'Bearer gpt-key' }, body: JSON.stringify({ model: source.model, async: true, n: 1 }),
+    })).json();
+    const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    await mkdir(join(f.config.stateDirectory, 'images'), { recursive: true });
+    await writeFile(join(f.config.stateDirectory, 'images', `${hash([f.config.tenantId, input.spaceId, input.projectId, input.planId, input.requestId])}.json`),
+        JSON.stringify({ ...input, tenantId: f.config.tenantId, taskId: data.id, status: 'pending', source,
+            fingerprint: hash([input.prompt, input.size, input.referenceIds]) }));
 }
 it('returns only uploaded image references, keeps pending review, and resumes partial uploads across Host restarts', async () => {
     const f = await setup();
@@ -145,6 +169,14 @@ it('enforces table writes and current project scope before a paid request', asyn
     f.denyWrites();
     await expect(f.runtime().run('images/generate', request)).rejects.toThrow('权限');
     expect(f.counts().imageCalls).toBe(0);
+});
+it('quotes Seedream using the actual request without reserving an account or invoking the provider', async () => {
+    const f = await setup();
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const quote = await f.runtime(billing).run('images/quote', { ...f.input, prompt: 'scene', size: '1536x864', referenceIds: [] });
+    expect(quote).toMatchObject({ estimated: true, estimatedCredits: '2', size: '1536x864', referenceCount: 0 });
+    expect(f.provider).not.toHaveBeenCalled();
+    expect(f.counts().uploads).toBe(0);
 });
 it('submits official 2.5 reference tasks, uploads completed videos, and restores platform results without another paid request', async () => {
     const f = await setup();
@@ -187,6 +219,20 @@ it('automatically stores synchronous image usage after upload and updates the sa
     expect(usage[0]).toMatchObject({ scenario: 'image', imageCount: 1, customerChargeMicros: '2000000',
         usageStatus: 'reported', chargeStatus: 'ready', deliveryStatus: 'delivered' });
     expect(f.counts().imageCalls).toBe(1);
+});
+it('recovers a legacy synchronous image without another generation or changing its recorded provider', async () => {
+    const f = await setup();
+    const input = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
+    const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const source = { ...input, model: 'gpt-image-2.5', createdAt: new Date().toISOString(), confirmedAt: '' };
+    await mkdir(join(f.config.stateDirectory, 'images'), { recursive: true });
+    await writeFile(join(f.config.stateDirectory, 'images', `${hash([f.config.tenantId, input.spaceId, input.projectId, input.planId, input.requestId])}.json`),
+        JSON.stringify({ fingerprint: hash([input.prompt, input.size, input.referenceIds]), status: 'succeeded',
+            result: { b64: png, mime: 'image/png', source } }));
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    await f.runtime(billing).run('images/generate', input);
+    expect(f.provider).not.toHaveBeenCalled();
+    expect([...f.records.values()].find(row => row.usageEventKey)).toMatchObject({ provider: 'gpt-image', modelKey: 'gpt-image-2.5' });
 });
 it('waits for a started generation to finish saving when the plugin is disposed', async () => {
     const f = await setup();
@@ -237,83 +283,64 @@ it('stops late media uploads after account changes and recovers the paid result 
     expect(f.provider).toHaveBeenCalledTimes(1);
 });
 
-it('submits multiple asynchronous reference edits before completion and restores each uploaded result', async () => {
+it('submits multiple Seedream requests before completion and restores each uploaded result', async () => {
     const f = await setup();
+    const release = Promise.withResolvers();
     let created = 0;
-    let completed = false;
-    f.provider.mockImplementation(async (url, init = {}) => {
-        if (init.method === 'POST') {
-            expect(url).toBe('https://api.kbsfdxc.net/v1/images/edits');
-            const body = JSON.parse(Buffer.from(init.body).toString());
-            expect(body).toMatchObject({ model: 'gpt-image-2.5', async: true, n: 1, response_format: 'url' });
-            expect(body.images).toEqual([`https://platform.example/api/file/previewImage/${f.config.tenantId}/${f.imageReferences[0].fileId}`]);
-            expect(body).not.toHaveProperty('mask');
-            expect(init.headers['Content-Type']).toBeUndefined();
-            expect(init.headers.Authorization).toBe('Bearer gpt-key');
-            return Response.json({ id: `img_${++created}`, status: 'pending' });
-        }
-        if (url.endsWith('/content'))
-            return new Response(null, { status: 302, headers: { location: 'https://image.example/result.png' } });
-        if (url.startsWith('https://image.example/')) {
-            expect(init.headers?.Authorization).toBeUndefined();
-            return new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
-        }
-        return Response.json({ id: url.split('/').at(-1), status: completed ? 'completed' : 'pending' });
+    f.provider.mockImplementation(async (url, init) => {
+        expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations');
+        const body = JSON.parse(init.body);
+        expect(body).toMatchObject({ model: 'doubao-seedream-5-0-pro-260628', response_format: 'b64_json' });
+        expect(body.image).toEqual([`https://platform.example/api/file/previewImage/${f.config.tenantId}/${f.imageReferences[0].fileId}`]);
+        expect(init.headers.Authorization).toBe('Bearer ark-key');
+        created++;
+        await release.promise;
+        return Response.json({ data: [{ b64_json: png }] });
     });
-    const requests = [1, 2].map(index => ({
-        ...f.input, requestId: `async-image-${index}`, prompt: `product view ${index}`,
-        referenceIds: [f.imageReferences[0].relationId], size: '1024x1024',
-    }));
+    const requests = [1, 2].map(index => ({ ...f.input, requestId: `seedream-${index}`, prompt: `view ${index}`,
+        referenceIds: [f.imageReferences[0].relationId], size: '1024x1024' }));
     const runtime = f.runtime();
     const tasks = await Promise.all(requests.map(input => runtime.run('images/tasks', input)));
-    expect(created).toBe(2);
+    await vi.waitFor(() => expect(created).toBe(2));
     expect(tasks.map(task => task.status)).toEqual(['pending', 'pending']);
-    expect(tasks).toEqual(JSON.parse(JSON.stringify(tasks)));
-    expect(JSON.stringify(tasks)).not.toContain('b64');
+    expect(tasks.every(task => task.providerAccountRef === 'ENV-ARK')).toBe(true);
+    expect(JSON.stringify(tasks)).not.toContain('ark-key');
     expect((await runtime.run('images/refresh', requests[0])).status).toBe('pending');
-    completed = true;
-    const result = await f.runtime().run('images/refresh', requests[0]);
-    expect(result).toMatchObject({ status: 'succeeded', result: { needsConfirmation: true, generation: { confirmedAt: '' } } });
-    expect(result.result.relationId).toHaveLength(24);
-    const restored = await f.runtime().run('images/list', f.input);
-    expect(restored.find(task => task.requestId === requests[0].requestId).result.relationId).toBe(result.result.relationId);
-    const second = await f.runtime().run('images/refresh', requests[1]);
-    expect(second.result.relationId).not.toBe(result.result.relationId);
-    expect(JSON.stringify(restored)).not.toContain('b64');
+    release.resolve();
+    await runtime.close();
+    const restored = f.runtime();
+    const first = await restored.run('images/refresh', requests[0]);
+    const second = await restored.run('images/refresh', requests[1]);
+    expect(first).toMatchObject({ status: 'succeeded', result: { needsConfirmation: true, generation: { confirmedAt: '', providerAccountRef: 'ENV-ARK' } } });
+    expect(first.result.relationId).not.toBe(second.result.relationId);
+    expect((await restored.run('images/list', f.input)).filter(task => task.result)).toHaveLength(2);
     expect(created).toBe(2);
 });
 
-it('refreshes scoped task ID arrays and uploads each completed image without waiting for other provider queries', async () => {
+it('uploads a completed Seedream image while another generation remains pending and rejects foreign task IDs', async () => {
     const f = await setup();
-    let created = 0;
     const release = Promise.withResolvers();
-    f.provider.mockImplementation(async (url, init = {}) => {
-        if (init.method === 'POST')
-            return Response.json({ id: `img_batch_${++created}`, status: 'pending' });
-        if (url.endsWith('/content'))
-            return new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
-        if (url.endsWith('img_batch_2'))
-            await release.promise;
-        return Response.json({ id: url.split('/').at(-1), status: url.endsWith('img_batch_2') ? 'pending' : 'completed' });
+    let created = 0;
+    f.provider.mockImplementation(async () => {
+        if (++created === 2) await release.promise;
+        return Response.json({ data: [{ b64_json: png }] });
     });
     const billing = createBillingRecorder(f.config, f.auth, async () => '');
     const runtime = f.runtime(billing);
     const requests = [1, 2].map(index => ({ ...f.input, requestId: `batch-request-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] }));
-    await Promise.all(requests.map(input => runtime.run('images/tasks', input)));
-    const batch = runtime.run('images/refresh', { ...f.input, taskIds: ['img_batch_1', 'img_batch_2'] });
-    await vi.waitFor(() => expect(f.counts().uploads).toBe(1));
-    release.resolve();
-    const result = await batch;
-    expect(result.map(task => task.status)).toEqual(['succeeded', 'pending']);
-    expect(result[0].result.relationId).toHaveLength(24);
+    const tasks = await Promise.all(requests.map(input => runtime.run('images/tasks', input)));
+    await vi.waitFor(async () => expect((await runtime.run('images/list', f.input)).some(task => task.status === 'upload_pending')).toBe(true));
+    const result = await runtime.run('images/refresh', { ...f.input, taskIds: tasks.map(task => task.taskId) });
+    expect(result.map(task => task.status).sort()).toEqual(['pending', 'succeeded']);
     const before = f.provider.mock.calls.length;
-    await expect(runtime.run('images/refresh', { ...f.input, taskIds: ['img_batch_2', 'img_other_project'] })).rejects.toThrow('任务');
+    await expect(runtime.run('images/refresh', { ...f.input, taskIds: [tasks[1].taskId, 'foreign-task'] })).rejects.toThrow('任务');
     expect(f.provider.mock.calls.length).toBe(before);
-    expect(created).toBe(2);
     const usage = [...f.records.values()].filter(row => row.usageEventKey);
     expect(usage).toHaveLength(2);
-    expect(usage.find(row => row.requestId === result[0].requestId)).toMatchObject({ imageCount: 1, customerChargeMicros: '2000000' });
-    expect(usage.find(row => row.requestId === result[1].requestId)).toMatchObject({ usageStatus: 'pending', chargeStatus: 'pending' });
+    expect(usage.every(row => row.providerAccountRef === 'ENV-ARK')).toBe(true);
+    expect(usage.find(row => row.imageCount === 1).customerChargeMicros).toBe('2000000');
+    release.resolve();
+    await runtime.close();
 });
 
 it('reports one failed refresh without discarding another uploaded image', async () => {
@@ -329,7 +356,8 @@ it('reports one failed refresh without discarding another uploaded image', async
         return Response.json({ id: url.split('/').at(-1), status: 'completed' });
     });
     const runtime = f.runtime();
-    const submitted = await Promise.all([1, 2].map(index => runtime.run('images/tasks', { ...f.input, requestId: `partial-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] })));
+    await Promise.all([1, 2].map(index => seedLegacy(f, { ...f.input, requestId: `partial-${index}`, prompt: 'product', size: '1024x1024', referenceIds: [] })));
+    const submitted = await runtime.run('images/list', f.input);
     const result = await runtime.run('images/refresh', { ...f.input, taskIds: ['img_partial_1', 'img_partial_2'] });
     expect(result[0].status).toBe('succeeded');
     const failedRequest = submitted.find(task => task.taskId === 'img_partial_2').requestId;
@@ -364,7 +392,7 @@ it('retries only the explicit provider failure within the persisted budget and c
             error: fail ? 'image generation failed; please retry' : null });
     });
     const input = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
-    await f.runtime().run('images/tasks', input);
+    await seedLegacy(f, input);
     const retried = await f.runtime().run('images/refresh', input);
     expect(retried).toMatchObject({ status: 'pending', taskId: 'img_retry_2', retryCount: 1 });
     fail = false;
@@ -375,7 +403,7 @@ it('retries only the explicit provider failure within the persisted budget and c
     expect(f.counts().uploads).toBe(1);
 });
 
-it('stops automatic retry after two replacements, including after restarts and concurrent refreshes', async () => {
+it('stops automatic retry after four replacements, including after restarts and concurrent refreshes', async () => {
     const f = await setup();
     let created = 0;
     f.provider.mockImplementation(async (url, init = {}) => {
@@ -386,32 +414,36 @@ it('stops automatic retry after two replacements, including after restarts and c
         return Response.json({ id: url.split('/').at(-1), status: 'failed', error: 'image generation failed; please retry' });
     });
     const input = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
-    await f.runtime().run('images/tasks', input);
+    await seedLegacy(f, input);
     await Promise.all([f.runtime().run('images/refresh', input), f.runtime().run('images/refresh', input)]);
     expect(created).toBe(2);
     await f.runtime().run('images/refresh', input);
     expect(created).toBe(3);
-    expect(await f.runtime().run('images/refresh', input)).toMatchObject({ status: 'failed', retryCount: 2, error: 'image generation failed; please retry' });
+    expect(await f.runtime().run('images/refresh', input)).toMatchObject({ status: 'pending', retryCount: 3 });
+    expect(await f.runtime().run('images/refresh', input)).toMatchObject({ status: 'pending', retryCount: 4 });
+    expect(await f.runtime().run('images/refresh', input)).toMatchObject({ status: 'failed', retryCount: 4, error: 'image generation failed; please retry' });
     await f.runtime().run('images/refresh', input);
-    expect(created).toBe(3);
+    expect(created).toBe(5);
     expect(f.counts().uploads).toBe(0);
 });
 
-it('preserves explicit provider rejection as failed and does not retry auth errors or ambiguous replacements', async () => {
+it('preserves rejected and unknown Seedream outcomes without resubmitting', async () => {
     const f = await setup();
     const input = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
-    f.provider.mockResolvedValue(Response.json({ error: { message: 'your token is not authorized for any channel serving this model' } }, { status: 403 }));
-    expect(await f.runtime().run('images/tasks', input)).toMatchObject({ status: 'failed', errorCode: 'image/provider-rejected' });
-    await f.runtime().run('images/refresh', input);
+    f.provider.mockResolvedValue(Response.json({ error: { message: 'denied' } }, { status: 403 }));
+    const runtime = f.runtime();
+    await runtime.run('images/tasks', input);
+    await runtime.close();
+    expect(await f.runtime().run('images/refresh', input)).toMatchObject({ status: 'failed', errorCode: 'image/provider-rejected' });
     expect(f.provider).toHaveBeenCalledTimes(1);
-    const second = { ...input, requestId: 'retry-unknown-001' };
-    f.provider.mockResolvedValueOnce(Response.json({ id: 'img_unknown', status: 'pending' }))
-        .mockResolvedValueOnce(Response.json({ id: 'img_unknown', status: 'failed', error: 'image generation failed; please retry' }))
-        .mockRejectedValueOnce(new Error('connection lost'));
-    await f.runtime().run('images/tasks', second);
+    const second = { ...input, requestId: 'unknown-seedream-001' };
+    f.provider.mockRejectedValueOnce(new Error('connection lost'));
+    const another = f.runtime();
+    await another.run('images/tasks', second);
+    await another.close();
     expect((await f.runtime().run('images/refresh', second)).status).toBe('unknown');
-    await f.runtime().run('images/refresh', second);
-    expect(f.provider).toHaveBeenCalledTimes(4);
+    await f.runtime().run('images/tasks', second);
+    expect(f.provider).toHaveBeenCalledTimes(2);
 });
 
 it('respects a disabled retry budget and revoked write access before any paid replacement', async () => {
@@ -421,7 +453,7 @@ it('respects a disabled retry budget and revoked write access before any paid re
     f.provider.mockImplementation(async (url, init = {}) => init.method === 'POST'
         ? Response.json({ id: 'img_no_retry', status: 'pending' })
         : Response.json({ id: 'img_no_retry', status: 'failed', error: 'image generation failed; please retry' }));
-    await f.runtime().run('images/tasks', input);
+    await seedLegacy(f, input);
     expect((await f.runtime().run('images/refresh', input)).status).toBe('failed');
     expect(f.provider).toHaveBeenCalledTimes(2);
     f.config.imageRetryLimit = 2;
@@ -430,35 +462,28 @@ it('respects a disabled retry budget and revoked write access before any paid re
     expect(f.provider).toHaveBeenCalledTimes(2);
 });
 
-it('resumes an asynchronous image after upload failure without resubmitting and rejects changed request parameters', async () => {
+it('resumes Seedream upload without resubmission and rejects changing the model under the original request', async () => {
     const f = await setup();
-    let created = 0;
-    f.provider.mockImplementation(async (url, init = {}) => {
-        if (init.method === 'POST') {
-            expect(JSON.parse(init.body)).toMatchObject({ async: true, n: 1, model: 'gpt-image-2.5' });
-            created++;
-            return Response.json({ id: 'img_resume', status: 'pending' });
-        }
-        return url.endsWith('/content')
-            ? new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } })
-            : Response.json({ id: 'img_resume', status: 'completed' });
-    });
-    const request = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
-    await f.runtime().run('images/tasks', request);
-    await f.runtime().run('images/tasks', request);
+    const request = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024', model: 'doubao-seedream-5-0-flash-260915' };
+    const runtime = f.runtime();
+    await runtime.run('images/tasks', request);
+    await runtime.run('images/tasks', request);
+    await runtime.close();
     f.failNextRelation();
     expect((await f.runtime().run('images/refresh', request)).status).toBe('upload_failed');
     expect((await f.runtime().run('images/refresh', request)).status).toBe('succeeded');
-    await expect(f.runtime().run('images/tasks', { ...request, prompt: 'different' })).rejects.toThrow('其他参数');
-    expect(created).toBe(1);
+    await expect(f.runtime().run('images/tasks', { ...request, model: 'doubao-seedream-5-0-pro-260628' })).rejects.toThrow('其他参数');
+    expect(f.counts().imageCalls).toBe(1);
     expect(f.counts().uploads).toBe(1);
 });
 
-it('never resubmits an unknown image submission and does not download an uncompleted or failed task', async () => {
+it('never resubmits an unknown Seedream task after Host recovery', async () => {
     const f = await setup();
     const request = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
     f.provider.mockRejectedValue(new Error('submission timeout'));
-    expect((await f.runtime().run('images/tasks', request)).status).toBe('unknown');
+    const runtime = f.runtime();
+    await runtime.run('images/tasks', request);
+    await runtime.close();
     expect((await f.runtime().run('images/tasks', request)).status).toBe('unknown');
     expect((await f.runtime().run('images/refresh', request)).status).toBe('unknown');
     expect(f.provider).toHaveBeenCalledTimes(1);
@@ -469,7 +494,7 @@ it('keeps an accepted image receipt after failed or invalid provider status and 
     const f = await setup();
     const input = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
     f.provider.mockResolvedValueOnce(Response.json({ id: 'img_failure', status: 'pending' }));
-    await f.runtime().run('images/tasks', input);
+    await seedLegacy(f, input);
     f.provider.mockResolvedValueOnce(Response.json({ id: 'img_other', status: 'completed' }));
     await expect(f.runtime().run('images/refresh', input)).rejects.toThrow('未知状态');
     f.provider.mockResolvedValueOnce(Response.json({ id: 'img_failure', status: 'failed', error: { message: 'provider failed' } }));
@@ -478,4 +503,36 @@ it('keeps an accepted image receipt after failed or invalid provider status and 
     expect(f.provider).toHaveBeenCalledTimes(3);
     await expect(f.runtime().run('images/refresh', { ...input, projectId: 'd'.repeat(24) })).rejects.toThrow('项目');
     expect(f.counts().uploads).toBe(0);
+});
+
+it('shares pool capacity between images and videos and polls a disabled account with its original key', async () => {
+    const f = await setup();
+    const rows = [1, 2].map(index => ({ _id: String(index).repeat(24), accountCode: `ARK-${index}`,
+        provider: 'ark', models: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', 'doubao-seedance-2-5-260628'], scenarios: ['image', 'video'], enabled: 1, maxConcurrent: 1, apiKey: `pooled-key-${index}` }));
+    const release = Promise.withResolvers();
+    const original = f.provider.getMockImplementation();
+    f.provider.mockImplementation(async (url, init) => {
+        if (url.endsWith('/images/generations')) {
+            await release.promise;
+            return Response.json({ data: [{ b64_json: png }] });
+        }
+        return original(url, init);
+    });
+    const runtime = f.runtime(undefined, rows);
+    const image = await runtime.run('images/tasks', { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] });
+    const video = await runtime.run('video/tasks', { ...f.input, requestId: 'pooled-video', batchId: f.batchId });
+    expect(video.status).toBe('queued');
+    expect(video.providerAccountRef).not.toBe(image.providerAccountRef);
+    const account = rows.find(row => row.accountCode === video.providerAccountRef);
+    account.enabled = 0;
+    const result = await runtime.run('video/refresh', { ...f.input, requestId: 'pooled-video' });
+    expect(result.status).toBe('succeeded');
+    const queries = f.provider.mock.calls.filter(([url]) => url.includes('contents/generations/tasks'));
+    expect(queries.map(([, init]) => init.headers.Authorization)).toEqual([`Bearer ${account.apiKey}`, `Bearer ${account.apiKey}`]);
+    release.resolve();
+    await runtime.close();
+    const audits = await Promise.all((await readdir(join(f.config.stateDirectory, 'provider-calls'))).map(name => readFile(join(f.config.stateDirectory, 'provider-calls', name), 'utf8')));
+    expect(audits).toHaveLength(2);
+    expect(audits.join()).not.toContain('pooled-key-');
+    expect(audits.map(text => JSON.parse(text).initiatedByUserId)).toEqual(['owner', 'owner']);
 });

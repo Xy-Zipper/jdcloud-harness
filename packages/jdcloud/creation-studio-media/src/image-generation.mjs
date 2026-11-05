@@ -1,3 +1,5 @@
+/** Allowed explicit Seedream sizes retain three released dimensions for task recovery. */
+export const IMAGE_SIZES = ['1024x1024', '1536x1536', '2048x2048', '864x1152', '1344x1792', '1776x2368', '1536x864', '2048x1152', '2816x1584', '1152x864', '1792x1344', '2368x1776', '864x1536', '1152x2048', '1584x2816', '1024x1536', '1248x1872', '1664x2496', '1536x1024', '1872x1248', '2496x1664', '1792x768', '2352x1008', '3136x1344']
 export function imageGenerationSource(description) {
     try {
         const value = typeof description === 'string' ? JSON.parse(description) : description;
@@ -19,9 +21,10 @@ export function isImageGenerationRequest(value) {
         return false;
     const request = value;
     return typeof request.prompt === 'string' && Boolean(request.prompt.trim()) && request.prompt.length <= 32000
-        && Array.isArray(request.referenceIds) && request.referenceIds.length <= 16
+        && Array.isArray(request.referenceIds) && request.referenceIds.length <= 10
         && new Set(request.referenceIds).size === request.referenceIds.length
         && request.referenceIds.every(id => typeof id === 'string' && /^[a-f0-9]{24}$/iu.test(id))
-        && ['1024x1024', '1024x1536', '1536x1024'].includes(String(request.size))
-        && Object.keys(request).every(key => ['prompt', 'referenceIds', 'size'].includes(key));
+        && IMAGE_SIZES.includes(String(request.size))
+        && (request.model === undefined || ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915'].includes(request.model))
+        && Object.keys(request).every(key => ['prompt', 'referenceIds', 'size', 'model'].includes(key));
 }

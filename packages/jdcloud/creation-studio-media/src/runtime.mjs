@@ -8,6 +8,9 @@ import { createImageService } from './images.mjs'
 import { createSeedanceService } from './seedance.mjs'
 import { generatedImagePending, imageGenerationSource } from './image-generation.mjs'
 import { createWhiteBackgroundService } from './white-background.mjs'
+import { createProviderAccountPool } from './provider-accounts.mjs'
+import { DEFAULT_IMAGE_MODEL, SEEDREAM_MODELS } from './seedream.mjs'
+import { calculateShadowCharge } from './billing-price.mjs'
 
 const MATERIAL = '6ad81c871f280486bb45ac43'
 const RELATION = '6ad81c871f280486bb45ac45'
@@ -19,7 +22,23 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   const owners = new AsyncLocalStorage()
   let closing = false
   const platform = config.platformURL.replace(/\/$/u, '')
-  const whiteBackground = createWhiteBackgroundService(config, auth, keys, billing, fetcher)
+  const defaultImageModel = config.imageModel || DEFAULT_IMAGE_MODEL
+  const accounts = createProviderAccountPool(config, auth, keys, fetcher)
+  const imageJobs = new Map()
+  const jobKey = input => JSON.stringify([input.spaceId, input.projectId, input.planId, input.requestId])
+  /** Background generation remains owned until its receipt is durable, including during plugin disposal. */
+  const imageBackground = {
+    start(input, operation) {
+      const key = jobKey(input)
+      const job = Promise.resolve().then(operation)
+        .catch(() => { console.warn('即梦后台任务保存失败，请查询原请求并核对供应商记录。') })
+        .finally(() => imageJobs.delete(key))
+      imageJobs.set(key, job)
+    },
+    has: input => imageJobs.has(jobKey(input)),
+    wait: input => imageJobs.get(jobKey(input)),
+  }
+  const whiteBackground = createWhiteBackgroundService(config, auth, keys, billing, fetcher, accounts)
   async function transport(url, init = {}) {
     if (await auth.currentScopeKey() !== owners.getStore())
       throw new Error('媒体执行期间账号已变化，已停止后续请求和写入；已生成结果可用原编号恢复。')
@@ -124,11 +143,18 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   async function imageTaskView(task, input, upload) {
     const source = task.source ?? task.result?.source
     const view = { requestId: task.requestId ?? input.requestId,
+      provider: task.provider || 'gpt-image', model: task.model || source?.model,
+      ...(source?.referenceIds ? { imageInputCount: source.referenceIds.length } : {}),
+      ...(task.providerAccountRef ? { providerAccountRef: task.providerAccountRef } : {}),
       status: task.status === 'submitting' ? 'unknown' : task.status,
       ...(task.taskId === undefined ? {} : { taskId: task.taskId }),
       ...(task.fingerprint === undefined ? {} : { fingerprint: task.fingerprint }),
       ...(source?.createdAt === undefined ? {} : { createdAt: source.createdAt }),
       ...(task.error === undefined ? {} : { error: task.error }) }
+    if (billing?.consumption) {
+      const consumption = await billing.consumption({ ...input, requestId: view.requestId }, 'image')
+      if (consumption) view.consumption = consumption
+    }
     if (task.errorCode !== undefined)
       view.errorCode = task.errorCode
     if (task.retryCount !== undefined)
@@ -147,7 +173,8 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
         const bytes = Buffer.from(task.result.b64, 'base64')
         return { bytes, mime: task.result.mime, dimensions: await inspectImage(bytes, task.result.mime) }
       })
-      return { ...view, status: 'succeeded', result }
+      return { ...view, status: 'succeeded', result, billingParameters: { imageOperation: source.referenceIds?.length ? 'edit' : 'generation',
+        imageSize: `${result.width}x${result.height}`, imagePixels: result.width * result.height } }
     }
     catch (error) {
       return { ...view, status: 'upload_failed', error: `图片已生成但上传未完成：${error.message} 请用原请求继续上传，不要重新生成。` }
@@ -156,15 +183,25 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   async function execute(operation, input) {
     // 白底图可在需求阶段运行，不要求已创建方案；拥有独立的项目、角色与素材校验。
     if (operation.startsWith('white-background/')) return whiteBackground.run(operation.slice('white-background/'.length), input)
-    const env = { CREATION_STUDIO_PLATFORM_URL: platform, CREATION_STUDIO_TENANT_ID: config.tenantId, CREATION_STUDIO_IMAGE_STATE_DIR: join(config.stateDirectory, 'images'), CREATION_STUDIO_IMAGE_RETRY_LIMIT: config.imageRetryLimit, CREATION_STUDIO_VIDEO_STATE_DIR: join(config.stateDirectory, 'seedance'), GPT_IMAGE_MODEL: config.imageModel, GPT_IMAGE_API_KEY: await keys(config.imageKeyRef), ARK_API_KEY: await keys(config.arkKeyRef) }
+    const env = { CREATION_STUDIO_PLATFORM_URL: platform, CREATION_STUDIO_TENANT_ID: config.tenantId, CREATION_STUDIO_IMAGE_STATE_DIR: join(config.stateDirectory, 'images'), CREATION_STUDIO_IMAGE_RETRY_LIMIT: config.imageRetryLimit, CREATION_STUDIO_VIDEO_STATE_DIR: join(config.stateDirectory, 'seedance'), GPT_IMAGE_API_KEY: await keys(config.imageKeyRef || 'GPT_IMAGE_API_KEY'), ARK_API_KEY: await keys(config.arkKeyRef || 'ARK_API_KEY'), SEEDREAM_MODEL: defaultImageModel, PROVIDER_ACCOUNTS: accounts, IMAGE_BACKGROUND: imageBackground }
     if (operation === 'config') {
-      return { image: { configured: Boolean(env.GPT_IMAGE_API_KEY), model: config.imageModel }, video: { configured: Boolean(env.ARK_API_KEY), model: 'doubao-seedance-2-5-260628' },
-        whiteBackground: { configured: Boolean(await keys(config.jimengAccessKeyRef) && await keys(config.jimengSecretKeyRef)), model: 'jimeng_t2i_v40' } }
+      return { image: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS }, video: { configured: await accounts.configured('ark', 'video'), model: 'doubao-seedance-2-5-260628' },
+        whiteBackground: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS } }
     }
     if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'shadow', rows: [], total: 0 }
     if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'shadow', processed: 0 }
     const images = createImageService(env, transport)
     const videos = createSeedanceService(env, transport)
+    if (operation === 'images/quote') {
+      const request = await images.quote('host-authenticated', input)
+      const binding = billing ? await billing.beginMedia(input) : undefined
+      const [width, height] = request.size.split('x').map(Number)
+      const fee = calculateShadowCharge({ scenario: 'image', provider: 'ark', modelKey: request.model, payer: 'customer',
+        status: 'succeeded', usageStatus: 'reported', delivered: true, occurredAt: Date.now(), imageCount: 1, imageInputCount: request.referenceCount,
+        parameters: { imagePixels: width * height, imageSize: request.size, imageOperation: request.referenceCount ? 'edit' : 'generation' } }, binding?.prices || [])
+      return { ...request, estimatedCredits: fee.customerChargeMicros === undefined ? undefined : (Number(fee.customerChargeMicros) / 1_000_000).toString(),
+        priceVersionId: fee.priceVersionId, reason: fee.reason, estimated: true }
+    }
     if (operation === 'images/tasks') {
       await authorizeWrites(input)
       return imageTaskView(await images.submit('host-authenticated', input), input, true)
@@ -214,6 +251,10 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (operation === 'video/list') {
       const tasks = await videos.list('host-authenticated', input)
       return Promise.all(tasks.map(async (task) => {
+        if (billing?.consumption) {
+          const consumption = await billing.consumption({ ...input, requestId: task.requestId }, 'video')
+          if (consumption) task = { ...task, consumption }
+        }
         if (task.status !== 'succeeded')
           return task
         let result
@@ -271,7 +312,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
         throw new Error('Harness 媒体插件正在停止，请稍后重试。')
       if (!scope)
         throw new Error('请先登录 Harness。')
-      const key = JSON.stringify([scope, operation, input.projectId, input.planId, input.spaceId, input.requestId, input.taskIds, ...(['images/generate', 'images/tasks'].includes(operation) ? [input.prompt, input.size, input.referenceIds] : []), ...(operation === 'video/tasks' ? [input.batchId] : []), ...(operation.startsWith('white-background/') ? [input.materialId, input.prompt] : [])])
+      const key = JSON.stringify([scope, operation, input.projectId, input.planId, input.spaceId, input.requestId, input.taskIds, ...(['images/generate', 'images/tasks'].includes(operation) ? [input.prompt, input.size, input.referenceIds, input.model] : []), ...(operation === 'video/tasks' ? [input.batchId] : []), ...(operation.startsWith('white-background/') ? [input.materialId, input.prompt] : [])])
       if (!active.has(key)) {
         active.set(key, owners.run(scope, async () => {
           const scenario = operation.startsWith('images/') ? 'image' : 'video'
@@ -279,17 +320,30 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
           const binding = metered ? await billing.beginMedia(input) : undefined
           const parameters = scenario === 'image'
             ? { ...(Array.isArray(input.referenceIds) ? { imageOperation: input.referenceIds.length ? 'edit' : 'generation' } : {}),
-                ...(input.size ? { imageSize: input.size } : {}), imageQuality: 'high' } : {}
+                ...(input.size ? { imageSize: input.size } : {}) } : {}
           // 首次提交前固定操作者和价格，恢复查询不重新采用当日售价。
           if (binding && ['images/tasks', 'images/generate', 'video/tasks'].includes(operation))
-            await billing.media(input, binding, scenario, { status: 'submitting' }, parameters)
-          const result = await execute(operation, input)
+            await billing.media(input, binding, scenario, { status: 'submitting', ...(scenario === 'image' ? { provider: 'ark', model: input.model || defaultImageModel } : {}) }, parameters)
+          let result
+          try { result = await execute(operation, input) }
+          catch (error) {
+            if (binding && error.task) await billing.media(input, binding, scenario, error.task, parameters)
+            throw error
+          }
           if (binding) {
             const billingParameters = result.billingParameters ?? parameters
             // 同步生图返回的是已上传素材引用，转为与异步图片一致的完成回执再计量。
             const task = operation === 'images/generate'
-              ? { status: 'succeeded', createdAt: result.generation?.createdAt, result } : result
-            try { await billing.media(input, binding, scenario, task, billingParameters) }
+              ? { status: 'succeeded', provider: result.generation?.model?.startsWith('gpt-image-') ? 'gpt-image' : 'ark', model: result.generation?.model,
+                  imageInputCount: result.generation?.referenceIds?.length,
+                  providerAccountRef: result.generation?.providerAccountRef, createdAt: result.generation?.createdAt, result } : result
+            const actualParameters = operation === 'images/generate'
+              ? { ...billingParameters, imagePixels: result.width * result.height, imageSize: `${result.width}x${result.height}` } : billingParameters
+            try {
+              const fee = await billing.media(input, binding, scenario, task, actualParameters)
+              if (fee) result = { ...result, consumption: { credits: fee.customerChargeMicros === undefined ? undefined
+                : (Number(fee.customerChargeMicros) / 1_000_000).toString(), status: fee.chargeStatus, reason: fee.reason } }
+            }
             catch (error) { return { ...result, billingWarning: `生成状态已保存，但用量记录待恢复：${error.message}` } }
           }
           return result
@@ -301,6 +355,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     async close() {
       closing = true
       await Promise.allSettled([...active.values()])
+      await Promise.allSettled([...imageJobs.values()])
     },
   }
   return runtime

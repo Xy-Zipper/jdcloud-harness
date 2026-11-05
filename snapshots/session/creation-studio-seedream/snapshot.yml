@@ -1,0 +1,8 @@
+version: 1
+scenario: creation-studio-seedream
+profile: headless
+composition: creation-studio-media
+recording: authored
+header:
+  class: creation-studio-media
+  pin: true

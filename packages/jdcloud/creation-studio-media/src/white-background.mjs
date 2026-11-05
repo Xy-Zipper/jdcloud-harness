@@ -4,6 +4,9 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import signerModule from '@volcengine/openapi/lib/base/sign.js'
 import sharp from 'sharp'
+import { whiteBackgroundPrompt } from './image-prompts.mjs'
+import { DEFAULT_IMAGE_MODEL, requestSeedreamImage, SEEDREAM_MODELS } from './seedream.mjs'
+import { IMAGE_SIZES } from './image-generation.mjs'
 
 // 官方签名模块是 CommonJS，Node ESM 与打包器的 default 解包层数不同。
 const Signer = typeof signerModule === 'function' ? signerModule : signerModule.default
@@ -22,11 +25,9 @@ const MODEL = 'jimeng_t2i_v40'
 const recordId = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const eq = (enCode, value) => ({ enCode, method: 'eq', type: 'custom', value })
-/** 海报文案和悬浮标识必须移除；只保留实际印在商品或包装上的文字。 */
-const instruction = '从参考图片中只提取商品主体，制作干净的纯白底商品图。保留原商品的形状、材质、颜色和结构，保留商品本体上的文字与标识（例如键盘键帽字符、瓶身标签或包装印刷）。删除原图中商品之外的所有文字，包括宣传标题、型号说明、卖点文案、字幕、角标、水印、悬浮Logo及平台标识；即使这些文字与商品品牌或型号有关也必须删除。移除原背景、无关物品和人物，不沿用海报排版，不新增任何悬浮文字、标识、商品或装饰。商品主体完整居中并占据画面主要区域，其余区域为纯白色。只输出一张白底商品图片。'
 
 /** 授权和供应商签名均在 Host 执行；接口不接收任意图片地址或供应商密钥。 */
-export function createWhiteBackgroundService(config, auth, keys, billing, fetcher = fetch) {
+export function createWhiteBackgroundService(config, auth, keys, billing, fetcher = fetch, accounts) {
   const directory = join(config.stateDirectory, 'white-background')
   const active = new Map()
   const base = config.platformURL.replace(/\/$/u, '')
@@ -72,7 +73,11 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
         throw new Error('当前账号没有保存白底图素材和引用的权限。')
     }
   }
-  async function credentials() {
+  async function credentials(state) {
+    if (state?.providerAccountId && accounts) {
+      const account = await accounts.resolve('jimeng', state)
+      return { accessKeyId: account.accessKeyId, secretKey: account.secretAccessKey }
+    }
     const [accessKeyId, secretKey] = await Promise.all([keys(config.jimengAccessKeyRef), keys(config.jimengSecretKeyRef)])
     if (!accessKeyId || !secretKey) throw new Error('即梦白底图尚未配置 JIMENG_ACCESS_KEY_ID / JIMENG_SECRET_ACCESS_KEY。')
     return { accessKeyId, secretKey }
@@ -132,14 +137,20 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
   }
   function view(state) {
     return { requestId: state.requestId, taskId: state.taskId, projectId: state.projectId, sourceMaterialId: state.source.id,
+      ...(state.providerAccountRef ? { providerAccountRef: state.providerAccountRef } : {}),
+      ...(SEEDREAM_MODELS.includes(state.model) ? { model: state.model, size: state.size } : {}),
+      ...(state.consumption ? { consumption: state.consumption } : {}),
       name: state.source.name, prompt: state.prompt, status: state.status, error: state.error,
       ...(state.result ? { result: state.result } : {}) }
   }
   async function meter(input, state) {
     if (!billing || !state.binding) return
     try {
-      await billing.media(input, state.binding, 'image', { ...view(state), provider: 'jimeng', model: MODEL,
-        createdAt: state.createdAt, result: state.result }, { imageOperation: 'edit', imageQuality: 'white-background', imageSize: '2048x2048' })
+      const fee = await billing.media(input, state.binding, 'image', { ...view(state), provider: SEEDREAM_MODELS.includes(state.model) ? 'ark' : 'jimeng', model: state.model || MODEL,
+        imageInputCount: 1, createdAt: state.createdAt, result: state.result },
+      SEEDREAM_MODELS.includes(state.model) ? { imageOperation: 'edit', imageSize: state.size, imagePixels: state.outputPixels }
+        : { imageOperation: 'edit', imageQuality: 'white-background', imageSize: '2048x2048' })
+      if (fee) state.consumption = { credits: fee.customerChargeMicros === undefined ? undefined : (Number(fee.customerChargeMicros) / 1_000_000).toString(), status: fee.chargeStatus, reason: fee.reason }
     } catch (error) { state.billingWarning = `白底图用量待恢复：${error.message}` }
   }
   /** JPEG/PNG/WebP 等可解码图片统一生成受限 JPEG 参考，原始文件不变。 */
@@ -172,11 +183,12 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
     await sharp(bytes, { limitInputPixels: 32 * 1024 * 1024 }).stats()
     const mime = metadata.format === 'png' ? 'image/png' : 'image/jpeg'
     const name = `${state.source.name.replace(/\.[^.]+$/u, '')}-白底图.${metadata.format === 'png' ? 'png' : 'jpg'}`
-    const generation = { requestId: state.requestId, taskId: state.taskId, model: MODEL, prompt: state.prompt,
-      size: '2048x2048', referenceIds: [], createdAt: state.createdAt, confirmedAt: '' }
+    state.outputPixels = metadata.width * metadata.height
+    const generation = { requestId: state.requestId, taskId: state.taskId, model: state.model || MODEL, prompt: state.prompt,
+      size: state.size || '2048x2048', referenceIds: [], providerAccountRef: state.providerAccountRef, createdAt: state.createdAt, confirmedAt: '' }
     const data = { spaceId: input.spaceId, name, library: 'project', category: '参考图片', sourceKind: 'generated',
       authorization: state.source.authorization, revision: 1, originalName: name, mime, width: metadata.width,
-      height: metadata.height, sizeBytes: bytes.length, provider: 'jimeng',
+      height: metadata.height, sizeBytes: bytes.length, provider: SEEDREAM_MODELS.includes(state.model) ? 'ark' : 'jimeng',
       sourceDescription: JSON.stringify({ generatedImage: generation, whiteBackground: {
         sourceMaterialId: state.source.id, sourceFileId: state.source.fileId, sourceRevision: state.source.revision, taskId: state.taskId } }) }
     if (!state.fileId) {
@@ -185,9 +197,10 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
     }
     data.fileId = state.fileId
     await createOnce(input, state, 'materialId', MATERIAL, data, [eq('sourceDescription', data.sourceDescription)])
+    // 结果先保存在项目素材，需求页看图确认后才建立需求附件或资料包引用。
     await createOnce(input, state, 'relationId', RELATION, { spaceId: input.spaceId, projectId: input.projectId, materialId: state.materialId,
-      purpose: '需求附件', sourceRevision: 1, usageSnapshot: JSON.stringify(data) },
-    [eq('projectId', input.projectId), eq('materialId', state.materialId), eq('purpose', '需求附件')])
+      purpose: '参考图', sourceRevision: 1, usageSnapshot: JSON.stringify(data) },
+    [eq('projectId', input.projectId), eq('materialId', state.materialId), eq('purpose', '参考图')])
     state.result = { materialId: state.materialId, relationId: state.relationId, fileId: state.fileId, name, mime }
     state.status = 'succeeded'
     delete state.image
@@ -207,15 +220,22 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
       let state = await read(pathOf(input))
       if (operation === 'tasks') {
         if (!recordId(input.materialId) || typeof input.prompt !== 'string' || input.prompt.length > 500) throw new Error('白底图素材或提示词无效。')
-        const fingerprint = digest([input.materialId, input.prompt.trim()])
+        const model = input.model || (accounts ? DEFAULT_IMAGE_MODEL : undefined)
+        const size = input.size || '1024x1024'
+        if (model && (!SEEDREAM_MODELS.includes(model) || !IMAGE_SIZES.includes(size)))
+          throw new Error('白底图模型或比例尺寸无效。')
+        const fingerprint = state && !SEEDREAM_MODELS.includes(state.model) && !input.model
+          ? digest([input.materialId, input.prompt.trim()])
+          : digest([input.materialId, input.prompt.trim(), ...(model ? [model, size] : [])])
         if (state && state.fingerprint !== fingerprint) throw new Error('该白底图请求编号已用于其他图片或提示词。')
         if (!state) {
           const source = await detail(MATERIAL, input.materialId)
           if (source?._id !== input.materialId || source.spaceId !== input.spaceId || !recordId(source.fileId)
             || (!String(source.mime).startsWith('image/') && !/\.(?:png|jpe?g|webp|gif|bmp|avif)$/iu.test(source.originalName || source.name || '')) || source.sourceKind === 'demo'
             || !['自有', '可商用'].includes(source.authorization)) throw new Error('请选择当前空间内可用于生成的自有或可商用图片。')
-          await credentials()
+          if (!model) await credentials()
           state = { requestId: input.requestId, projectId: input.projectId, spaceId: input.spaceId, fingerprint,
+            ...(model ? { model, size } : {}),
             prompt: input.prompt.trim(), status: 'preparing', createdAt: new Date().toISOString(),
             source: { id: source._id, fileId: source.fileId, name: source.name || source.originalName, revision: source.revision, authorization: source.authorization },
             binding: billing ? await billing.beginMedia(input) : undefined }
@@ -224,31 +244,47 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
         }
         if (state.status === 'preparing') {
           await prepareReference(input, state)
+          // AK/SK 账号与任务一同落盘，排队、生成和查询始终使用同一账号。
+          if (accounts && !state.providerAccountId) {
+            const selected = await accounts.acquire(SEEDREAM_MODELS.includes(state.model) ? 'ark' : 'jimeng', { ...input, scenario: 'image', model: state.model || MODEL })
+            Object.assign(state, selected.receipt)
+          }
           state.status = 'submitting'
           await persist(input, state)
           try {
-            const data = await provider('CVSync2AsyncSubmitTask', { req_key: MODEL,
-              image_urls: [`${base}/api/file/previewImage/${config.tenantId}/${state.referenceFileId}`],
-              prompt: `${instruction}${state.prompt ? `用户指定主体与要求：${state.prompt}` : ''}`,
-              force_single: true, width: 2048, height: 2048 }, await credentials())
-            if (typeof data?.task_id !== 'string' || !data.task_id) throw new Error('即梦提交未返回任务编号。')
-            state.taskId = data.task_id
-            state.status = 'in_queue'
+            if (SEEDREAM_MODELS.includes(state.model)) {
+              const account = await accounts.resolve('ark', state)
+              const image = await requestSeedreamImage(account.apiKey, state.model, { prompt: whiteBackgroundPrompt(state.prompt), size: state.size },
+                [{ url: `${base}/api/file/previewImage/${config.tenantId}/${state.referenceFileId}` }], fetcher)
+              state.image = image.b64
+              state.taskId = `seedream-${state.requestId}`
+              state.status = 'done'
+            }
+            else {
+              const data = await provider('CVSync2AsyncSubmitTask', { req_key: MODEL,
+                image_urls: [`${base}/api/file/previewImage/${config.tenantId}/${state.referenceFileId}`],
+                prompt: whiteBackgroundPrompt(state.prompt),
+                force_single: true, width: 2048, height: 2048 }, await credentials(state))
+              if (typeof data?.task_id !== 'string' || !data.task_id) throw new Error('即梦提交未返回任务编号。')
+              state.taskId = data.task_id
+              state.status = 'in_queue'
+            }
           } catch (error) {
-            state.status = error.rejected ? 'failed' : 'unknown'
-            state.error = error.rejected ? error.message : '提交结果未确认，请核对原任务；不会自动重复付费提交。'
+            state.status = error.rejected || error.providerRejected ? 'failed' : 'unknown'
+            state.error = error.rejected || error.providerRejected ? error.message : '提交结果未确认，请核对原任务；不会自动重复付费提交。'
           }
           await meter(input, state)
           await persist(input, state)
+          await accounts?.settle(state, state.status === 'done' ? 'succeeded' : state.status, state.taskId)
         }
       } else if (operation === 'refresh') {
         if (!state) throw new Error('没有找到白底图任务。')
         if (state.status === 'submitting') return { ...view(state), status: 'unknown', error: '原提交结果待核对，不会重复提交。' }
-        if (state.taskId && ['in_queue', 'generating'].includes(state.status)) {
+        if (!SEEDREAM_MODELS.includes(state.model) && state.taskId && ['in_queue', 'generating'].includes(state.status)) {
           let data
           try {
             data = await provider('CVSync2AsyncGetResult', { req_key: MODEL, task_id: state.taskId,
-              req_json: JSON.stringify({ return_url: false }) }, await credentials())
+              req_json: JSON.stringify({ return_url: false }) }, await credentials(state))
           } catch (error) {
             // 查询限流和网络故障不代表原生成任务失败，保留原任务状态供继续获取。
             if (!error.terminal) throw error
@@ -256,6 +292,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
             state.error = error.message
             await meter(input, state)
             await persist(input, state)
+            await accounts?.settle(state, 'failed', state.taskId)
             return view(state)
           }
           if (!['in_queue', 'generating', 'done', 'not_found', 'expired'].includes(data?.status)) throw new Error('即梦任务返回未知状态。')
@@ -267,6 +304,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
           }
           if (['not_found', 'expired'].includes(data.status)) state.error = '即梦任务不存在或已过期，请核对后重新发起生成。'
           await persist(input, state)
+          await accounts?.settle(state, data.status === 'done' ? 'succeeded' : data.status, state.taskId)
         }
         if (state.image && !state.result) {
           try { await deliver(input, state) }

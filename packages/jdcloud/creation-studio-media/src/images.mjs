@@ -5,6 +5,8 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { confirmedStoryboardUpstream } from './upstream.mjs'
 import { generatedImagePending, isImageGenerationRequest } from './image-generation.mjs'
+import { imagePrompt } from './image-prompts.mjs'
+import { createSeedreamTasks, SEEDREAM_MODELS } from './seedream.mjs'
 
 const MENU = { project: '6ad81c131f280486bb45ac3f', plan: '6ad81c871f280486bb45ac49', shot: '6ad81c871f280486bb45ac4b', material: '6ad81c871f280486bb45ac43', relation: '6ad81c871f280486bb45ac45', space: '6adb0fbec3ca9f3dcdaf499a', member: '6adb0fbec3ca9f3dcdaf499d' }
 const id = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
@@ -21,7 +23,7 @@ const providerError = data => typeof data.error === 'string' ? data.error : data
 
 /** 有参考图按已验证协议传 images URL，不沿用 multipart 或 JSON Content-Type。 */
 async function postImage(apiKey, model, input, references, asynchronous, transport) {
-  const fields = { model, prompt: input.prompt, size: input.size, quality: 'high',
+  const fields = { model, prompt: imagePrompt(input.prompt), size: input.size, quality: 'high',
     response_format: asynchronous ? 'url' : 'b64_json', ...(asynchronous ? { async: true, n: 1 } : {}),
     ...(references.length ? { images: references.map(reference => reference.url) } : {}) }
   const response = await transport(`https://api.kbsfdxc.net/v1/images/${references.length ? 'edits' : 'generations'}`, {
@@ -64,17 +66,15 @@ export async function requestGptImage(apiKey, model, input, references, transpor
 
 export function createImageService(env, transport = fetch) {
   const apiKey = env.GPT_IMAGE_API_KEY?.trim()
-  const model = env.GPT_IMAGE_MODEL?.trim() || 'gpt-image-2.5'
   const platform = (env.CREATION_STUDIO_PLATFORM_URL || env.VITE_SERVE || '').replace(/\/$/u, '')
   const tenant = env.CREATION_STUDIO_TENANT_ID || env.VITE_TENANT_ID
   const directory = resolve(env.CREATION_STUDIO_IMAGE_STATE_DIR || '.creation-studio/images')
-  const retryLimit = env.CREATION_STUDIO_IMAGE_RETRY_LIMIT ?? 2
+  const retryLimit = env.CREATION_STUDIO_IMAGE_RETRY_LIMIT ?? 4
   const taskPath = input => {
     if (!/^[a-zA-Z0-9-]{8,100}$/u.test(input.requestId || ''))
       throw new ApiError('图片请求编号无效。')
     return join(directory, `${createHash('sha256').update(JSON.stringify([tenant, input.spaceId, input.projectId, input.planId, input.requestId])).digest('hex')}.json`)
   }
-  const fingerprint = input => createHash('sha256').update(JSON.stringify([input.prompt, input.size, input.referenceIds])).digest('hex')
   async function readTask(input) {
     try { return JSON.parse(await readFile(taskPath(input), 'utf8')) }
     catch (error) { if (error.code === 'ENOENT') return null; throw error }
@@ -148,87 +148,24 @@ export function createImageService(env, transport = fetch) {
     return { url: `${platform}/api/file/previewImage/${tenant}/${source.fileId}`,
       mime: source.mime, name: source.originalName || 'reference.png', fileId: source.fileId, revision: source.revision }
   }
+  // Seedream 的同步供应商请求由 Host 托管，页面仍使用原来的异步任务与上传入口。
+  const seedream = createSeedreamTasks({
+    authorize, referenceData, readTask, storeTask, pool: env.PROVIDER_ACCOUNTS,
+    background: env.IMAGE_BACKGROUND, transport, validate: isImageGenerationRequest, defaultModel: env.SEEDREAM_MODEL,
+    async createTask(input, task) {
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      try { await writeFile(taskPath(input), JSON.stringify(task), { flag: 'wx', mode: 0o600 }); return true }
+      catch (error) { if (error.code === 'EEXIST') return false; throw error }
+    },
+  })
+  const submit = (token, input) => seedream.submit(token, { ...input, tenantId: tenant })
   async function generate(token, input) {
-    if (!apiKey)
-      throw new ApiError('生图服务尚未配置 GPT_IMAGE_API_KEY，请由服务端配置后再生成。', 503)
-    if (!/^[a-zA-Z0-9-]{8,100}$/u.test(input.requestId || '')
-      || !isImageGenerationRequest({ prompt: input.prompt, size: input.size, referenceIds: input.referenceIds })) {
-      throw new ApiError('图片提示词、尺寸或参考图参数无效。')
-    }
-    await authorize(token, input)
-    const key = createHash('sha256').update(JSON.stringify([tenant, input.spaceId, input.projectId, input.planId, input.requestId])).digest('hex')
-    const fingerprint = createHash('sha256').update(JSON.stringify([input.prompt, input.size, input.referenceIds])).digest('hex')
-    const path = join(directory, `${key}.json`)
-    let previous
-    try {
-      previous = JSON.parse(await readFile(path, 'utf8'))
-    }
-    catch (error) {
-      if (error.code !== 'ENOENT') {
-        throw error
-      }
-    }
-    if (previous) {
-      if (previous.fingerprint !== fingerprint)
-        throw new ApiError('该请求编号已用于其他参数，请新建生成请求。')
-      if (previous.status === 'succeeded')
-        return previous.result
-      throw new ApiError(previous.error || '该请求提交结果未确认，请先核对供应商记录；不会自动重复生成。', 409)
-    }
-    const references = []
-    for (const relationId of input.referenceIds) references.push(await referenceData(token, input, relationId))
-    await mkdir(directory, { recursive: true })
-    // 付费请求之前独占落盘；服务重启或多个进程均不重复发送同一请求。
-    const state = { fingerprint, status: 'submitting' }
-    try {
-      await writeFile(path, JSON.stringify(state), { flag: 'wx', mode: 0o600 })
-    }
-    catch (error) {
-      if (error.code === 'EEXIST')
-        throw new ApiError('该请求已在处理，请稍后重试读取结果。', 409)
-      throw error
-    }
-    try {
-      const image = await requestGptImage(apiKey, model, input, references, transport)
-      state.status = 'succeeded'
-      state.result = { ...image, source: { requestId: input.requestId, model, prompt: input.prompt, size: input.size, referenceIds: [...input.referenceIds], createdAt: new Date().toISOString(), confirmedAt: '' } }
-    }
-    catch (error) {
-      state.status = 'unknown'
-      state.error = `图片请求未完成：${error.message} 请核对供应商记录后再新建请求，当前请求不会重复发送。`
-    }
-    await writeFile(`${path}.tmp`, JSON.stringify(state), { mode: 0o600 })
-    await rename(`${path}.tmp`, path)
-    if (state.status !== 'succeeded')
-      throw new ApiError(state.error, 502)
-    return state.result
-  }
-  /** 一图一任务，提交前独占落盘；同编号始终读取原回执，未知提交不自动重发。 */
-  async function submit(token, input) {
-    if (!isImageGenerationRequest({ prompt: input.prompt, size: input.size, referenceIds: input.referenceIds }))
-      throw new ApiError('图片提示词、尺寸或参考图参数无效。')
-    await authorize(token, input)
-    const previous = await readTask(input)
-    if (previous) {
-      if (previous.fingerprint !== fingerprint(input))
-        throw new ApiError('该请求编号已用于其他参数，请新建生成请求。', 409)
-      return previous
-    }
-    if (!apiKey)
-      throw new ApiError('生图服务尚未配置 GPT_IMAGE_API_KEY。', 503)
-    const references = []
-    for (const relationId of input.referenceIds) references.push(await referenceData(token, input, relationId))
-    const task = { requestId: input.requestId, tenantId: tenant, projectId: input.projectId, planId: input.planId,
-      spaceId: input.spaceId, fingerprint: fingerprint(input), status: 'submitting',
-      source: { requestId: input.requestId, model, prompt: input.prompt, size: input.size,
-        referenceIds: [...input.referenceIds], createdAt: new Date().toISOString(), confirmedAt: '' } }
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    try { await writeFile(taskPath(input), JSON.stringify(task), { flag: 'wx', mode: 0o600 }) }
-    catch (error) {
-      if (error.code === 'EEXIST') return readTask(input)
-      throw error
-    }
-    return sendTask(input, task, references)
+    await submit(token, input)
+    await env.IMAGE_BACKGROUND.wait(input)
+    const result = await readTask(input)
+    if (result.status !== 'succeeded')
+      throw Object.assign(new ApiError(result.error || '图片尚未完成，请查询原请求。', 502), { task: result })
+    return result.result
   }
 
   /** 提交拒绝与未知付费结果分开持久化；任何 POST 前均已有 submitting 回执。 */
@@ -282,6 +219,7 @@ export function createImageService(env, transport = fetch) {
     await authorize(token, input)
     const task = await readTask(input)
     if (!task) throw new ApiError('没有找到当前项目的图片任务。', 404)
+    if (SEEDREAM_MODELS.includes(task.source?.model)) return seedream.refresh(input, task)
     if (task.status === 'failed') return retryTask(token, input, task)
     if (!task.taskId || ['succeeded', 'unknown'].includes(task.status)) return task
     if (!apiKey) throw new ApiError('生图服务尚未配置 GPT_IMAGE_API_KEY。', 503)
@@ -347,5 +285,13 @@ export function createImageService(env, transport = fetch) {
     }
     return tasks
   }
-  return { generate, submit, refresh, list }
+  /** 报价重读项目确认与参考图权限，不创建任务、不占用账号、不调用供应商。 */
+  async function quote(token, input) {
+    if (!isImageGenerationRequest({ prompt: input.prompt, size: input.size, referenceIds: input.referenceIds, ...(input.model ? { model: input.model } : {}) }))
+      throw new ApiError('报价图片参数无效。')
+    await authorize(token, input)
+    for (const relationId of input.referenceIds) await referenceData(token, input, relationId)
+    return { model: input.model || env.SEEDREAM_MODEL, size: input.size, referenceCount: input.referenceIds.length }
+  }
+  return { generate, submit, refresh, list, quote }
 }

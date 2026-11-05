@@ -123,6 +123,7 @@ export function createSeedanceService(env, transport = fetch) {
 		batchId: task.batchId,
 		id: task.id,
 		model: task.model || "doubao-seedance-2-0-260128",
+		providerAccountRef: task.providerAccountRef,
 		status: task.status,
 		videoUrl: task.videoUrl,
 		error: task.error,
@@ -192,7 +193,7 @@ export function createSeedanceService(env, transport = fetch) {
 		return { duration, url: `data:${mime};base64,${bytes.toString("base64")}` };
 	}
 	async function submit(token, input) {
-		if (!apiKey) throw new ApiError("视频服务尚未配置 ARK_API_KEY，请由服务端配置后再生成。", 503);
+		if (!apiKey && !env.PROVIDER_ACCOUNTS) throw new ApiError("视频服务尚未配置账号池或 ARK_API_KEY。", 503);
 		const { plan, project } = await authorize(token, input);
 		if (!id(input.batchId) || !/^[a-zA-Z0-9-]{8,100}$/u.test(input.requestId || "")) throw new ApiError("批次或请求编号无效。");
 		const previous = await readTask(input, input.requestId);
@@ -324,11 +325,28 @@ export function createSeedanceService(env, transport = fetch) {
 			throw error;
 		}
 		await store(input, task);
+		// 在付费提交前固定原账号；后续查询不能重新负载分配。
+		let account = { apiKey };
+		if (env.PROVIDER_ACCOUNTS) {
+			try {
+				const selected = await env.PROVIDER_ACCOUNTS.acquire('ark', { ...input, scenario: 'video', model: task.model });
+				account = selected.account;
+				Object.assign(task, selected.receipt);
+				task.status = 'submitting';
+				await store(input, task);
+			} catch (error) {
+				task.status = 'failed';
+				task.error = error.message;
+				await store(input, task);
+				if (task.providerLeaseId) await env.PROVIDER_ACCOUNTS.settle(task, 'failed');
+				return view(task);
+			}
+		}
 		try {
 			const response = await transport("https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks", {
 				method: "POST",
 				headers: {
-					Authorization: `Bearer ${apiKey}`,
+					Authorization: `Bearer ${account.apiKey.trim().replace(/^Bearer\s+/iu, '')}`,
 					"Content-Type": "application/json"
 				},
 				body: JSON.stringify(request),
@@ -347,6 +365,7 @@ export function createSeedanceService(env, transport = fetch) {
 			task.error = "提交结果未确认，请在方舟控制台核对后再新建任务，当前请求不会自动重发。";
 		}
 		await store(input, task);
+		await env.PROVIDER_ACCOUNTS?.settle(task, task.status, task.id);
 		return view(task);
 	}
 	async function refresh(token, input) {
@@ -355,9 +374,11 @@ export function createSeedanceService(env, transport = fetch) {
 		if (!task) throw new ApiError("没有找到当前项目的生成任务。", 404);
 		// 旧成功任务缺usage时允许只读补取原回执；不新建供应商任务。
 		if (!task.id || (terminal.has(task.status) && !(task.status === "succeeded" && task.usage === undefined))) return view(task);
-		if (!apiKey) throw new ApiError("视频服务尚未配置 ARK_API_KEY。", 503);
+		const account = task.providerAccountId && env.PROVIDER_ACCOUNTS
+			? await env.PROVIDER_ACCOUNTS.resolve('ark', task) : { apiKey };
+		if (!account.apiKey) throw new ApiError("原视频任务的 ARK_API_KEY 未配置。", 503);
 		const response = await transport(`https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/${encodeURIComponent(task.id)}`, {
-			headers: { Authorization: `Bearer ${apiKey}` },
+			headers: { Authorization: `Bearer ${account.apiKey.trim().replace(/^Bearer\s+/iu, '')}` },
 			signal: AbortSignal.timeout(3e4)
 		});
 		const data = await response.json();
@@ -372,6 +393,7 @@ export function createSeedanceService(env, transport = fetch) {
 			...(typeof data.generate_audio === "boolean" ? { audioMode: data.generate_audio ? "enabled" : "disabled" } : {}) };
 		if (data.status === "succeeded") task.videoUrl = data.content?.video_url || "";
 		await store(input, task);
+		await env.PROVIDER_ACCOUNTS?.settle(task, task.status, task.id);
 		return view(task);
 	}
 	async function list(token, input) {

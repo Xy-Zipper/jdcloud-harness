@@ -48,7 +48,11 @@
         stateDirectory: !!js "process.env.CREATION_STUDIO_MEDIA_STATE_DIR || process.getBuiltinModule('node:path').join(process.env.DSH_HOME || process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'creation-studio-media')"
         imageKeyRef: GPT_IMAGE_API_KEY
         arkKeyRef: ARK_API_KEY
-        imageModel: gpt-image-2.5
+        imageModel: doubao-seedream-5-0-pro-260628
+        accountPoolTableId: 6aead43ac3ca9f3dcdaf4b23
+        accountPoolKeyRef: CREATION_STUDIO_ACCOUNT_POOL_TOKEN
+        accountPoolUsernameRef: CREATION_STUDIO_ACCOUNT_POOL_USERNAME
+        accountPoolPasswordRef: CREATION_STUDIO_ACCOUNT_POOL_PASSWORD
 
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'

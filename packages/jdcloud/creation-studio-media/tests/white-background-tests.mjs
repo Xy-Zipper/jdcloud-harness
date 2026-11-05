@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { createWhiteBackgroundService } from '../src/white-background.mjs'
+import { createProviderAccountPool } from '../src/provider-accounts.mjs'
 
 const roots = []
 const MATERIAL = '6ad81c871f280486bb45ac43'
@@ -58,12 +59,34 @@ async function setup() {
     if (url.includes('CVSync2AsyncSubmitTask')) return Response.json({ code: 10000, data: { task_id: 'jimeng-task' } })
     return Response.json({ code: 10000, data: { status: 'done', binary_data_base64: [png.toString('base64')] } })
   })
-  const keys = async key => key === 'AK' ? 'access-key' : 'secret-key'
+  const keys = async key => key === 'AK' ? 'access-key' : key === 'SK' ? 'secret-key' : ''
   const billing = { beginMedia: vi.fn(async () => ({ initiatedByUserId: 'actor', prices: [] })), media: vi.fn() }
-  const service = () => createWhiteBackgroundService(config, auth, keys, billing, provider)
-  return { input, config, source, auth, provider, billing, rows, uploads, service, directory,
+  const service = accounts => createWhiteBackgroundService(config, auth, keys, billing, provider, accounts)
+  return { input, config, source, auth, provider, billing, rows, uploads, service, directory, keys, png,
     loseNextRelationAcknowledgement() { lostRelation = true } }
 }
+
+it('generates white-background images with the selected Seedream model and records the Ark account', async () => {
+  const f = await setup()
+  const pool = createProviderAccountPool(f.config, f.auth, async key => key === 'ARK_API_KEY' ? 'ark-test-key' : '')
+  f.provider.mockImplementation(async (url, init) => {
+    expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations')
+    expect(JSON.parse(init.body)).toMatchObject({ model: 'doubao-seedream-5-0-flash-260915', size: '1536x864' })
+    return Response.json({ data: [{ b64_json: f.png.toString('base64') }] })
+  })
+  f.input.model = 'doubao-seedream-5-0-flash-260915'
+  f.input.size = '1536x864'
+  const task = await f.service(pool).run('tasks', f.input)
+  expect(task.providerAccountRef).toBe('ENV-ARK')
+  const result = await f.service(pool).run('refresh', f.input)
+  expect(result.status).toBe('succeeded')
+  expect(f.billing.media.mock.calls.at(-1)[3]).toMatchObject({ providerAccountRef: 'ENV-ARK', provider: 'ark', imageInputCount: 1 })
+  expect(f.billing.media.mock.calls.at(-1)[4]).toMatchObject({ imagePixels: 1024 })
+  const files = await readdir(join(f.directory, 'provider-calls'))
+  const audit = await readFile(join(f.directory, 'provider-calls', files[0]), 'utf8')
+  expect(JSON.parse(audit)).toMatchObject({ providerAccountRef: 'ENV-ARK', initiatedByUserId: 'actor', status: 'succeeded' })
+  expect(audit).not.toMatch(/access-key|secret-key/u)
+})
 
 it('signs a forced single-image edit, preserves the original and uploads a reusable project material', async () => {
   const f = await setup()
@@ -83,7 +106,7 @@ it('signs a forced single-image edit, preserves the original and uploads a reusa
   expect(JSON.parse(material.sourceDescription)).toMatchObject({ whiteBackground: { sourceMaterialId: f.input.materialId },
     generatedImage: { model: 'jimeng_t2i_v40', confirmedAt: '' } })
   expect(f.source.name).toBe('商品.png')
-  expect(f.rows.find(row => row.menuId === RELATION)).toMatchObject({ projectId: f.input.projectId, materialId: material._id, purpose: '需求附件' })
+  expect(f.rows.find(row => row.menuId === RELATION)).toMatchObject({ projectId: f.input.projectId, materialId: material._id, purpose: '参考图' })
   expect(JSON.stringify(result)).not.toMatch(/binary_data|secret-key|access-key|prices/u)
   expect(f.billing.media.mock.calls.at(-1)[3]).toMatchObject({ provider: 'jimeng', model: 'jimeng_t2i_v40', status: 'succeeded' })
 })
@@ -95,6 +118,19 @@ it('removes poster text while preserving product lettering when subject instruct
   expect(prompt).toContain('删除原图中商品之外的所有文字')
   expect(prompt).toContain('保留商品本体上的文字与标识')
   await expect(`${prompt}\n`).toMatchFileSnapshot('./expected/white-background-prompt.txt')
+})
+
+it('sends the user multi-view request with layout and structure constraints rather than a single-view override', async () => {
+  const f = await setup()
+  const prompt = '生成一张白底的道具多视角参考图'
+  await f.service().run('tasks', { ...f.input, prompt })
+  const body = JSON.parse(f.provider.mock.calls[0][1].body)
+  expect(body.prompt).toContain(`用户本次生成要求：\n${prompt}`)
+  expect(body.prompt).toContain('不限制其中的视角数量')
+  expect(body.prompt).toContain('正面、侧面、四分之三视角')
+  expect(body.prompt).toContain('避免畸形、扭曲')
+  expect(body.force_single).toBe(true)
+  await expect(`${body.prompt}\n`).toMatchFileSnapshot('./expected/white-background-multiview-prompt.txt')
 })
 
 it('recovers a lost low-code create response after restart without another paid request or duplicate material', async () => {

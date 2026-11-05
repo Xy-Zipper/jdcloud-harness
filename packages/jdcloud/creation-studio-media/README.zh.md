@@ -31,31 +31,34 @@ kind: "package-reference"
 |---|---|---|
 | `platformURL` / `tenantId` | 必填 | 固定平台与租户，调用身份必须匹配 |
 | `stateDirectory` | 必填 | 持久化生成回执和上传进度 |
-| `imageModel` | `gpt-image-2.5` | 图片供应商模型 |
-| `imageRetryLimit` | `2` | 供应商指定可重试错误后的最大自动重提次数 |
+| `imageModel` | `doubao-seedream-5-0-pro-260628` | 图片供应商模型 |
+| `imageRetryLimit` | `4` | 仅用于已持久化的历史 GPT 任务的自动重提预算 |
 | `imageKeyRef` / `arkKeyRef` | `GPT_IMAGE_API_KEY` / `ARK_API_KEY` | Host 凭据引用 |
+| `accountPoolTableId` | `6aead43ac3ca9f3dcdaf4b23` | 私有账号池表 |
+| `accountPoolUsernameRef` / `accountPoolPasswordRef` | `CREATION_STUDIO_ACCOUNT_POOL_USERNAME` / `CREATION_STUDIO_ACCOUNT_POOL_PASSWORD` | 仅 Host 使用的服务账号与密码 |
+| `accountPoolKeyRef` | `CREATION_STUDIO_ACCOUNT_POOL_TOKEN` | 可选历史 Token；账号密码登录优先 |
 | `billingWriterKeyRef` | `CREATION_STUDIO_BILLING_WRITER_TOKEN` | 可选的受限 JDCloud 凭据，用于影子用量同步 |
 | `jimengAccessKeyRef` / `jimengSecretKeyRef` | `JIMENG_ACCESS_KEY_ID` / `JIMENG_SECRET_ACCESS_KEY` | 仅在 Host 使用的即梦 Visual API 签名凭据 |
 
-在 Harness 服务器环境或凭据存储中配置 `GPT_IMAGE_API_KEY` 和 `ARK_API_KEY`。Compose 将变量传入容器，并把媒体状态保存在既有持久化目录 `data/creation-studio-media` 中。造物片场 Skill ZIP 仍通过 Skill 管理单独安装。
+方舟 API Key 和即梦 AK/SK 存入私有账号池表。`CREATION_STUDIO_ACCOUNT_POOL_USERNAME` 和 `CREATION_STUDIO_ACCOUNT_POOL_PASSWORD` 使用专用租户账号，仅允许读取租户身份和账号池表；禁止向普通调用者授权该表。Host 登录固定租户，Token 只缓存在内存中；遇到 HTTP 401 或平台600/601/602时，并发请求共用一次重新登录，再重试原只读请求一次。权限和密码失败不循环重试或回退，凭据变化后替换登录缓存。Compose 将账号密码传入容器。两项均未配置时仍可使用可选的历史 `CREATION_STUDIO_ACCOUNT_POOL_TOKEN`。完全未配置读取凭据时，以 `ENV-ARK`、`ENV-JIMENG` 编号保留历史单密钥部署；已配置但不可读或为空的账号池不会回退。`GPT_IMAGE_API_KEY` 仅在旧 GPT 任务仍需恢复时保留。更新的造物片场 Skill ZIP 仍通过 Skill 管理单独安装。
 
 前端继续将 `/harness-api` 代理到 Harness。认证后的媒体接口保持 `/api/external/v 1/creation-studio/media/*`，网关读取超时需超过420秒。缺少供应商密钥不阻止 Harness 启动，生成配置会显示为未配置。
 
 迁移已有任务前先停止旧执行器，将 images/seedance 回执复制到 `stateDirectory` 对应子目录。更换容器时保留同一目录。上传恢复沿用原请求编号；付费提交结果不明时先核对供应商记录，再决定是否新建请求。
 
-分镜批量补图使用 `creation_studio_image_task` 和媒体前缀下的已认证 POST 接口 `images/tasks`、`images/refresh`、`images/list`。Submit 为每个缺图创建一个 `n=1` 异步供应商任务，模型保持 `gpt-image-2.5`。参考编辑用原始 JSON 请求体的 images 数组传已核验平台预览 URL，省略 Content-Type；文生图使用 JSON Content-Type。两者均传 async=true、response_format=url，认证为一个 Bearer 前缀加解析后的图片密钥。提交返回持久化请求及任务编号，无需等待图片生成完成。
+分镜生图可选 `doubao-seedream-5-0-pro-260628` 或 `doubao-seedream-5-0-flash-260915`，默认取 `imageModel`。生成规划和工具参数均保存 `model`。最多十张已核验项目参考图组成方舟 `image` URL 数组。Host 调用 `/api/v3/images/generations`，返回 PNG Base64，不加水印；尺寸支持8种比例及1K/1.5K/2K，场景资产优先16:9，16:9和9:16为推荐画幅。`images/quote`核对项目及参考图，返回当前预计积分，不调用供应商或占用账号。图片按实际解码像素范围选价，参考图超出每请求免费张数的部分另计；完成任务返回`consumption`。`images/tasks` 立即返回 Host 任务，同步供应商请求在有生命周期所有者的后台运行；卸载会等待回执持久化。`images/refresh` 继续上传，`images/list` 不创建付费任务。未知提交和重启中断请求需核对供应商记录，不自动重发；已持久化的 GPT 任务保留原查询和受限重试流程。
 
-Refresh 查询已保存的供应商编号，只有 completed 才下载内容；HTTPS 跳转跨域时不转发供应商密钥，实际解码后继续项目上传。succeeded 在 result 中返回已保存图片，pending、upload_pending、upload_failed 均保留原请求。只有明确 failed 且错误为 image generation failed; please retry 才允许自动重提，上限为 imageRetryLimit；次数及旧任务编号随同一 requestId 落盘。认证或其他客户端拒绝返回 failed 和 image/provider-rejected，结果不明仍为 unknown，绝不自动重提。既有 unknown 回执需核对供应商记录后才能新建请求。List 不创建任务。页面关闭后供应商继续生成，下载、符合条件的重提及平台上传在后续已认证查询中恢复。同步接口保留供既有单图调用方使用。
+仅从 `models` 包含本次完整API模型ID且 `scenarios` 包含本次服务的账号中分配。表单选择 `Doubao-Seedream-5.0-flash` 等具体模型名，渠道字段仅作服务端路由元数据。同一Key的多个模型共用一条账号与并发上限。账号分配优先选择在途任务数除以 `maxConcurrent` 最小的账号，同等负载随机选择，符合模型条件的启用账号占满时拒绝新任务。方舟生图和视频共享并发额度，新白底图共享方舟额度；历史即梦任务保留AK/SK池。提交前在 `stateDirectory/provider-calls` 持久化占用及每次调用的用户、项目、请求、模型、账号 ID/编号、时间和状态，不保存密钥。未知结果保留占用；生成完成或明确失败释放额度，上传恢复不重新生成。视频和白底图查询使用原账号，即使该账号已停用；任务结束前须保留原凭据。影子用量记录仅公开 `providerAccountRef`，不返回密钥。每个状态目录由一个 Host 独占，此实现不是分布式调度器。
 
 批量刷新传入 `projectId`、`planId`、`spaceId` 和非空 `taskIds` 数组，响应为任务视图数组。开始查询供应商之前，必须确认全部编号属于该项目、方案和空间。各图独立下载及上传，单项查询失败以 `refresh_failed` 返回，不隐藏其他结果。后续请求移除 `succeeded` 项；自动重提后跟随返回的新 `taskId`。工具仍可使用单个 `requestId` 的调用形式。创意或脚本确认失效时，以 `creation-studio/stale-confirmation` 停止生成，并提示重新确认对应阶段。
 
 Seedance 视频任务保留已确认脚本的旁白、字幕、音乐与音效。分镜说话人设置对应租户音色目录中当前可读的记录；共享音色不带空间 ID，私有音色须与项目空间一致。Host 下载所选音频文件并实测时长，以 audio_url 和 reference_audio 提交。样音须为 MP3 或 WAV，每条2–30秒且不超过15MB，总长不超过30秒；每次请求最多十种不同音色。提示词将说话人及原台词映射到 @音频N，样音仅作音色参考。音色无效、缺失或不可读时，在发出付费供应商请求前停止；已有任务刷新保留原参数。
 
-即梦白底图使用已认证 POST `white-background/tasks`、`white-background/refresh`、`white-background/list`。Host 需要配置两个即梦凭据引用，与 ARK 的 Bearer 密钥不同。提交需要当前空间的项目和自有或可商用图片素材，不要求已采纳方案。Host 单独生成 JPEG 参考图，使用官方签名器调用 Visual API，并让必需的 `content-type` 头参与签名，固定 `req_key=jimeng_t2i_v40`、`force_single=true` 和2048×2048输出，并把用户指定的主体要求追加到白底图提示词。提示词要求移除海报文案、悬浮标识和商品外文字，保留实际印在商品或包装上的文字，包括键盘键帽字符。原图保持不变。返回的单张图片经核验、上传后关联为生成的项目素材，保存原始素材来源；同空间其他项目可以复用。稳定请求编号恢复生成与上传进度，未知付费提交不自动重发。用量记录的供应商为 `jimeng`；没有匹配的已发布价格时费用保持待计算。
+Seedream白底图使用所选pro/flash、明确尺寸与方舟账号池，付费同步调用前固定模型和尺寸。历史即梦4.0回执保留AK/SK恢复。已认证POST接口仍为`white-background/tasks`、`white-background/refresh`、`white-background/list`。提交需要当前空间项目和自有或可商用图片，无需采纳方案。Host单独生成JPEG参考图并应用白底提示词，保留商品文字与用户指定的多视角构图；生成图仍需人工检查。原图保持不变。返回的单张图片经核验、上传后关联为生成的项目素材，保存原始素材来源；同空间其他项目可以复用。稳定请求编号恢复生成与上传进度，未知付费提交不自动重发。新用量记录的供应商为 `ark` 及所选模型；没有匹配的已发布价格时费用保持待计算。
 
 -----
 
-影子计费从持久 assistant 事件采集已认证造物片场调用尝试，不增加模型消息。正常供应商用量归属于提交用户和空间，推荐请求及供应商错误尝试由平台承担。缺用量或价格保持待核对。视频回执先于下载保存 completion_tokens，不再加一次 total_tokens。图片和视频仅在项目入库后将客户费用标为可核对；不写余额、预留或账本流水。
+影子计费从持久 assistant 事件采集已认证造物片场调用尝试，不增加模型消息。正常供应商用量（含阶段推荐）归属于提交用户和空间，供应商错误尝试和没有本轮用户操作的自动调用由平台承担。历史回执保留原费用归属。缺用量或价格保持待核对。视频回执先于下载保存 completion_tokens，不再加一次 total_tokens。图片和视频仅在项目入库后将客户费用标为可核对；不写余额、预留或账本流水。
 
 每次模型调用结束后自动向低代码用量表同步回执。配置受限服务写入凭据时优先使用；它仅需读取租户身份、查询用量表以及新增/更新用量记录。未配置时，使用原发起人当前认证请求已有的权限，不额外保存用户 Token，账号变化时拒绝继续写入。权限或网络失败保留持久待同步回执。本轮结束后在后台补同步绑定空间和项目的待处理记录；已认证 POST billing/list 也会先补同步、重算待处理记录，再按每页50条返回当前空间的本地回执。billing/sync 显式执行同样的恢复，每次最多处理50条。回执和已核验会话绑定保存在 stateDirectory/billing。更新使用 PUT；创建响应丢失时按原事件键核对，不盲目再次创建。每个状态目录由一个 Host 独占，多写入端在财务使用前须补平台唯一键。
 

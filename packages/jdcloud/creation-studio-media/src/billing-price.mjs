@@ -17,6 +17,8 @@ export function calculateShadowCharge(row, prices) {
     && price.provider === row.provider && price.modelKey === row.modelKey && price.scenario === row.scenario
     && (!price.effectiveFrom || Number(price.effectiveFrom) <= row.occurredAt)
     && (!price.effectiveTo || Number(price.effectiveTo) > row.occurredAt)
+    && (!price.imageMinPixels || row.parameters?.imagePixels >= Number(price.imageMinPixels))
+    && (!price.imageMaxPixels || row.parameters?.imagePixels <= Number(price.imageMaxPixels))
     && ['resolution', 'inputVideoMode', 'audioMode', 'serviceTier', 'imageOperation', 'imageSize', 'imageQuality'].every(key =>
       !price[key] || price[key] === 'not_applicable' || price[key] === row.parameters?.[key]))
   if (candidates.length !== 1)
@@ -36,6 +38,14 @@ export function calculateShadowCharge(row, prices) {
     const rate = amount(price[priceKey])
     if (rate === undefined) return { chargeStatus: 'pending', reason: `${priceKey} 未填写有效单价。` }
     numerator += BigInt(quantity) * rate
+  }
+  // Seedream pro 首张输入免费，其余参考图按每次请求计费；历史图片价格不补加该项。
+  if (row.scenario === 'image' && price.imageInputPerUnitYuan !== undefined && price.imageInputPerUnitYuan !== '') {
+    const rate = amount(price.imageInputPerUnitYuan)
+    const free = Number(price.imageFreeInputCount)
+    if (rate === undefined || !integer(free) || !integer(row.imageInputCount))
+      return { chargeStatus: 'pending', reason: '参考图用量或计费配置不完整。' }
+    numerator += BigInt(Math.max(0, row.imageInputCount - free)) * rate
   }
   if (row.scenario !== 'agent' && !row.delivered)
     return { chargeStatus: 'pending', reason: '媒体尚未完成项目入库，暂不计算客户应收。' }

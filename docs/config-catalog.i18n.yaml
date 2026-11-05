@@ -1,6 +1,451 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for config-catalog.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/config-catalog.md
-config-catalog.md: c3cd1180d6951b48db37557cc67330d455989c1d
-config-catalog.zh.md: 5bbd400ee63fb3c777b99b45b6561f35954b3c98
+/:
+  en: 0977df2d5eaa10e9
+  zh: 8391907932c5fb77
+/plugin-config-catalog:
+  en: 7ccc9070a7b36402
+  zh: 4f1cb2c8fef52157
+/plugin-config-catalog/deepseek-ai-dsh-acp:
+  en: 08f0a41504986b48
+  zh: 6e8c9eb169bb2f3f
+/plugin-config-catalog/deepseek-ai-dsh-agent-default-model:
+  en: 0580993a82f20043
+  zh: daa4da4b3bd0274d
+/plugin-config-catalog/deepseek-ai-dsh-agent-instructions:
+  en: 994aefcc7ee054f5
+  zh: 0073d4e4aaaf7371
+/plugin-config-catalog/deepseek-ai-dsh-agent-loop:
+  en: db01a51a88605fe0
+  zh: d8c0e83fc8ad7964
+/plugin-config-catalog/deepseek-ai-dsh-agent-preset:
+  en: ef97de31e4f0bb0b
+  zh: 06b848ed6a7fc41a
+/plugin-config-catalog/deepseek-ai-dsh-agent-preset-registry:
+  en: 70429719aea47b7b
+  zh: bf0e7270ed73dd9f
+/plugin-config-catalog/deepseek-ai-dsh-agent-tool-presentation:
+  en: 50b3c3832c9baa2d
+  zh: 9f79294596e37633
+/plugin-config-catalog/deepseek-ai-dsh-api-gateway:
+  en: a2fd3dd5e9fefacd
+  zh: ce88f083da039018
+/plugin-config-catalog/deepseek-ai-dsh-api-jdcloud-auth-controller:
+  en: 6820b55c61531d3c
+  zh: 764aa11bc17e1692
+/plugin-config-catalog/deepseek-ai-dsh-api-job-controller:
+  en: ad2a229840c717af
+  zh: 6ce9941ea6620255
+/plugin-config-catalog/deepseek-ai-dsh-api-session-controller:
+  en: d34831923c8a383c
+  zh: 326627baf66560b5
+/plugin-config-catalog/deepseek-ai-dsh-api-settings-controller:
+  en: 0e59882f6baf457d
+  zh: e97df5ddb3600060
+/plugin-config-catalog/deepseek-ai-dsh-api-terminal-controller:
+  en: cfbd1d711ecae327
+  zh: 0005d3db7a5f313d
+/plugin-config-catalog/deepseek-ai-dsh-api-workspace-controller:
+  en: 2802ba7fdd1fd9ee
+  zh: efc39cfe7b39780e
+/plugin-config-catalog/deepseek-ai-dsh-api-workspace-files:
+  en: ecf90a04fe44b666
+  zh: 72175669c7dd9f0f
+/plugin-config-catalog/deepseek-ai-dsh-attachment-local:
+  en: 3442b2a0b3913b37
+  zh: 946a969198bf1ab1
+/plugin-config-catalog/deepseek-ai-dsh-bash-local:
+  en: 6aa93924c6a9d7fc
+  zh: 18f5cc6b5e0b2466
+/plugin-config-catalog/deepseek-ai-dsh-bash-sandbox:
+  en: fc57b0faf65d3411
+  zh: e9933c7951371285
+/plugin-config-catalog/deepseek-ai-dsh-client-connection:
+  en: 4ade261a32f2f3f3
+  zh: ad400207cf4bfb85
+/plugin-config-catalog/deepseek-ai-dsh-client-hmr:
+  en: 87a12117085917be
+  zh: ad1c90d6c4252b05
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-jdcloud-login:
+  en: c575a229930b6c6c
+  zh: 890c7362f2b124df
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-plugin-manager:
+  en: b143890cd4c20a11
+  zh: 2a0bc3a5ba8d7921
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-settings-account:
+  en: cb712bb6964032fb
+  zh: 8fa77f320a5f52fd
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-settings-models:
+  en: 067a26bcd12bda71
+  zh: 2806da6aa8b58ec2
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-sidebar-documentpreview:
+  en: 175bac2bce7bd140
+  zh: b01377d2a1d3117d
+/plugin-config-catalog/deepseek-ai-dsh-client-ui-theme:
+  en: d99c0e384ff24ef3
+  zh: 2a01c66d25b275de
+/plugin-config-catalog/deepseek-ai-dsh-compaction-basic:
+  en: d469f1c4658525c7
+  zh: 7f1a80c54ca0323d
+/plugin-config-catalog/deepseek-ai-dsh-compaction-tool-result-pruner:
+  en: 1c07de664691e260
+  zh: 7408092af0b43bb1
+/plugin-config-catalog/deepseek-ai-dsh-cordis-host-runner:
+  en: f7361e58221d3a6a
+  zh: 32cccd52edc9753e
+/plugin-config-catalog/deepseek-ai-dsh-creation-studio-media:
+  en: 4007977d17172261
+  zh: 4007977d17172261
+/plugin-config-catalog/deepseek-ai-dsh-credentials-local:
+  en: fb8305bc8d3f9c98
+  zh: 28d90f55025a6a88
+/plugin-config-catalog/deepseek-ai-dsh-deepseek-account-platform:
+  en: 1ebcb1a6c18ba9e3
+  zh: 08617fbeaf841b25
+/plugin-config-catalog/deepseek-ai-dsh-experimental-agent-team:
+  en: c98629187cf310df
+  zh: 1bfa4a0289042244
+/plugin-config-catalog/deepseek-ai-dsh-experimental-api-speech-to-text:
+  en: 80c21bf93c53561e
+  zh: 4a4b0f27a88ee819
+/plugin-config-catalog/deepseek-ai-dsh-experimental-browser-use-chrome-devtools-mcp:
+  en: f40c6f76b0ef6ec3
+  zh: 2cf2fa5d3a91d034
+/plugin-config-catalog/deepseek-ai-dsh-experimental-browser-use-playwright-mcp:
+  en: 59f3ea4e2685ddc8
+  zh: 1e4061bbf755b9f3
+/plugin-config-catalog/deepseek-ai-dsh-experimental-browser-use-stagehand-native:
+  en: f4a7c77ce9c2f9cc
+  zh: 97e67b479d459049
+/plugin-config-catalog/deepseek-ai-dsh-experimental-computer-use-cua-driver-mcp:
+  en: c60a27efac198ac8
+  zh: c6f3b91f521f0cc5
+/plugin-config-catalog/deepseek-ai-dsh-experimental-inspector:
+  en: e8caa1c16040c0c4
+  zh: c0d2ee781257618b
+/plugin-config-catalog/deepseek-ai-dsh-experimental-ptc-runtime-python:
+  en: 1c94a6b9e0edc124
+  zh: 7245e91aa55bca23
+/plugin-config-catalog/deepseek-ai-dsh-experimental-speech-to-text:
+  en: a4db6f6b190826ce
+  zh: 0e1bd1ffe40077c3
+/plugin-config-catalog/deepseek-ai-dsh-experimental-speech-to-text-sensevoice:
+  en: ed08e1b058a62393
+  zh: 1301a97cc1a77245
+/plugin-config-catalog/deepseek-ai-dsh-experimental-tool-agent-team:
+  en: 77e7dbda5d0c413b
+  zh: 141a9ae94f3ae048
+/plugin-config-catalog/deepseek-ai-dsh-file-reference-local:
+  en: 42a8c42625856828
+  zh: 7e4dd93b90589ae6
+/plugin-config-catalog/deepseek-ai-dsh-fs-local:
+  en: 46570984cd8d0ec0
+  zh: 8c933ffc8e7a2a43
+/plugin-config-catalog/deepseek-ai-dsh-fs-sandbox:
+  en: d961a1234073b46b
+  zh: 28607b4a29a2aa28
+/plugin-config-catalog/deepseek-ai-dsh-goal:
+  en: 80fd0a5d5c4a1bea
+  zh: b9ea2c24a2cca890
+/plugin-config-catalog/deepseek-ai-dsh-headless:
+  en: 079c5186f114feac
+  zh: 180f2fca425467e0
+/plugin-config-catalog/deepseek-ai-dsh-hmr:
+  en: 2d106711868c5de2
+  zh: 3753c03b2e1aa696
+/plugin-config-catalog/deepseek-ai-dsh-hooks-claude-code:
+  en: 6f23ffe44b95b2c4
+  zh: ca9fe8b5d8ab987c
+/plugin-config-catalog/deepseek-ai-dsh-hooks-codex:
+  en: 6347548c0d290f86
+  zh: 436e68df5d7e46fd
+/plugin-config-catalog/deepseek-ai-dsh-host-directory-picker-browse:
+  en: 4d11d9c0da65769e
+  zh: 855d9284eb4985a3
+/plugin-config-catalog/deepseek-ai-dsh-host-frontend-static:
+  en: 37ab5e5eb056afce
+  zh: c49bf57986e40464
+/plugin-config-catalog/deepseek-ai-dsh-host-open-in-app:
+  en: a1f13bc5cf17100f
+  zh: 3916f82a52727910
+/plugin-config-catalog/deepseek-ai-dsh-host-product-telemetry-otel:
+  en: c8399f73d38d7d6d
+  zh: a09505a44d5eedee
+/plugin-config-catalog/deepseek-ai-dsh-host-webserver:
+  en: 219bdb934154f8f4
+  zh: 05212daf76b29c84
+/plugin-config-catalog/deepseek-ai-dsh-invariants:
+  en: 5f3cbfe01f45903f
+  zh: e73988850adb9f67
+/plugin-config-catalog/deepseek-ai-dsh-jobs-local:
+  en: 2bf1ab7b0ac21d84
+  zh: 8e8a4a214d23076b
+/plugin-config-catalog/deepseek-ai-dsh-llm-deepseek:
+  en: bb14c6b2494aeba1
+  zh: 7337cb89ceb46e8b
+/plugin-config-catalog/deepseek-ai-dsh-llm-pi-ai:
+  en: 7bcc5f48c2fa40a8
+  zh: b9743103d2c65bcc
+/plugin-config-catalog/deepseek-ai-dsh-llm-replay:
+  en: 6e9f9d1314a601a3
+  zh: f67ae2185d649bd1
+/plugin-config-catalog/deepseek-ai-dsh-llm-retry:
+  en: 8fe18cd03e7897c7
+  zh: b84a516f242eb5dd
+/plugin-config-catalog/deepseek-ai-dsh-lsp-stdio:
+  en: eb87667a66ec065a
+  zh: fe856098f1d7168f
+/plugin-config-catalog/deepseek-ai-dsh-mcp-client:
+  en: e5132c973fb9b16c
+  zh: 45772eca390c5dfd
+/plugin-config-catalog/deepseek-ai-dsh-message-feedback:
+  en: 734f5ca48e4ef055
+  zh: d3f92f676f400264
+/plugin-config-catalog/deepseek-ai-dsh-office-to-pdf:
+  en: 660c5ed19c9655c7
+  zh: 08707a356b26958e
+/plugin-config-catalog/deepseek-ai-dsh-permission-presets:
+  en: 8d4b82007ac16550
+  zh: 36fa39428ad20f84
+/plugin-config-catalog/deepseek-ai-dsh-persona:
+  en: 3f186124aa9cbe8e
+  zh: 82b0e83e1a146944
+/plugin-config-catalog/deepseek-ai-dsh-plan-mode:
+  en: d80e800b698abcc6
+  zh: 4f8d0d3cbc2fd76b
+/plugin-config-catalog/deepseek-ai-dsh-plugin-manager:
+  en: 45929131fbd1705c
+  zh: 670f0cbbc36d9ef0
+/plugin-config-catalog/deepseek-ai-dsh-plugin-package-inventory-deepseek:
+  en: e48ec54d9a4244e0
+  zh: fb13b711b9192257
+/plugin-config-catalog/deepseek-ai-dsh-ptc-runtime-node:
+  en: 8ce6c4502f1ae32e
+  zh: 0ea216470b71edf5
+/plugin-config-catalog/deepseek-ai-dsh-pwsh-local:
+  en: a90ae905677f1703
+  zh: db250178bdaf78f0
+/plugin-config-catalog/deepseek-ai-dsh-pwsh-sandbox:
+  en: 4a8b92986e35b3d8
+  zh: fa0736eeb8689117
+/plugin-config-catalog/deepseek-ai-dsh-repeat-tool-reminder:
+  en: 60a74882d75f1138
+  zh: ced82606e6b3a254
+/plugin-config-catalog/deepseek-ai-dsh-sandbox-local:
+  en: 95b6559745e1746e
+  zh: f7aa76f3bf5a54f2
+/plugin-config-catalog/deepseek-ai-dsh-sandbox-policy:
+  en: ce820b0239ed1db3
+  zh: d8f8e2be3cbc3153
+/plugin-config-catalog/deepseek-ai-dsh-sdk-app:
+  en: 5b19459301d9e8ca
+  zh: b91d05a993d54d09
+/plugin-config-catalog/deepseek-ai-dsh-sdk-jsonrpc-server:
+  en: 4f131fabb2c4657d
+  zh: 3b67a201e6c9e044
+/plugin-config-catalog/deepseek-ai-dsh-session-log-deepseek:
+  en: d968a8bc0ab45498
+  zh: 63dd2fbbed088690
+/plugin-config-catalog/deepseek-ai-dsh-session-log-export:
+  en: 556dc8a305a17486
+  zh: 8594aee8bcf81602
+/plugin-config-catalog/deepseek-ai-dsh-session-persistence-jsonl:
+  en: 5934f12cee09052d
+  zh: c7afe5c1d2973511
+/plugin-config-catalog/deepseek-ai-dsh-session-projection-cache:
+  en: 85202eb9d71d2cca
+  zh: 179361b47229427f
+/plugin-config-catalog/deepseek-ai-dsh-session-query-sqlite:
+  en: d2ca6e8eba45baef
+  zh: 5d256ef15ed9957f
+/plugin-config-catalog/deepseek-ai-dsh-session-reference:
+  en: b1e17aa5b55208db
+  zh: 34665b008de6fcc0
+/plugin-config-catalog/deepseek-ai-dsh-session-telemetry-otel:
+  en: de608c9fbdbb286c
+  zh: a52cc0ca7e8dc45b
+/plugin-config-catalog/deepseek-ai-dsh-session-title:
+  en: ef414e9ba5f3e9b1
+  zh: 987f69675e494678
+/plugin-config-catalog/deepseek-ai-dsh-session-title-all-prompts-llm:
+  en: 9fc1650ffbb0d162
+  zh: 2e471d0107953062
+/plugin-config-catalog/deepseek-ai-dsh-session-title-first-prompt-llm:
+  en: a37e9ecf1883cf5d
+  zh: 8c68846f0917c56d
+/plugin-config-catalog/deepseek-ai-dsh-shell-env:
+  en: f20d2fa30dfa6a0f
+  zh: 06780918d55ad653
+/plugin-config-catalog/deepseek-ai-dsh-skill:
+  en: c332a65f692e4801
+  zh: 43db0e336e160a53
+/plugin-config-catalog/deepseek-ai-dsh-skill-filesystem:
+  en: 8e51f5722b08e9ce
+  zh: 4e279c2ac1f4d065
+/plugin-config-catalog/deepseek-ai-dsh-skill-office:
+  en: 19002d72ce101589
+  zh: d3106825bcd10877
+/plugin-config-catalog/deepseek-ai-dsh-spill-local:
+  en: 06d0e580c99b2aa5
+  zh: 2458892320279920
+/plugin-config-catalog/deepseek-ai-dsh-spill-policy:
+  en: 96b5f170026cecff
+  zh: 80334cbad52836b8
+/plugin-config-catalog/deepseek-ai-dsh-ssh:
+  en: ffc79a209730f198
+  zh: 4df10d64d58ab7dd
+/plugin-config-catalog/deepseek-ai-dsh-storage-domain:
+  en: 19be079edfd86c65
+  zh: d786511a617bab2c
+/plugin-config-catalog/deepseek-ai-dsh-storage-json:
+  en: a1f2dab418639beb
+  zh: f23f2bc4b65dbfd8
+/plugin-config-catalog/deepseek-ai-dsh-storage-sqlite:
+  en: 350320a29e3d13dd
+  zh: 197f913318183dc0
+/plugin-config-catalog/deepseek-ai-dsh-subagent:
+  en: bc07eac3139dddaf
+  zh: caaaed7f114075ef
+/plugin-config-catalog/deepseek-ai-dsh-subagent-acp:
+  en: d04c7f2b92b08352
+  zh: 0b081b7af936ad9c
+/plugin-config-catalog/deepseek-ai-dsh-subagent-claude-code:
+  en: 295defe2812b29b8
+  zh: 608b4f6a4c0e2a98
+/plugin-config-catalog/deepseek-ai-dsh-subagent-codex:
+  en: 61b60ffe6f73a73e
+  zh: 138925152e3cc91e
+/plugin-config-catalog/deepseek-ai-dsh-subagent-dsh-sdk:
+  en: 59ae4351b99cfe27
+  zh: 86055c6b89955da2
+/plugin-config-catalog/deepseek-ai-dsh-subagent-fork-in-process:
+  en: e268da21f422ba16
+  zh: a527c5dc5c01a922
+/plugin-config-catalog/deepseek-ai-dsh-subagent-spawn-in-process:
+  en: 964a1265f01b8964
+  zh: 7812c09f91474d22
+/plugin-config-catalog/deepseek-ai-dsh-system-prompt:
+  en: 1eb01b6a6330982f
+  zh: 87dea8fcca2c40ba
+/plugin-config-catalog/deepseek-ai-dsh-terminal-bash:
+  en: 3e596d1b31690da9
+  zh: 53d00b00470e4bda
+/plugin-config-catalog/deepseek-ai-dsh-time-context:
+  en: 021ee53995337cfd
+  zh: fc0c1cb5d5e23d69
+/plugin-config-catalog/deepseek-ai-dsh-tmux-context:
+  en: e7d3082ff27efa0d
+  zh: f80c70a8481bcef0
+/plugin-config-catalog/deepseek-ai-dsh-token-meter:
+  en: 6c77910691ec14fc
+  zh: ff86a8f7fd3b9bbc
+/plugin-config-catalog/deepseek-ai-dsh-tool-bash:
+  en: e9baf48593d972bc
+  zh: 241c89b28446edff
+/plugin-config-catalog/deepseek-ai-dsh-tool-bash-persistent:
+  en: 4f47d8fdc799623b
+  zh: 074eacebe034eed5
+/plugin-config-catalog/deepseek-ai-dsh-tool-fs:
+  en: 3ec670da2529726c
+  zh: 1b78b68b0cb2baf2
+/plugin-config-catalog/deepseek-ai-dsh-tool-fs-search:
+  en: 6edacd35fc3522d6
+  zh: 38f572ab1afa2df0
+/plugin-config-catalog/deepseek-ai-dsh-tool-goal:
+  en: 6baa840f1c9d7026
+  zh: c65932117b32d855
+/plugin-config-catalog/deepseek-ai-dsh-tool-jdcloud-lowcode:
+  en: 638650e70738529a
+  zh: 37396c6a24921e71
+/plugin-config-catalog/deepseek-ai-dsh-tool-jobs:
+  en: 49f9d460a83d74e1
+  zh: d9c9f3417cbd3dcd
+/plugin-config-catalog/deepseek-ai-dsh-tool-lsp:
+  en: 2f5e0b2aca2e2103
+  zh: 508760b45c3f1234
+/plugin-config-catalog/deepseek-ai-dsh-tool-present:
+  en: 35ebbe6a40d8db04
+  zh: 4a4a5b3b9869a6b3
+/plugin-config-catalog/deepseek-ai-dsh-tool-pwsh:
+  en: ee4aa2762bfbc2f6
+  zh: 868dd8b6ebe9d427
+/plugin-config-catalog/deepseek-ai-dsh-tool-pwsh-persistent:
+  en: 1ebcdb5dc169f0bc
+  zh: 6fb286222d3b4e15
+/plugin-config-catalog/deepseek-ai-dsh-tool-ralph:
+  en: 95e8506a39ad4684
+  zh: fe6371ec128e9180
+/plugin-config-catalog/deepseek-ai-dsh-tool-session-query:
+  en: 5d3b87f623d186b0
+  zh: 59a083c2ee3690f6
+/plugin-config-catalog/deepseek-ai-dsh-tool-skill:
+  en: 726dc2988e9e8d4e
+  zh: 52349c49f511fe16
+/plugin-config-catalog/deepseek-ai-dsh-tool-str-replace-editor:
+  en: cf87a394c7d219bc
+  zh: 6200ae63350501e3
+/plugin-config-catalog/deepseek-ai-dsh-tool-subagent:
+  en: b37504c4cec46ba3
+  zh: ff34e7cf5b88ac09
+/plugin-config-catalog/deepseek-ai-dsh-tool-terminal:
+  en: 2f7ea7a6172df894
+  zh: b4fb7bc7dc3bd0e2
+/plugin-config-catalog/deepseek-ai-dsh-tool-todo:
+  en: 65996f18aacb7c30
+  zh: c5fc7b2b07fc53ab
+/plugin-config-catalog/deepseek-ai-dsh-tool-web:
+  en: 965344514c95243e
+  zh: 2f51fa1393f26192
+/plugin-config-catalog/deepseek-ai-dsh-tool-workflow:
+  en: 7a2e6aa2a043f519
+  zh: ba1ac456bc385d58
+/plugin-config-catalog/deepseek-ai-dsh-tool-workspace-dependencies:
+  en: 231d7b16d62dc28d
+  zh: 4fe84412d42292e0
+/plugin-config-catalog/deepseek-ai-dsh-tools:
+  en: 73e06910b09bcf6a
+  zh: 2785a1563c93afe8
+/plugin-config-catalog/deepseek-ai-dsh-typert-loader:
+  en: 0f841d74208d1e00
+  zh: a20b549777dc533d
+/plugin-config-catalog/deepseek-ai-dsh-user-approval:
+  en: 14bc5b592c8c49b5
+  zh: 8061d40086313c94
+/plugin-config-catalog/deepseek-ai-dsh-web:
+  en: 05c767fd41ae821b
+  zh: 4858aac1da72e7fc
+/plugin-config-catalog/deepseek-ai-dsh-web-app:
+  en: 575cab9624b3ae62
+  zh: 4926292c906d5a12
+/plugin-config-catalog/deepseek-ai-dsh-web-fetch-http:
+  en: 73d55f184c7e9ae9
+  zh: 3ff5801d6ff0d198
+/plugin-config-catalog/deepseek-ai-dsh-web-search-deepseek:
+  en: f10bf301f92baf50
+  zh: df1ba6c7fee14a71
+/plugin-config-catalog/deepseek-ai-dsh-web-search-exa:
+  en: 1140bd54cab3e56c
+  zh: 487c7a2f2e577110
+/plugin-config-catalog/deepseek-ai-dsh-web-search-perplexity:
+  en: 89f89ce3a318d3df
+  zh: a6ce9a79bd45ff43
+/plugin-config-catalog/deepseek-ai-dsh-webhook-github:
+  en: 32aa7e6510c14d85
+  zh: 2388643fda51c7fa
+/plugin-config-catalog/deepseek-ai-dsh-workflow-ptc:
+  en: 59921a743709b548
+  zh: 2c4000351c6d15fd
+/plugin-config-catalog/deepseek-ai-dsh-workspace-changes:
+  en: 2374497403b46a54
+  zh: 7f79b2c753f3ab43
+/plugin-config-catalog/loadable-plugins-with-no-config:
+  en: 0be4e11e3853faf7
+  zh: 68c4401dbdd6b9e1
+/plugin-config-catalog/seam-packages-not-directly-loadable:
+  en: fbbab33ae5424a08
+  zh: ae410ab160b3f1fe
+/plugin-config-catalog/library-packages-no-plugin-entry:
+  en: c870f288a45da198
+  zh: e72b4dcf0756e042

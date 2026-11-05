@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -98,7 +98,23 @@ it('counts cumulative-looking per-call usage directly and keeps missing usage pe
   expect(rows.reduce((total: number, row: { inputTokens?: number; outputTokens?: number }) => total + sumTokens(row), 0)).toBe(2900)
   expect(rows.find((row: { eventSeq: number }) => row.eventSeq === 3).usageStatus).toBe('pending')
 })
-it('waives platform recommendations and failed model attempts while preserving their token counts', async () => {
+it('charges stage recommendations to their authenticated submitter and captures each usage event once', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  await f.recorder.bind(f.session, [{ ...f.message, content: [{ type: 'text', text: f.message.content[0]!.text.replace('creation-studio-creative-plans', 'creation-studio-stage-recommender') }] }], undefined, 1)
+  const event = { type: 'assistant/message', seq: 2, time: 100, data: { turn: 1, step: 1,
+    message: { source: { provider: f.provider, model: 'model' } },
+    usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1200 } } }
+  await f.recorder.capture(f.session, event)
+  await f.recorder.capture(f.session, event)
+  const result = await f.recorder.list(f.input)
+  expect(result.total).toBe(1)
+  expect(result.rows[0]).toMatchObject({ payer: 'customer', chargeStatus: 'ready', customerChargeMicros: '14000',
+    initiatedByUserId: 'actor', requestId: 'request', syncStatus: 'synced', skillNames: '["creation-studio-stage-recommender"]' })
+  expect(f.remoteRows).toHaveLength(1)
+  expect(f.remoteRows[0]).toMatchObject({ payer: 'customer', customerChargeMicros: '14000' })
+})
+it('keeps failed recommendation attempts platform-funded while preserving their token counts', async () => {
   const f = await setup()
   await f.recorder.bind(f.session, [{ ...f.message, content: [{ type: 'text', text: f.message.content[0]!.text.replace('creation-studio-creative-plans', 'creation-studio-stage-recommender') }] }])
   await f.recorder.capture(f.session, { type: 'assistant/attempt', seq: 2, time: 100, data: { turn: 1, step: 1, stream: [
@@ -106,6 +122,29 @@ it('waives platform recommendations and failed model attempts while preserving t
     { type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error' } } },
   ] } })
   expect((await f.recorder.list(f.input)).rows[0]).toMatchObject({ payer: 'platform', chargeStatus: 'waived', customerChargeMicros: '0', inputTokens: 1000 })
+})
+it('preserves a retained platform-funded recommendation binding while billing the next recommendation', async () => {
+  const f = await setup()
+  f.events.push({ seq: 0 }, { seq: 1 })
+  const recommendation = { ...f.message, content: [{ type: 'text', text: f.message.content[0]!.text.replace('creation-studio-creative-plans', 'creation-studio-stage-recommender') }] }
+  await f.recorder.bind(f.session, [recommendation], undefined, 1)
+  const bindingName = (await readdir(join(f.config.stateDirectory, 'billing'))).find(name => name.endsWith('.bindings.json'))!
+  const bindingPath = join(f.config.stateDirectory, 'billing', bindingName)
+  const history = JSON.parse(await readFile(bindingPath, 'utf8'))
+  // Existing receipts and bindings use their persisted payer rather than the new-operation policy.
+  history[0].payer = 'platform'
+  await writeFile(bindingPath, JSON.stringify(history))
+  const recorder = createBillingRecorder(f.config, f.auth, async () => '')
+  const data = { turn: 1, step: 1, message: { source: { provider: f.provider, model: 'model' } },
+    usage: { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 } }
+  const previous = { type: 'assistant/message', seq: 2, time: 100, data }
+  await recorder.capture(f.session, previous)
+  f.events.push(previous)
+  await recorder.bind(f.session, [recommendation], undefined, 2)
+  await recorder.capture(f.session, { type: 'assistant/message', seq: 3, time: 200, data: { ...data, turn: 2 } })
+  const result = await recorder.list(f.input)
+  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 2)).toMatchObject({ payer: 'platform', customerChargeMicros: '0' })
+  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 3)).toMatchObject({ payer: 'customer', customerChargeMicros: '14000' })
 })
 it('does not replace the original submitter during media recovery or change a delivered charge back to pending', async () => {
   const f = await setup()

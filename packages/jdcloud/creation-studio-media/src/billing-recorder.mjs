@@ -162,7 +162,8 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const end = text.lastIndexOf('}')
       const value = JSON.parse(text.slice(start, end + 1))
       if (value.context?.tenantId !== config.tenantId || !id(value.context.spaceId)) return undefined
-      return { ...value.context, skillNames, payer: skillNames.includes('creation-studio-stage-recommender') ? 'platform' : 'customer' }
+      // 阶段推荐与阶段对话均按提交用户计量，错误尝试仍在采集时由平台承担。
+      return { ...value.context, skillNames, payer: 'customer' }
     } catch { return undefined }
   }
   const sessionKey = session => hash([session.id, session.header.createdAt])
@@ -252,6 +253,13 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const owner = await identity(input)
       return { ...owner, prices: await prices() }
     },
+    /** 已授权任务列表读取原请求的本地费用回执，页面刷新不丢失实际积分。 */
+    async consumption(input, scenario) {
+      const eventKey = `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`
+      const record = await read(join(directory, `${hash([config.tenantId, eventKey])}.json`))
+      return record ? { credits: record.row.customerChargeMicros === undefined ? undefined
+        : (Number(record.row.customerChargeMicros) / 1_000_000).toString(), status: record.row.chargeStatus, reason: record.row.reason } : undefined
+    },
     async media(input, binding, scenario, task, parameters) {
       if (!binding) return
       const failure = ['failed', 'expired', 'cancelled'].includes(task.status)
@@ -259,12 +267,14 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const validVideo = Number.isSafeInteger(usage?.completion_tokens) && usage.completion_tokens >= 0
         && (usage.total_tokens === undefined || usage.total_tokens === usage.completion_tokens)
       return save({ spaceId: binding.spaceId, projectId: input.projectId, initiatedByUserId: binding.initiatedByUserId,
-        requestId: input.requestId, scenario, provider: task.provider || (scenario === 'video' ? 'ark' : 'gpt-image'),
-        modelKey: task.model || (scenario === 'image' ? config.imageModel : 'doubao-seedance-2-5-260628'),
+        requestId: input.requestId, scenario, provider: task.provider || 'ark',
+        ...(task.providerAccountRef ? { providerAccountRef: task.providerAccountRef } : {}),
+        modelKey: task.model || (scenario === 'image' ? input.model || 'doubao-seedream-5-0-pro-260628' : 'doubao-seedance-2-5-260628'),
         usageEventKey: `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`,
         providerRequestId: task.id || task.taskId || '', status: failure ? 'failed' : task.status,
         usageStatus: scenario === 'image' ? (task.result ? 'reported' : 'pending') : validVideo ? 'reported' : 'pending',
         ...(scenario === 'image' && task.result ? { imageCount: 1 } : {}),
+        ...(scenario === 'image' && task.imageInputCount !== undefined ? { imageInputCount: task.imageInputCount } : {}),
         ...(validVideo ? { videoOutputTokens: usage.completion_tokens, totalTokens: usage.total_tokens } : {}),
         delivered: Boolean(task.result?.relationId || task.videoRefId), occurredAt: Date.parse(task.createdAt) || Date.now(),
         completedAt: Date.now(), usageSource: scenario === 'video' ? 'ark-task-usage' : 'platform-image-result',

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/creation-studio-seedream/guide.md
+/:
+  en: e755d5a33a0b9d31
+  zh: f8517c42a61e2cd6
+/creation-studio-images-use-seedream-and-private-account-pools:
+  en: 7b8cf10ccb281114
+  zh: fa29f8550a4a47d4
+/creation-studio-images-use-seedream-and-private-account-pools/change:
+  en: 878da56366bd444b
+  zh: 9a8889328bfaad49
+/creation-studio-images-use-seedream-and-private-account-pools/migration:
+  en: deffa8e5a8d04e4b
+  zh: 5af5bce2b8f16147
