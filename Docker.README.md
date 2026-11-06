@@ -59,6 +59,8 @@ docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
 
 如 Docker Desktop 无法拉取镜像，在 Docker Desktop 的代理设置中填写 `http://host.docker.internal:27085` 后重启 Docker Desktop。
 
+镜像在构建阶段和运行阶段均按根目录 `package.json` 的 `packageManager` 安装 pnpm，避免版本不一致时额外下载 `@pnpm/exe`。若安装依赖时仍出现 registry 网络错误，可在原构建命令中增加 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`；例如 `docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com jdcloud-harness`。更换源仍保留 `--frozen-lockfile` 和锁文件完整性校验。
+
 ## 上传并启动
 
 上传 `jdcloud-harness.tar` 和 `compose.yaml` 到服务器部署目录，例如 `/opt/jdcloud-harness`。

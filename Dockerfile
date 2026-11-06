@@ -18,11 +18,11 @@ ARG NPM_REGISTRY
 
 WORKDIR /app
 
-# Ship a real pnpm binary instead of a corepack shim: corepack resolves versions through
-# the registry at every invocation (the entrypoint runs `pnpm` outside any project, where
-# no packageManager field applies), which made container startup require registry access.
+# Install the repository's exact pnpm version so workspace commands do not download
+# another package manager. Keep a real binary available outside the project at startup.
 # pnpm ignores the `npm_config_registry` environment variable, so pass --registry explicitly.
-RUN npm install --global pnpm@11.7.0 --registry "$NPM_REGISTRY"
+COPY package.json ./
+RUN npm install --global "$(node -p 'require("./package.json").packageManager')" --registry "$NPM_REGISTRY"
 
 COPY . .
 
@@ -46,7 +46,8 @@ WORKDIR /app
 # Real pnpm binary (see builder stage); no registry access is needed to start a container.
 # The node user's npmrc keeps runtime package operations (profile plugin installs) on the
 # same registry the image was built with.
-RUN npm install --global pnpm@11.7.0 --registry "$NPM_REGISTRY" \
+COPY --from=builder /app/package.json ./
+RUN npm install --global "$(node -p 'require("./package.json").packageManager')" --registry "$NPM_REGISTRY" \
   && printf 'registry=%s\n' "$NPM_REGISTRY" > /home/node/.npmrc \
   && chown node:node /home/node/.npmrc
 
