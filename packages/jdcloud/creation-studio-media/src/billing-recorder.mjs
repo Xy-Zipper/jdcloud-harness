@@ -1,8 +1,9 @@
-/** 影子账单持久回执与低代码同步；不写钱包、预留或消费流水，不把账单送给模型。 */
+/** 实际用量计费回执与低代码同步；积分由数据助手处理，不把账单送给模型。 */
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { calculateShadowCharge, normalizeAgentUsage } from './billing-price.mjs'
+import { assertSpacePoints } from './project-points.mjs'
 
 const PRICE = '6ad81c871f280486bb45ac59'
 const USAGE = '6ad81c871f280486bb45ac5b'
@@ -13,7 +14,24 @@ const id = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const filter = (enCode, value) => ({ enCode, method: 'eq', type: 'custom', value })
 const read = async path => {
-  try { return JSON.parse(await readFile(path, 'utf8')) }
+  try {
+    const value = JSON.parse(await readFile(path, 'utf8'))
+    // 历史回执按原金额转换，不用当前价格重算，也不重新触发已同步记录的扣分。
+    if (value.row?.schemaVersion === 'shadow-billing-1') {
+      for (const [oldField, field] of [['customerChargeMicros', 'customerCharge'], ['gatewayCostMicros', 'gatewayCost']]) {
+        if (value.row[oldField] !== undefined && value.row[oldField] !== null && value.row[oldField] !== '') {
+          const raw = BigInt(value.row[oldField])
+          const cents = ((raw < 0n ? -raw : raw) + 5_000n) / 10_000n
+          value.row[field] = `${raw < 0n ? '-' : ''}${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`
+        }
+        delete value.row[oldField]
+      }
+      value.row.schemaVersion = 'usage-decimal-2'
+    }
+    // 缺少模式的旧回执保留历史标识，不通过补同步迁移已结算账单。
+    if (value.row && !value.row.billingMode) value.row.billingMode = 'shadow'
+    return value
+  }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error }
 }
 
@@ -115,8 +133,21 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       if (!remoteId && record.syncStatus === 'unknown')
         return { ...record, syncMessage: '原创建回执未知且尚未查到记录，请核对平台，不自动再次创建。' }
       const { parameters, delivered, ...syncRow } = record.row
-      const data = JSON.stringify({ ...syncRow, requestParameters: JSON.stringify(parameters),
-        deliveryStatus: delivered ? 'delivered' : 'pending', billingMode: 'shadow' })
+      // 已核算费用入库为已结算；本地 ready 回执及执行状态保持原语义。
+      const payload = { ...syncRow, requestParameters: JSON.stringify(parameters),
+        chargeStatus: syncRow.chargeStatus === 'ready' ? 'settled' : syncRow.chargeStatus,
+        deliveryStatus: delivered ? 'delivered' : 'pending' }
+      // 平台更新已结算记录会触发扣分；原回执确认存在后不重复写入或修改已结算金额。
+      const existing = found.list[0]
+      const finalHistory = record.row.billingMode === 'shadow' && record.syncStatus === 'synced' && existing?.chargeStatus === 'ready'
+      if (existing?.chargeStatus === 'settled' || finalHistory) {
+        if (!id(remoteId) || String(existing.customerCharge) !== String(payload.customerCharge)
+          || existing.payer !== payload.payer || existing.initiatedByUserId !== payload.initiatedByUserId
+          || (existing.providerRequestId && payload.providerRequestId && existing.providerRequestId !== payload.providerRequestId))
+          throw new Error('已结算回执与当前费用或供应商任务编号不一致，请人工核对；未重复更新扣分。')
+        return { ...record, remoteId, syncStatus: 'synced', syncMessage: '' }
+      }
+      const data = JSON.stringify(payload)
       if (remoteId) await call('/api/visualdev/form/update', { menuId: USAGE, _id: remoteId, data }, 'PUT')
       else {
         record = { ...record, syncStatus: 'unknown' }
@@ -140,11 +171,12 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const pinned = previous?.prices ?? priceRows
       // 操作人由首次合法提交固定；他人查询/恢复不能把账单改为自己的消费。
       const normalized = { ...previous?.row, ...row, ...(previous ? { initiatedByUserId: previous.row.initiatedByUserId, occurredAt: previous.row.occurredAt } : {}),
+        billingMode: previous?.row.billingMode ?? 'metered',
         parameters: { ...previous?.row.parameters, ...parameters } }
       const fee = calculateShadowCharge(normalized, pinned)
       const record = { key, prices: pinned, row: { ...normalized, ...fee, priceSnapshot: fee.priceSnapshot || '',
         usage: JSON.stringify(Object.fromEntries(['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'totalTokens', 'reasoningTokens', 'videoOutputTokens', 'imageCount']
-          .filter(key => normalized[key] !== undefined).map(key => [key, normalized[key]]))), receipt: '', schemaVersion: 'shadow-billing-1' },
+          .filter(key => normalized[key] !== undefined).map(key => [key, normalized[key]]))), receipt: '', schemaVersion: 'usage-decimal-2' },
         syncStatus: previous?.syncStatus === 'synced' ? 'synced' : previous?.syncStatus ?? 'pending' }
       await persist(`${key}.json`, record)
       const synced = await sync(record)
@@ -173,7 +205,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     const priceRows = await prices()
     let files
     try { files = await readdir(directory) }
-    catch (error) { if (error.code === 'ENOENT') return { mode: 'shadow', processed: 0 }; throw error }
+    catch (error) { if (error.code === 'ENOENT') return { mode: 'metered', processed: 0 }; throw error }
     let processed = 0
     for (const file of files.filter(name => /^[a-f0-9]{64}\.json$/u.test(name))) {
       if (processed >= 50) break
@@ -190,9 +222,20 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
         processed++
       })
     }
-    return { mode: 'shadow', processed }
+    return { mode: 'metered', processed }
   }
   return {
+    /** 已核验的空间绑定也随会话落盘；普通 Harness 会话没有绑定，不套用造物片场积分。 */
+    async checkPoints(session, signal) {
+      const history = bindings.get(sessionKey(session)) ?? await read(join(directory, `${sessionKey(session)}.bindings.json`))
+      const binding = history?.at(-1)
+      if (!binding) return
+      if (binding.scopeKey !== await auth.currentScopeKey()) {
+        throw Object.assign(new Error('账号已变化，已停止本次调用，请重新登录后重试。'),
+          { code: 'creation-studio/points-unavailable' })
+      }
+      await assertSpacePoints(auth, binding.spaceId, signal)
+    },
     /** 在模型运行前固定真实用户/空间和价格；不将采集结果写入消息。 */
     async bind(session, messages, parent, turn) {
       const contexts = messages.map(contextOf).filter(Boolean)
@@ -236,6 +279,8 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const source = event.data.message?.source
       const usage = event.data.usage ?? event.data.stream?.findLast(item => item.type === 'chunk' && item.chunk.type === 'usage')?.chunk.usage
       const finish = event.data.stream?.findLast(item => item.type === 'chunk' && item.chunk.type === 'finish')?.chunk.reason
+      // 积分准入拒绝发生在供应商调用之前，不生成虚构的模型用量记录。
+      if (['creation-studio/insufficient-points', 'creation-studio/points-unavailable'].includes(finish?.failure?.code)) return
       const failed = event.type === 'assistant/attempt' && finish?.kind !== 'aborted'
       const background = binding.turnNumber !== undefined && binding.turnNumber !== event.data.turn
       const normalized = normalizeAgentUsage(usage)
@@ -257,8 +302,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     async consumption(input, scenario) {
       const eventKey = `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`
       const record = await read(join(directory, `${hash([config.tenantId, eventKey])}.json`))
-      return record ? { credits: record.row.customerChargeMicros === undefined ? undefined
-        : (Number(record.row.customerChargeMicros) / 1_000_000).toString(), status: record.row.chargeStatus, reason: record.row.reason } : undefined
+      return record ? { credits: record.row.customerCharge, status: record.row.chargeStatus, reason: record.row.reason } : undefined
     },
     async media(input, binding, scenario, task, parameters) {
       if (!binding) return
@@ -266,12 +310,14 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       const usage = task.usage
       const validVideo = Number.isSafeInteger(usage?.completion_tokens) && usage.completion_tokens >= 0
         && (usage.total_tokens === undefined || usage.total_tokens === usage.completion_tokens)
+      // 视频保存供应商返回的 cgt 编号；缺少新编号的中间状态不能清空原回执。
+      const providerRequestId = task.id || task.taskId
       return save({ spaceId: binding.spaceId, projectId: input.projectId, initiatedByUserId: binding.initiatedByUserId,
         requestId: input.requestId, scenario, provider: task.provider || 'ark',
         ...(task.providerAccountRef ? { providerAccountRef: task.providerAccountRef } : {}),
         modelKey: task.model || (scenario === 'image' ? input.model || 'doubao-seedream-5-0-pro-260628' : 'doubao-seedance-2-5-260628'),
         usageEventKey: `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`,
-        providerRequestId: task.id || task.taskId || '', status: failure ? 'failed' : task.status,
+        ...(providerRequestId ? { providerRequestId } : {}), status: failure ? 'failed' : task.status,
         usageStatus: scenario === 'image' ? (task.result ? 'reported' : 'pending') : validVideo ? 'reported' : 'pending',
         ...(scenario === 'image' && task.result ? { imageCount: 1 } : {}),
         ...(scenario === 'image' && task.imageInputCount !== undefined ? { imageInputCount: task.imageInputCount } : {}),
@@ -294,7 +340,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       await reconcile(input)
       let files
       try { files = await readdir(directory) }
-      catch (error) { if (error.code === 'ENOENT') return { mode: 'shadow', rows: [], total: 0, page: 1 }; throw error }
+      catch (error) { if (error.code === 'ENOENT') return { mode: 'metered', rows: [], total: 0, page: 1 }; throw error }
       const records = []
       for (const file of files.filter(name => /^[a-f0-9]{64}\.json$/u.test(name))) {
         const record = await read(join(directory, file))
@@ -304,7 +350,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       }
       records.sort((a, b) => b.occurredAt - a.occurredAt)
       const page = Number.isSafeInteger(input.page) && input.page > 0 ? input.page : 1
-      return { mode: 'shadow', rows: records.slice((page - 1) * 50, page * 50), total: records.length, page }
+      return { mode: 'metered', rows: records.slice((page - 1) * 50, page * 50), total: records.length, page }
     },
     async close() {
       stopping = true

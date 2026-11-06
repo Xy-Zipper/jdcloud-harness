@@ -30,6 +30,7 @@ English | [中文](README.zh.md)
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse one child directory and Workspace. |
 | `GET` | `/api/external/v1/workspaces/files` | List one Workspace directory. |
 | `GET` | `/api/external/v1/sessions/history` | Read text history for a Session owned by the current identity. |
+| `POST` | `/api/external/v1/sessions/questions/answer` | Answer an owned foreground question without a new model prompt. |
 | `POST` | `/api/external/v1/sessions/create` | Create a Session without invoking a model. |
 | `GET` | `/api/external/v1/sessions/file` | Read a complete bounded text file through its owned Session. |
 | `POST` | `/api/external/v1/sessions/files/upload` | Stage raw file bytes and return a Session-specific receipt. |
@@ -42,6 +43,8 @@ All requests carry `Authorization: Bearer <token>`. JDCloud requires the low-cod
 File reads accept `sessionId/path`, reuse Session ownership and Workspace filesystem policies, and reject partial previews. Session creation accepts `workspaceId`. Uploads accept `sessionId/name` queries and raw `application/octet-stream` bytes under the 30 MiB request cap. Pass the returned `receiptId` through the same Session's `/chat.fileReceiptIds`; the existing Session services continue to own attachment admission and persistence.
 
 History also returns `running`, read from the live Agent before and after the snapshot; either running observation keeps it true. When the history window includes the current `turn/start`, `startedAt` carries that event time. Reloaded clients can poll this authenticated read without submitting another prompt, keep sending and recommendations disabled while running, and read final artifacts only after it becomes false. Intermediate Assistant text does not mean the turn completed.
+
+The history response includes `pendingQuestions` with question text, options, the original `callId`, and `answerable`. Live history counts visible messages rather than letting tool events displace them; a running turn can read earlier pages back to its start to recover unanswered calls. `POST /api/external/v1/sessions/questions/answer` accepts `sessionId/callId/answers`, verifies Session ownership, and completes only that still-open question without a new prompt. Closing or switching a client view leaves the question active. Requests held by an older Host remain visible with `answerable=false` and must be answered in their original Harness window; do not restart that Host while its blocking call is open.
 
 <a id="model-experience"></a>
 ## Model Experience

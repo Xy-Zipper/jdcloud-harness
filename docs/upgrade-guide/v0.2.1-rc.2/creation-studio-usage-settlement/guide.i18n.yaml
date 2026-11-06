@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/creation-studio-usage-settlement/guide.md
+/:
+  en: e22badb0572db643
+  zh: f87578074f550418
+/creation-studio-usage-fees-write-settled:
+  en: 56000006fc6c5409
+  zh: 1287d38ca2ce94b4
+/creation-studio-usage-fees-write-settled/change:
+  en: 78197019d0310e6c
+  zh: e1eee29ca40c048e
+/creation-studio-usage-fees-write-settled/migration:
+  en: 777f0c17ea3d9ba2
+  zh: 0c5ee3b3df19bb30

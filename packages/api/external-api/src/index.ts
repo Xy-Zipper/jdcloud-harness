@@ -24,6 +24,9 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import { bridge, type ConnectionFetchHandler, type PeerScope } from '@deepseek-ai/dsh-client-connection'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-user-questions'
+import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { unzipSync } from 'fflate'
@@ -87,6 +90,7 @@ const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Respo
   [`${API_PREFIX}/workspaces/create`, workspacesCreate],
   [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
   [`${API_PREFIX}/sessions/history`, sessionHistory],
+  [`${API_PREFIX}/sessions/questions/answer`, answerSessionQuestion],
   [`${API_PREFIX}/sessions/create`, sessionCreate],
   [`${API_PREFIX}/sessions/file`, sessionFile],
   [`${API_PREFIX}/sessions/files/upload`, sessionFileUpload],
@@ -225,16 +229,101 @@ async function sessionHistory(ctx: Context, request: Request): Promise<Response>
       if (opening.done || opening.value.type !== 'snapshot') {
         throw new Error('Session history did not open with a snapshot')
       }
-      const running = wasRunning || ctx.agents.get(id)?.status === 'running'
-      const startedAt = running ? opening.value.records.findLast(record => record.event.type === 'turn/start')?.event.time : undefined
+      const live = ctx.agents.get(id)
+      const running = wasRunning || live?.status === 'running'
+      const visibleRecords = [...opening.value.records]
+      // Recover older foreground calls through paged history without reading the live Session log.
+      let hasMore = opening.value.hasMore
+      while (running && hasMore && !visibleRecords.some(record => record.event.type === 'turn/start')) {
+        const page = await ctx.sessionController.page({
+          address: { kind: 'session', sessionId: id },
+          throughSeq: opening.value.cursor,
+          beforeSeq: visibleRecords[0]?.event.seq ?? opening.value.cursor + 1,
+          maxMessages,
+          turnWindow: { minMessages: 1, minTurns: 1 },
+        }, request.signal)
+        visibleRecords.unshift(...page.records)
+        hasMore = page.hasMore
+      }
+      const startedAt = running ? visibleRecords.findLast(record => record.event.type === 'turn/start')?.event.time : undefined
+      const pendingQuestions = sessionQuestions(ctx, id, visibleRecords)
       return {
         sessionId,
         cursor: opening.value.cursor,
         hasMore: opening.value.hasMore,
         running,
         ...(startedAt === undefined ? {} : { startedAt }),
-        messages: externalSessionMessages(opening.value.records),
+        messages: externalSessionMessages(visibleRecords).slice(-maxMessages),
+        ...(pendingQuestions.length ? { pendingQuestions } : {}),
       }
+    } finally {
+      await iterator.return?.()
+    }
+  })
+}
+
+/** Read foreground questions after the Session ownership check; older live calls remain visible but read-only. */
+function sessionQuestions(ctx: Context, sessionId: SessionId, records: readonly SessionHistoryRecord[]) {
+  const agent = ctx.agents.get(sessionId)
+  const service = ctx.get('userQuestions')
+  if (agent !== undefined && typeof service?.pendingOpen === 'function') {
+    const open = service.pendingOpen(agent)
+    if (open.length) return open.map(item => ({ ...item, answerable: true }))
+  }
+  const pending = new Map<string, { callId: string; questions: AskUserQuestionItem[]; answerable: boolean }>()
+  for (const { event } of records) {
+    if (event.type === 'turn/end') pending.clear()
+    const data: unknown = event.data
+    if (!isPlainRecord(data)) continue
+    if (event.type === 'tool/result' && isPlainRecord(data.message) && typeof data.message.toolCallId === 'string') pending.delete(data.message.toolCallId)
+    if (event.type !== 'tool/call' || data.name !== 'ask_user_question' || typeof data.callId !== 'string' || typeof data.arguments !== 'string') continue
+    let args: unknown
+    try { args = JSON.parse(data.arguments) }
+    catch { continue }
+    if (!isPlainRecord(args) || !Array.isArray(args.questions)) continue
+    const questions = args.questions.flatMap((item): AskUserQuestionItem[] => {
+      if (!isPlainRecord(item) || typeof item.id !== 'string' || typeof item.question !== 'string') return []
+      const options = Array.isArray(item.options) ? item.options.flatMap(option =>
+        isPlainRecord(option) && typeof option.label === 'string'
+          ? [{ label: option.label, ...(typeof option.description === 'string' ? { description: option.description } : {}) }] : []) : undefined
+      return [{ id: item.id, question: item.question,
+        ...(typeof item.header === 'string' ? { header: item.header } : {}),
+        ...(options === undefined ? {} : { options }), multiSelect: item.multi_select === true }]
+    })
+    if (questions.length) pending.set(data.callId, { callId: data.callId, questions, answerable: false })
+  }
+  return [...pending.values()]
+}
+
+/** Resume the owned foreground question instead of queuing another model prompt. */
+async function answerSessionQuestion(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    const body = await jsonBody(request)
+    const sessionId = brandString<SessionId>(requiredString(body['sessionId'], 'sessionId'))
+    const callId = ToolCallId(requiredString(body['callId'], 'callId'))
+    if (!Array.isArray(body['answers'])) throw badRequest('answers must be an array')
+    const answer: AskUserQuestionAnswer = { answers: body['answers'].map((item) => {
+      if (!isPlainRecord(item) || typeof item.id !== 'string' || !Array.isArray(item.selected)
+        || !item.selected.every((label: unknown) => typeof label === 'string')
+        || (item.custom !== undefined && typeof item.custom !== 'string')) throw badRequest('invalid question answer')
+      return { id: item.id, selected: item.selected, ...(typeof item.custom === 'string' ? { custom: item.custom } : {}) }
+    }) }
+    const iterator = ctx.sessionController.follow({ address: { kind: 'session', sessionId }, maxMessages: 1 }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') throw badRequest('Session history is unavailable')
+      const agent = ctx.agents.get(sessionId)
+      const service = ctx.get('userQuestions')
+      if (agent === undefined || typeof service?.answerOpen !== 'function')
+        throw badRequest('This question is still owned by the original Harness window; answer it there.')
+      try {
+        if (!service.answerOpen(agent, callId, answer)) throw badRequest('The question has already closed; refresh before answering.')
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'BAD_ANSWER') throw badRequest(error.message)
+        throw error
+      }
+      return { accepted: true, sessionId, callId }
     } finally {
       await iterator.return?.()
     }
@@ -379,6 +468,7 @@ async function pumpChat(
   input: ChatRequest,
   signal: AbortSignal,
 ): Promise<void> {
+  let stopQuestions: (() => void) | undefined
   const iterator = ctx.sessionController.follow({
     address: { kind: 'session', sessionId },
     assistantStream: true,
@@ -387,6 +477,19 @@ async function pumpChat(
   try {
     const opening = await iterator.next()
     if (opening.done || opening.value.type !== 'snapshot') throw new Error('Session follow did not open with a snapshot')
+    // The owned external conversation supplies an answer UI even without a Web tab.
+    stopQuestions = ctx.on('user-questions/request', (question, next) => {
+      if (question.agent?.id !== sessionId || question.wait === undefined) return next()
+      return new Promise((_resolve, reject) => {
+        const signal = question.signal
+        const abort = () => {
+          const reason: unknown = signal?.reason
+          reject(reason instanceof Error ? reason : new Error('Question request aborted'))
+        }
+        if (signal?.aborted) abort()
+        else signal?.addEventListener('abort', abort, { once: true })
+      })
+    }, { global: true, prepend: true })
     sendEvent(controller, encoder, 'session', { sessionId })
     sendEvent(controller, encoder, 'snapshot', opening.value)
     const skillPrefix = input.skillNames.map(name => `/${name}`).join(' ')
@@ -419,6 +522,7 @@ async function pumpChat(
       controller.close()
     }
   } finally {
+    stopQuestions?.()
     await iterator.return?.()
   }
 }

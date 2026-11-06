@@ -1,0 +1,10 @@
+version: 1
+scenario: creation-studio-points
+profile: headless
+composition: creation-studio-points
+recording: authored
+header:
+  class: creation-studio-points
+  pin: true
+workspace:
+  final: true

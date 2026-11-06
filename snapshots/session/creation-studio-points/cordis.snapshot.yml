@@ -1,0 +1,43 @@
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
+  disabled: true
+- insert:
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: deepseek-official
+            name: DeepSeek
+            models:
+              - id: deepseek-v4-flash
+# Keep the real low-code tool and media plugin; only the platform is a keyless fixture.
+- id: credentials
+  disabled: false
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    watch: false
+- insert:
+    - id: project-points-platform
+      name: '../../../packages/jdcloud/creation-studio-media/tests/fixtures/project-points-platform.ts'
+    - id: tool-jdcloud-lowcode
+      name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
+    - id: media-test-webserver
+      name: '@deepseek-ai/dsh-host-webserver'
+      config:
+        host: 127.0.0.1
+        port: 0
+    - id: creation-studio-media
+      name: '@deepseek-ai/dsh-creation-studio-media'
+      config:
+        platformURL: https://mi.kindoucloud.com
+        tenantId: 6ad80f2f1f280486bb45ac3a
+        stateDirectory: !!js "process.env.DSH_HOME + '/creation-studio-media'"
+    - id: media-portable-context
+      name: '../../../packages/jdcloud/creation-studio-media/tests/fixtures/portable-context.ts'

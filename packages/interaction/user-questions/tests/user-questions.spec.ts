@@ -41,6 +41,29 @@ function stubAgent(id: string, delegationDepth = 0): Agent {
 }
 
 describe('UserQuestionService', () => {
+  it('recovers a foreground question and accepts its answer once through another authenticated client', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(UserQuestionService)
+    const agent = stubAgent('external-question')
+    ctx.agents.enter(agent, undefined)
+    registerAnswerer(ctx, { ask: request => new Promise((_resolve, reject) => {
+      request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true })
+    }) })
+    const callId = ToolCallId('question-call')
+    const questions = [{ id: 'references', question: 'Use confirmed requirements?', options: [{ label: 'Use requirements' }] }]
+    const result = ctx.userQuestions.ask({ agent, wait: { callId }, questions })
+    expect(ctx.userQuestions.pendingOpen(agent)).toEqual([{ callId, questions, state: 'open' }])
+    expect(() => ctx.userQuestions.answerOpen(agent, callId, { answers: [{ id: 'wrong', selected: [] }] })).toThrow('exactly once')
+    expect(() => ctx.userQuestions.answerOpen(agent, callId, { answers: [{ id: 'references', selected: ['invented'] }] })).toThrow('offered')
+    const answer = { answers: [{ id: 'references', selected: ['Use requirements'] }] }
+    expect(ctx.userQuestions.answerOpen(agent, callId, answer)).toBe(true)
+    expect(ctx.userQuestions.answerOpen(agent, callId, answer)).toBe(false)
+    await expect(result).resolves.toEqual(answer)
+    expect(ctx.userQuestions.pendingOpen(agent)).toEqual([])
+  })
+
   it('delegates ask requests to the registered provider', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)

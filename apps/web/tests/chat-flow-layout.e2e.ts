@@ -29,6 +29,7 @@ it.each(['turn-tail-actions', 'goal-multi-turn-actions', 'present'] as const)(
     const controls = page.locator('[data-turn-process]')
     await expect.poll(() => controls.count()).toBe(scenario === 'goal-multi-turn-actions' ? 2 : 1)
     const process = controls.first()
+    expect(await process.textContent()).not.toContain('{duration}')
     expect(await process.getAttribute('aria-expanded')).toBe('false')
     expect(await process.evaluate(element => element.closest('[data-slot="conversation.chat.flow"]') !== null)).toBe(true)
 

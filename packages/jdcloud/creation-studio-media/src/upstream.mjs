@@ -47,8 +47,11 @@ export function confirmedStoryboardUpstream(requirement, project, row, rows) {
   const rawSpec = parse(project.specification, {})
   const specKeys = ['family', 'primary', 'secondary', 'objective', 'presentation', 'duration', 'ratio']
   requireValue(object(rawSpec) && specKeys.every(key => typeof rawSpec[key] === 'string') && object(rawSpec.styles)
+    && (rawSpec.durationMode === undefined || ['fixed', 'estimated'].includes(rawSpec.durationMode))
     && Object.values(rawSpec.styles).every(axis => Array.isArray(axis) && axis.length <= 1 && axis.every(text)), 'Invalid specification')
-  const specification = { ...Object.fromEntries(specKeys.map(key => [key, rawSpec[key]])), styles: rawSpec.styles }
+  // Optional duration mode retains the frontend JSON order; legacy hashes stay unchanged.
+  const specification = { ...Object.fromEntries(specKeys.map(key => [key, rawSpec[key]])), styles: rawSpec.styles,
+    ...(rawSpec.durationMode ? { durationMode: rawSpec.durationMode } : {}) }
   const formKeys = ['productName', 'productCategory', 'platform', 'audience', 'intent', 'avoid', 'sellingPoints']
   requireValue(formKeys.every(key => typeof project[key] === 'string'), 'Missing requirement fields')
   const form = Object.fromEntries(formKeys.map(key => [key, project[key]]))
@@ -92,8 +95,11 @@ export function confirmedStoryboardUpstream(requirement, project, row, rows) {
       ...(detail ? { scriptDetail: detail } : {}),
     }
   })
-  requireValue(shots.reduce((sum, shot) => sum + shot.seconds, 0) === plan.seconds, 'Confirmed shot duration differs from plan')
-  requireValue(plan.seconds >= 4, 'Shot total duration must be at least 4 seconds')
+  const total = shots.reduce((sum, shot) => sum + shot.seconds, 0)
+  // Estimated films and plans stay within the requirement limit; fixed films match the plan.
+  const limit = Number(/^seconds_(\d+)$/u.exec(specification.duration)?.[1] ?? plan.seconds)
+  requireValue(specification.durationMode === 'estimated' ? total <= limit && plan.seconds <= limit : total === plan.seconds, 'Confirmed shot duration differs from requirement or plan')
+  requireValue(total >= 4 && plan.seconds >= 4, 'Shot total duration must be at least 4 seconds')
   const stamps = parse(row.stageConfirmations, {})
   const revisions = stamps.revisions
   const formHash = frontendHash({ ...form, specification: JSON.stringify(specification), caseIds })

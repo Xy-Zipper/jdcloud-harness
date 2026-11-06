@@ -192,7 +192,7 @@
     },
     {
       "name": "creation_studio_video_task",
-      "description": "提交、查询或列出已保存批次的 Seedance 2.5 参考生视频任务；完成后上传项目素材。",
+      "description": "按已保存批次选择的 Seedance 2.0、2.0-fast、2.0-mini 或2.5模型提交参考生视频，或查询、列出任务；完成后上传项目素材。",
       "parameters": {
         "type": "object",
         "properties": {

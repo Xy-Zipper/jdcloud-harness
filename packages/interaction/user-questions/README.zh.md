@@ -32,7 +32,7 @@ kind: "package-reference"
 
 请求包含 agent 时，`ask()` 会通过当前 `AgentRegistry` 验证该 agent 与注册表中的存活实例是同一对象，并且只允许运行时根调用。存活子级不能发起人机交互。不含 agent 的程序化请求仍会交给本地未限定 scope 的 waterfall listener，若无人接受则以 `NO_PROVIDER` 失败。
 
-工具调用开放期间，唯一的回答路径就是这条请求；重新连接的浏览器会再次收到它，仍可完成。调用返回 pending 之后，或拥有它的进程结束之后，问题进入 `continued`：`answer` Remote 方法把回复作为 `user-question-reply` 消息 steer 给 agent。没有任何 Remote 方法会放弃问题——Client 收起面板时不发送任何内容，因此该调用在收到回答前一直可回答。回答已关闭的会话时先恢复其根 agent。两条路径都不会为已结束的工具调用伪造结果。
+工具调用开放期间，原请求与已认证外部客户端共享同一个待回答调用。Host 适配器校验 Session 归属后，通过 `pendingOpen(agent)` 读取问题，并调用 `answerOpen(agent, callId, answer)` 提交回答。只有一个客户端能完成该调用；接受回答后关闭其他回答界面。调用返回 pending 之后，或拥有它的进程结束之后，问题进入 `continued`：`answer` Remote 方法把回复作为 `user-question-reply` 消息 steer 给 agent。没有任何 Remote 方法会放弃问题——Client 收起面板时不发送任何内容，因此该调用在收到回答前一直可回答。回答已关闭的会话时先恢复其根 agent。两条路径都不会为已结束的工具调用伪造结果。
 
 <a id="role"></a>
 ## 职责

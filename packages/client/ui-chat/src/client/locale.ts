@@ -127,7 +127,8 @@ export const zh = {
   'message.unknownBlock': '未知内容块',
   'message.turnProcess.worked': '已完成工作',
   'message.turnProcess.deepDivingFor': '深度求索中，用时{duration}',
-  'message.turnProcess.took': '用时 {duration}',
+  // Completed duration is appended as separately styled numeric and unit fragments.
+  'message.turnProcess.took': '用时 ',
   'message.turnProcess.failed': '处理失败',
   'image.open': '查看大图',
   'image.loading': '加载图片…',
@@ -336,7 +337,7 @@ export const en = {
   'message.unknownBlock': 'Unknown content block',
   'message.turnProcess.worked': 'Worked',
   'message.turnProcess.deepDivingFor': 'Deep diving for {duration}',
-  'message.turnProcess.took': 'Took {duration}',
+  'message.turnProcess.took': 'Took ',
   'message.turnProcess.failed': 'Failed',
   'image.open': 'View full image',
   'image.loading': 'Loading image…',

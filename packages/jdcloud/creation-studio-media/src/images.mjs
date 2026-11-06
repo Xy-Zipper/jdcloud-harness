@@ -191,6 +191,8 @@ export function createImageService(env, transport = fetch) {
   async function retryTask(token, input, task) {
     const count = task.retryCount ?? 0
     if (!task.retryable || count >= retryLimit) return task
+    // 历史 GPT 失败重提会新增供应商费用，余额不足时只保留原回执供核对。
+    if (env.CHECK_POINTS) await env.CHECK_POINTS(input.spaceId)
     if (!apiKey) throw new ApiError('生图服务尚未配置 GPT_IMAGE_API_KEY。', 503)
     const references = []
     for (const relationId of task.source.referenceIds) references.push(await referenceData(token, input, relationId))

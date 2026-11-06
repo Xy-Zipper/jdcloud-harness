@@ -57,6 +57,7 @@ function context(services: {
   readonly files?: object
   readonly uploads?: object
   readonly agents?: object
+  readonly questions?: object
 } = {}): Context {
   const ctx = new Context()
   contexts.push(ctx)
@@ -81,6 +82,7 @@ function context(services: {
   ctx.provide('sessionController', services.sessions ?? {} as never)
   ctx.provide('workspaceController', services.workspaces ?? {} as never)
   ctx.provide('workspaceFiles', services.files ?? {} as never)
+  if (services.questions !== undefined) ctx.provide('userQuestions', services.questions as never)
   if (services.uploads !== undefined) ctx.provide('fileUploads', services.uploads as never)
   return ctx
 }
@@ -468,6 +470,38 @@ describe('external API Session files', () => {
 })
 
 describe('external API Session history', () => {
+  it('recovers unresolved question text through paged history when the opening window omits the call', async () => {
+    const events = [{ type: 'tool/call', seq: 100, time: 100, data: { callId: 'question-call', name: 'ask_user_question',
+      arguments: JSON.stringify({ questions: [{ id: 'references', question: 'Use requirements without references?', options: [{ label: 'Allow', description: 'Continue the same script' }] }] }) } }]
+    const page = vi.fn(async () => ({ records: events.map(event => ({ type: 'event', event })), hasMore: false }))
+    const ctx = context({ agents: { get: () => ({ status: 'running' }) },
+      sessions: { follow: async function* () { yield { type: 'snapshot', records: [], cursor: 1000, hasMore: true } }, page } })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/history?sessionId=script'))
+    await expect(response.json()).resolves.toMatchObject({ data: { running: true, pendingQuestions: [{
+      callId: 'question-call', answerable: false, questions: [{ id: 'references', question: 'Use requirements without references?' }],
+    }] } })
+    expect(page).toHaveBeenCalledWith(expect.objectContaining({ throughSeq: 1000, beforeSeq: 1001 }), expect.any(AbortSignal))
+  })
+
+  it('answers an owned open question without sending another model prompt and rejects foreign Sessions', async () => {
+    const prompt = vi.fn()
+    const answerOpen = vi.fn(() => true)
+    const agent = { id: 'script' }
+    const follow = vi.fn(async function* ({ address }: { address: { sessionId: string } }) {
+      if (address.sessionId === 'foreign') throw new RemoteError('session/not-found', 'not owned', { sessionId: brandString<SessionId>('foreign') })
+      yield { type: 'snapshot', records: [] }
+    })
+    const ctx = context({ agents: { get: () => agent }, sessions: { follow, prompt }, questions: { answerOpen } })
+    const send = (sessionId: string) => fetchExternalApi(ctx, request('/api/external/v1/sessions/questions/answer', {
+      method: 'POST', body: JSON.stringify({ sessionId, callId: 'question-call', answers: [{ id: 'references', selected: ['Allow'] }] }),
+    }, { 'content-type': 'application/json' }))
+    expect((await send('foreign')).status).toBe(404)
+    expect(answerOpen).not.toHaveBeenCalled()
+    expect((await send('script')).status).toBe(200)
+    expect(answerOpen).toHaveBeenCalledWith(agent, 'question-call', { answers: [{ id: 'references', selected: ['Allow'] }] })
+    expect(prompt).not.toHaveBeenCalled()
+  })
+
   it('reports a running Agent even after intermediate assistant text and never submits another prompt', async () => {
     let running = true
     const prompt = vi.fn()
@@ -478,7 +512,9 @@ describe('external API Session history', () => {
         records: [{ type: 'event', event: { type: 'turn/start', seq: 1, time: 100, data: { turn: 1 } } }],
       }
     })
-    const ctx = context({ agents: { get: () => ({ status: running ? 'running' : 'idle' }) }, sessions: { follow, prompt } })
+    const ctx = context({ agents: { get: () => ({ status: running ? 'running' : 'idle', session: {
+      snapshotEvents: () => [{ type: 'turn/start', time: 100, data: { turn: 1 } }],
+    } }) }, sessions: { follow, prompt } })
     const path = '/api/external/v1/sessions/history?sessionId=session-history'
     const active = await fetchExternalApi(ctx, request(path))
     await expect(active.json()).resolves.toMatchObject({ data: { running: true, startedAt: 100 } })

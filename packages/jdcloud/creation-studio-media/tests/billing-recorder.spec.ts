@@ -76,13 +76,74 @@ it('captures final usage once, survives replay and never writes money tables or 
   await replay.capture(f.session, event)
   const result = await replay.list(f.input)
   expect(result.total).toBe(1)
-  expect(result.rows[0]).toMatchObject({ customerChargeMicros: '14000', chargeStatus: 'ready', syncStatus: 'pending', initiatedByUserId: 'actor', requestId: 'request' })
+  expect(result.rows[0]).toMatchObject({ customerCharge: '0.01', chargeStatus: 'ready', syncStatus: 'pending', initiatedByUserId: 'actor', requestId: 'request' })
+  expect(result.rows[0]).not.toHaveProperty('customerChargeMicros')
   expect(f.auth.requestAuthenticated.mock.calls.every(([request]) => !request.body?.menuId
     || ['6ad81c871f280486bb45ac59', '6ad81c871f280486bb45ac5b', '6adb0fbec3ca9f3dcdaf499a', '6ad81c131f280486bb45ac3f'].includes(request.body.menuId))).toBe(true)
   expect(f.events).toHaveLength(1)
 })
+
+it('persists the provider video task ID with formal metered billing and restores it after restart', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  const model = 'doubao-seedance-2-5-260628'
+  f.prices.push({ ...f.prices[0]!, _id: 'e'.repeat(24), provider: 'ark', modelKey: model,
+    scenario: 'video', videoPerMillionYuan: '70' } as typeof f.prices[number])
+  const input = { ...f.input, planId: 'f'.repeat(24), requestId: 'video-request' }
+  const binding = await f.recorder.beginMedia(input)
+  const task = { id: 'cgt-20261106104442-test', model, status: 'succeeded', createdAt: new Date().toISOString(),
+    usage: { completion_tokens: 100000, total_tokens: 100000 }, videoRefId: '1'.repeat(24) }
+  await f.recorder.media(input, binding, 'video', task, { resolution: '720p', inputVideoMode: 'none' })
+  expect(f.remoteRows[0]).toMatchObject({ billingMode: 'metered', providerRequestId: task.id, customerCharge: '7.00', chargeStatus: 'settled' })
+  const replay = createBillingRecorder(f.config, f.auth, async () => '')
+  expect(await replay.list(input)).toMatchObject({ mode: 'metered', rows: [{ providerRequestId: task.id, billingMode: 'metered' }] })
+  await replay.media(input, binding, 'video', task, { resolution: '720p', inputVideoMode: 'none' })
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
+})
+
+it('does not update a settled usage row when the same model receipt is recovered again', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  await f.recorder.bind(f.session, [f.message])
+  const event = { type: 'assistant/message', seq: 2, time: 100, data: { turn: 1, step: 1,
+    message: { source: { provider: f.provider, model: 'model' } },
+    usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 } } }
+  await f.recorder.capture(f.session, event)
+  const replay = createBillingRecorder(f.config, f.auth, async () => '')
+  await replay.capture(f.session, event)
+  expect(f.remoteRows).toHaveLength(1)
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
+})
+
+it('retains the original provider task ID when an intermediate receipt has no new ID', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  const input = { ...f.input, planId: 'f'.repeat(24), requestId: 'video-request' }
+  const binding = await f.recorder.beginMedia(input)
+  const task = { id: 'cgt-20261106104442-test', status: 'running', createdAt: new Date().toISOString() }
+  await f.recorder.media(input, binding, 'video', task, {})
+  await f.recorder.media(input, binding, 'video', { status: 'running', createdAt: task.createdAt }, {})
+  expect(f.remoteRows[0]).toMatchObject({ providerRequestId: task.id, billingMode: 'metered' })
+})
+
+it('holds a conflicting settled amount for review without triggering another deduction update', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  await f.recorder.bind(f.session, [f.message])
+  const event = { type: 'assistant/message', seq: 2, time: 100, data: { turn: 1, step: 1,
+    message: { source: { provider: f.provider, model: 'model' } },
+    usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 } } }
+  await f.recorder.capture(f.session, event)
+  f.remoteRows[0]!.customerCharge = '9.00'
+  const replay = createBillingRecorder(f.config, f.auth, async () => '')
+  await replay.capture(f.session, event)
+  expect((await replay.list(f.input)).rows[0].syncMessage).toContain('人工核对')
+  expect(f.remoteRows[0]!.customerCharge).toBe('9.00')
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
+})
 it('counts cumulative-looking per-call usage directly and keeps missing usage pending', async () => {
   const f = await setup()
+  f.allowUsageWrites()
   await f.recorder.bind(f.session, [f.message])
   const usages = [
     [1, { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 }],
@@ -97,6 +158,47 @@ it('counts cumulative-looking per-call usage directly and keeps missing usage pe
   const sumTokens = (row: { inputTokens?: number; outputTokens?: number }) => (row.inputTokens || 0) + (row.outputTokens || 0)
   expect(rows.reduce((total: number, row: { inputTokens?: number; outputTokens?: number }) => total + sumTokens(row), 0)).toBe(2900)
   expect(rows.find((row: { eventSeq: number }) => row.eventSeq === 3).usageStatus).toBe('pending')
+  expect(f.remoteRows.find(row => row.eventSeq === 3)).toMatchObject({ status: 'succeeded', chargeStatus: 'pending' })
+})
+it('reads retained micro receipts as decimal amounts without resynchronizing settled history', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  await f.recorder.bind(f.session, [f.message])
+  await f.recorder.capture(f.session, { type: 'assistant/message', seq: 2, time: 100, data: { turn: 1, step: 1,
+    usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
+    message: { source: { provider: f.provider, model: 'model' } } } })
+  const filename = (await readdir(join(f.config.stateDirectory, 'billing'))).find(name => /^[a-f0-9]{64}\.json$/u.test(name))!
+  const path = join(f.config.stateDirectory, 'billing', filename)
+  const record = JSON.parse(await readFile(path, 'utf8'))
+  delete record.row.customerCharge
+  delete record.row.billingMode
+  Object.assign(record.row, { schemaVersion: 'shadow-billing-1', customerChargeMicros: '14000' })
+  await writeFile(path, JSON.stringify(record))
+  const replay = createBillingRecorder(f.config, f.auth, async () => '')
+  const result = await replay.list(f.input)
+  expect(result.rows[0]).toMatchObject({ customerCharge: '0.01', schemaVersion: 'usage-decimal-2', billingMode: 'shadow' })
+  expect(result.rows[0]).not.toHaveProperty('customerChargeMicros')
+  expect(f.remoteRows).toHaveLength(1)
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
+})
+it('keeps an already synchronized legacy ready row unchanged when its event is replayed', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  await f.recorder.bind(f.session, [f.message])
+  const event = { type: 'assistant/message', seq: 2, time: 100, data: { turn: 1, step: 1,
+    usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
+    message: { source: { provider: f.provider, model: 'model' } } } }
+  await f.recorder.capture(f.session, event)
+  Object.assign(f.remoteRows[0]!, { billingMode: 'shadow', chargeStatus: 'ready' })
+  const file = (await readdir(join(f.config.stateDirectory, 'billing'))).find(name => /^[a-f0-9]{64}\.json$/u.test(name))!
+  const path = join(f.config.stateDirectory, 'billing', file)
+  const record = JSON.parse(await readFile(path, 'utf8'))
+  delete record.row.billingMode
+  await writeFile(path, JSON.stringify(record))
+  const replay = createBillingRecorder(f.config, f.auth, async () => '')
+  await replay.capture(f.session, event)
+  expect(f.remoteRows[0]).toMatchObject({ billingMode: 'shadow', chargeStatus: 'ready' })
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
 })
 it('charges stage recommendations to their authenticated submitter and captures each usage event once', async () => {
   const f = await setup()
@@ -109,19 +211,21 @@ it('charges stage recommendations to their authenticated submitter and captures 
   await f.recorder.capture(f.session, event)
   const result = await f.recorder.list(f.input)
   expect(result.total).toBe(1)
-  expect(result.rows[0]).toMatchObject({ payer: 'customer', chargeStatus: 'ready', customerChargeMicros: '14000',
+  expect(result.rows[0]).toMatchObject({ payer: 'customer', chargeStatus: 'ready', customerCharge: '0.01',
     initiatedByUserId: 'actor', requestId: 'request', syncStatus: 'synced', skillNames: '["creation-studio-stage-recommender"]' })
   expect(f.remoteRows).toHaveLength(1)
-  expect(f.remoteRows[0]).toMatchObject({ payer: 'customer', customerChargeMicros: '14000' })
+  expect(f.remoteRows[0]).toMatchObject({ payer: 'customer', customerCharge: '0.01', status: 'succeeded', chargeStatus: 'settled' })
 })
 it('keeps failed recommendation attempts platform-funded while preserving their token counts', async () => {
   const f = await setup()
+  f.allowUsageWrites()
   await f.recorder.bind(f.session, [{ ...f.message, content: [{ type: 'text', text: f.message.content[0]!.text.replace('creation-studio-creative-plans', 'creation-studio-stage-recommender') }] }])
   await f.recorder.capture(f.session, { type: 'assistant/attempt', seq: 2, time: 100, data: { turn: 1, step: 1, stream: [
     { type: 'chunk', chunk: { type: 'usage', usage: { inputTokens: 1000, outputTokens: 50 } } },
     { type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error' } } },
   ] } })
-  expect((await f.recorder.list(f.input)).rows[0]).toMatchObject({ payer: 'platform', chargeStatus: 'waived', customerChargeMicros: '0', inputTokens: 1000 })
+  expect((await f.recorder.list(f.input)).rows[0]).toMatchObject({ payer: 'platform', chargeStatus: 'waived', customerCharge: '0.00', inputTokens: 1000 })
+  expect(f.remoteRows[0]).toMatchObject({ status: 'failed', chargeStatus: 'waived', customerCharge: '0.00' })
 })
 it('preserves a retained platform-funded recommendation binding while billing the next recommendation', async () => {
   const f = await setup()
@@ -143,8 +247,8 @@ it('preserves a retained platform-funded recommendation binding while billing th
   await recorder.bind(f.session, [recommendation], undefined, 2)
   await recorder.capture(f.session, { type: 'assistant/message', seq: 3, time: 200, data: { ...data, turn: 2 } })
   const result = await recorder.list(f.input)
-  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 2)).toMatchObject({ payer: 'platform', customerChargeMicros: '0' })
-  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 3)).toMatchObject({ payer: 'customer', customerChargeMicros: '14000' })
+  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 2)).toMatchObject({ payer: 'platform', customerCharge: '0.00' })
+  expect(result.rows.find((row: { eventSeq: number }) => row.eventSeq === 3)).toMatchObject({ payer: 'customer', customerCharge: '0.01' })
 })
 it('does not replace the original submitter during media recovery or change a delivered charge back to pending', async () => {
   const f = await setup()
@@ -199,7 +303,7 @@ it('recovers a lost create acknowledgement by its original event key without cre
   await recorder.reconcile(f.input)
   expect((await recorder.list(f.input)).rows[0].syncStatus).toBe('synced')
   expect(creates).toBe(1)
-  expect(saved).toMatchObject({ billingMode: 'shadow', customerChargeMicros: '14000', chargeStatus: 'ready' })
+  expect(saved).toMatchObject({ billingMode: 'metered', customerCharge: '0.01', status: 'succeeded', chargeStatus: 'settled' })
 })
 it('never sends usage to a service credential belonging to a different tenant', async () => {
   const f = await setup()
@@ -229,8 +333,8 @@ it('automatically writes each settled model call with current caller permissions
     data: { turn: 1, step: seq, usage: { inputTokens: 1000, outputTokens: 200, totalTokens: 1200 },
       message: { source: { provider: f.provider, model: 'model' } } } })
   expect(f.remoteRows).toHaveLength(2)
-  expect(f.remoteRows[0]).toMatchObject({ inputTokens: 1000, outputTokens: 200, customerChargeMicros: '14000',
-    chargeStatus: 'ready', billingMode: 'shadow', requestId: 'request', initiatedByUserId: 'actor', spaceId: f.input.spaceId })
+  expect(f.remoteRows[0]).toMatchObject({ inputTokens: 1000, outputTokens: 200, customerCharge: '0.01',
+    status: 'succeeded', chargeStatus: 'settled', billingMode: 'metered', requestId: 'request', initiatedByUserId: 'actor', spaceId: f.input.spaceId })
   expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/create'))).toHaveLength(2)
   const files = await readdir(join(f.config.stateDirectory, 'billing'))
   for (const file of files) {
@@ -253,7 +357,8 @@ it('recovers unsynchronized usage on the next authenticated read without rerunni
   expect(f.remoteRows).toHaveLength(1)
   await replay.capture(f.session, event)
   expect(f.remoteRows).toHaveLength(1)
-  expect(f.auth.requestAuthenticated.mock.calls.findLast(([request]) => request.path.endsWith('/update'))?.[0].method).toBe('PUT')
+  expect(f.remoteRows[0]).toMatchObject({ status: 'succeeded', chargeStatus: 'settled', customerCharge: '0.01' })
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
 })
 
 it('keeps another user from supplying an automatic fallback writer for the original submitter', async () => {

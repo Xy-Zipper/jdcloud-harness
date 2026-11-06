@@ -1,4 +1,4 @@
-/** 影子计费：仅用已发布售价与实际计量计算微元，不产生余额或流水写入。 */
+/** 按已发布售价与实际用量精确计算，每次调用最终四舍五入为两位小数金额，不写余额或流水。 */
 const integer = value => Number.isSafeInteger(value) && value >= 0
 const amount = value => {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)(\.\d{1,6})?$/u.test(value)) return undefined
@@ -6,11 +6,19 @@ const amount = value => {
   return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, '0'))
 }
 
+/** 将历史工具回执中的元／积分金额四舍五入到分；缺失或无效金额不补零。 */
+export function roundCredits(value) {
+  const raw = amount(value)
+  if (raw === undefined) return undefined
+  const cents = (raw + 5_000n) / 10_000n
+  return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`
+}
+
 /** 按实际规格唯一选价；空条件为不区分，缺价/重叠/不完整用量均不视为零费用。 */
 export function calculateShadowCharge(row, prices) {
-  if (row.payer === 'platform') return { chargeStatus: 'waived', customerChargeMicros: '0', reason: row.reason || '平台后台调用或故障重试，由平台承担。' }
+  if (row.payer === 'platform') return { chargeStatus: 'waived', customerCharge: '0.00', reason: row.reason || '平台后台调用或故障重试，由平台承担。' }
   if (row.status === 'failed' && row.scenario !== 'agent')
-    return { chargeStatus: 'waived', customerChargeMicros: '0', reason: '媒体明确失败，不向客户计费。' }
+    return { chargeStatus: 'waived', customerCharge: '0.00', reason: '媒体明确失败，不向客户计费。' }
   if (row.usageStatus !== 'reported')
     return { chargeStatus: 'pending', reason: '实际用量尚未完整返回，暂不计算费用。' }
   const candidates = prices.filter(price => price.pricingStatus === 'published' && price.currency === 'CNY'
@@ -49,9 +57,11 @@ export function calculateShadowCharge(row, prices) {
   }
   if (row.scenario !== 'agent' && !row.delivered)
     return { chargeStatus: 'pending', reason: '媒体尚未完成项目入库，暂不计算客户应收。' }
-  const denominator = row.scenario === 'image' ? 1n : 1_000_000n
-  return { chargeStatus: 'ready', customerChargeMicros: ((numerator + denominator / 2n) / denominator).toString(),
-    priceVersionId: price._id, priceSnapshot: JSON.stringify(price), reason: '费用试算，仅核对，未扣余额。' }
+  // 直接从精确分子取整到分，避免先取整微元造成二次舍入。
+  const denominator = (row.scenario === 'image' ? 1n : 1_000_000n) * 10_000n
+  const cents = (numerator + denominator / 2n) / denominator
+  return { chargeStatus: 'ready', customerCharge: `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`,
+    priceVersionId: price._id, priceSnapshot: JSON.stringify(price), reason: '费用已结算。' }
 }
 
 /** 只接纳安全整数实测桶；推理属于输出子集，总量不重复相加。 */

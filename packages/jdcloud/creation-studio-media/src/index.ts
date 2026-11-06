@@ -32,7 +32,7 @@ export interface Config {
   accountPoolUsernameRef: string
   /** Host credential reference for its password; expiry triggers one shared login and read retry. */
   accountPoolPasswordRef: string
-  /** Optional restricted service credential for shadow usage synchronization. */
+  /** Optional restricted service credential for metered usage synchronization. */
   billingWriterKeyRef: string
   /** Legacy Jimeng access-key reference used without a private pool reader. */
   jimengAccessKeyRef: string

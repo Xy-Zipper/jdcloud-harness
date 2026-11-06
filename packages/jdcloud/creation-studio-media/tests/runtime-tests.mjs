@@ -11,7 +11,7 @@ const { createBillingRecorder } = await import(new URL('../src/billing-recorder.
 const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const { frontendHash } = await import(new URL('../src/upstream.mjs', import.meta.url).href);
-import { encodeGenerationPrompt } from '../src/seedance-request.mjs';
+import { decodeGenerationPrompt, encodeGenerationPrompt, SEEDANCE_MODELS } from '../src/seedance-request.mjs';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VZkAAAAASUVORK5CYII=';
 it('sends one Bearer prefix and no inferred Content-Type on URL reference edits', async () => {
     const transport = vi.fn(async (url, init) => {
@@ -95,7 +95,7 @@ async function setup() {
         }),
     };
     // Space shares a separate ID and must resolve before the generic detail lookup.
-    records.set(f.project.spaceId, { _id: f.project.spaceId, ownerUserId: 'owner', status: 'active' });
+    records.set(f.project.spaceId, { _id: f.project.spaceId, ownerUserId: 'owner', status: 'active', points: '20' });
     const provider = vi.fn(async (url, init = {}) => {
         expect(String(init.headers?.Authorization || '')).not.toContain('platform');
         if (url.endsWith('/images/generations')) {
@@ -127,10 +127,116 @@ async function setup() {
             return provider(url, init);
         }, billing);
     const input = { projectId: f.project._id, planId: f.plan._id, spaceId: f.project.spaceId, requestId: 'request-test-001' };
-    return { ...f, config, auth, provider, records, runtime, input, batchId,
+    return { ...f, config, auth, provider, records, runtime, input, batchId, priceRows,
         failNextRelation() { failRelation = true; }, denyWrites() { denyWrite = true; },
         counts: () => ({ imageCalls, videoCalls, uploads }) };
 }
+it.each(SEEDANCE_MODELS)('submits the saved $label model and preserves it when the same request is recovered', async ({ value }) => {
+    const f = await setup();
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, model: value });
+    const runtime = f.runtime();
+    const input = { ...f.input, batchId: f.batchId };
+    const task = await runtime.run('video/tasks', input);
+    expect(task.model).toBe(value);
+    const calls = f.provider.mock.calls.filter(([url, init]) => url.includes('contents/generations/tasks') && init.method === 'POST');
+    expect(calls).toHaveLength(1);
+    const sent = JSON.parse(calls[0][1].body);
+    expect(sent.model).toBe(value);
+    expect(sent.omni_reference_task_type).toBe(value.includes('2-5') ? 'reference' : undefined);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, model: 'doubao-seedance-2-0-fast-260128' });
+    expect((await runtime.run('video/tasks', input)).model).toBe(value);
+    expect(f.counts().videoCalls).toBe(1);
+    await runtime.close();
+});
+it('records the selected mini model against its own price instead of the 2.5 price', async () => {
+    const f = await setup();
+    const model = 'doubao-seedance-2-0-mini-260615';
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, model });
+    f.priceRows.push({ ...f.priceRows[1], _id: 'e'.repeat(24), modelKey: model, videoPerMillionYuan: '23' });
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const runtime = f.runtime(billing);
+    await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+    const task = await runtime.run('video/refresh', f.input);
+    expect(task.model).toBe(model);
+    expect(task.consumption.credits).toBe('3.32');
+    const usage = [...f.records.values()].find(row => row.scenario === 'video' && row.usageEventKey);
+    expect(usage).toMatchObject({ modelKey: model, customerCharge: '3.32', videoOutputTokens: 144512 });
+    await runtime.close();
+    await billing.close();
+});
+it.each(['1080p', '4k'])('rejects the unsupported mini resolution %s before a paid provider request', async (resolution) => {
+    const f = await setup();
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, model: 'doubao-seedance-2-0-mini-260615', resolution });
+    const runtime = f.runtime();
+    await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow('分辨率');
+    expect(f.counts().videoCalls).toBe(0);
+    await runtime.close();
+});
+it('does not drop extra reference images to fit a selected 2.0 model', async () => {
+    const f = await setup();
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, model: 'doubao-seedance-2-0-260128',
+        references: Array.from({ length: 10 }, (_, index) => ({ ...saved.generation.references[0], relationId: String(index).padStart(24, 'a') })) });
+    const runtime = f.runtime();
+    await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow('1–9');
+    expect(f.counts().videoCalls).toBe(0);
+    await runtime.close();
+});
+it('rechecks persisted Skill bindings after restart and does not invent usage for a denied call', async () => {
+    const f = await setup();
+    f.auth.owns = async () => true;
+    const session = { id: 'session', header: { createdAt: 1 }, snapshotEvents: () => [] };
+    const recorder = createBillingRecorder(f.config, f.auth, async () => '');
+    const message = { source: { kind: 'user' }, content: [{ type: 'text', text: JSON.stringify({
+        context: { tenantId: f.config.tenantId, spaceId: f.input.spaceId, projectId: f.input.projectId },
+    }) }] };
+    await recorder.bind(session, [message]);
+    await expect(recorder.checkPoints(session)).resolves.toBeUndefined();
+    f.records.get(f.project.spaceId).points = '0';
+    await expect(recorder.checkPoints(session)).rejects.toMatchObject({ code: 'creation-studio/insufficient-points' });
+    const restored = createBillingRecorder(f.config, f.auth, async () => '');
+    await expect(restored.checkPoints(session)).rejects.toMatchObject({ code: 'creation-studio/insufficient-points' });
+    await restored.capture(session, { type: 'assistant/attempt', seq: 2, time: 100, data: { turn: 1, step: 1,
+        stream: [{ type: 'chunk', chunk: { type: 'finish', reason: { kind: 'error',
+            failure: { code: 'creation-studio/insufficient-points', message: '请充值' } } } }] } });
+    expect([...f.records.values()].filter(row => row.usageEventKey)).toHaveLength(0);
+    f.records.get(f.project.spaceId).points = '0.001';
+    await expect(restored.checkPoints(session)).resolves.toBeUndefined();
+    await expect(restored.checkPoints({ ...session, id: 'ordinary-chat' })).resolves.toBeUndefined();
+    await recorder.close();
+    await restored.close();
+});
+it('blocks new paid image and video calls at zero points but lets a recharge take effect on the next attempt', async () => {
+    const f = await setup();
+    f.records.get(f.project.spaceId).points = '0';
+    const runtime = f.runtime();
+    const image = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
+    expect(await runtime.run('images/tasks', image)).toMatchObject({ status: 'failed', error: expect.stringContaining('充值') });
+    expect(await runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).toMatchObject({ status: 'failed', error: expect.stringContaining('充值') });
+    expect(f.counts()).toMatchObject({ imageCalls: 0, videoCalls: 0 });
+    f.records.get(f.project.spaceId).points = '0.01';
+    expect((await runtime.run('video/tasks', { ...f.input, batchId: f.batchId, requestId: 'after-recharge' })).status).toBe('queued');
+    expect(f.counts().videoCalls).toBe(1);
+    await runtime.close();
+});
+it('keeps paid video polling and result upload available when points are depleted after submission', async () => {
+    const f = await setup();
+    const runtime = f.runtime();
+    await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+    f.records.get(f.project.spaceId).points = '-1';
+    const task = await runtime.run('video/refresh', f.input);
+    expect(task.status).toBe('succeeded');
+    expect(task.videoRefId).toBeTruthy();
+    expect(f.counts().videoCalls).toBe(1);
+    await runtime.close();
+});
 // Receipts written by the released GPT executor remain readable after the provider switch.
 async function seedLegacy(f, input) {
     const source = { requestId: input.requestId, model: 'gpt-image-2.5', prompt: input.prompt,
@@ -174,7 +280,7 @@ it('quotes Seedream using the actual request without reserving an account or inv
     const f = await setup();
     const billing = createBillingRecorder(f.config, f.auth, async () => '');
     const quote = await f.runtime(billing).run('images/quote', { ...f.input, prompt: 'scene', size: '1536x864', referenceIds: [] });
-    expect(quote).toMatchObject({ estimated: true, estimatedCredits: '2', size: '1536x864', referenceCount: 0 });
+    expect(quote).toMatchObject({ estimated: true, estimatedCredits: '2.00', size: '1536x864', referenceCount: 0 });
     expect(f.provider).not.toHaveBeenCalled();
     expect(f.counts().uploads).toBe(0);
 });
@@ -204,7 +310,7 @@ it('submits official 2.5 reference tasks, uploads completed videos, and restores
     await runtime.run('video/refresh', request);
     const usage = [...f.records.values()].filter(row => row.usageEventKey);
     expect(usage).toHaveLength(1);
-    expect(usage[0]).toMatchObject({ videoOutputTokens: 144512, customerChargeMicros: '14451200', deliveryStatus: 'delivered' });
+    expect(usage[0]).toMatchObject({ videoOutputTokens: 144512, customerCharge: '14.45', deliveryStatus: 'delivered' });
 });
 
 it('automatically stores synchronous image usage after upload and updates the same low-code row on recovery', async () => {
@@ -216,8 +322,8 @@ it('automatically stores synchronous image usage after upload and updates the sa
     await runtime.run('images/generate', request);
     const usage = [...f.records.values()].filter(row => row.usageEventKey);
     expect(usage).toHaveLength(1);
-    expect(usage[0]).toMatchObject({ scenario: 'image', imageCount: 1, customerChargeMicros: '2000000',
-        usageStatus: 'reported', chargeStatus: 'ready', deliveryStatus: 'delivered' });
+    expect(usage[0]).toMatchObject({ scenario: 'image', imageCount: 1, customerCharge: '2.00',
+        usageStatus: 'reported', chargeStatus: 'settled', deliveryStatus: 'delivered' });
     expect(f.counts().imageCalls).toBe(1);
 });
 it('recovers a legacy synchronous image without another generation or changing its recorded provider', async () => {
@@ -338,7 +444,7 @@ it('uploads a completed Seedream image while another generation remains pending 
     const usage = [...f.records.values()].filter(row => row.usageEventKey);
     expect(usage).toHaveLength(2);
     expect(usage.every(row => row.providerAccountRef === 'ENV-ARK')).toBe(true);
-    expect(usage.find(row => row.imageCount === 1).customerChargeMicros).toBe('2000000');
+    expect(usage.find(row => row.imageCount === 1).customerCharge).toBe('2.00');
     release.resolve();
     await runtime.close();
 });

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createProviderAccountPool } from '../src/provider-accounts.mjs'
 import { requestSeedreamImage, SEEDREAM_MODELS } from '../src/seedream.mjs'
+import { SEEDANCE_MODELS } from '../src/seedance-request.mjs'
 
 const roots = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -20,11 +21,12 @@ async function setup() {
     return Response.json({ code: 200, data: init.method === 'GET'
       ? { userInfo: { corpId: tenantId } } : { list: rows } })
   })
-  const auth = { requestAuthenticated: async () => ({ userInfo: { id: 'user', corpId: tenantId } }) }
+  const auth = { currentScopeKey: async () => 'user', requestAuthenticated: async ({ path, body }) => path.endsWith('/info')
+    ? { _id: body._id, points: '20', status: 'active' } : { userInfo: { id: 'user', corpId: tenantId } } }
   const config = { platformURL: 'https://platform.example', tenantId, stateDirectory: root }
   const keys = async key => key === 'CREATION_STUDIO_ACCOUNT_POOL_TOKEN' ? 'private-reader' : ''
   const create = () => createProviderAccountPool(config, auth, keys, fetcher)
-  const input = { spaceId: 'space', projectId: 'project', planId: 'plan', requestId: 'request', scenario: 'image', model: SEEDREAM_MODELS[0] }
+  const input = { spaceId: 'a'.repeat(24), projectId: 'project', planId: 'plan', requestId: 'request', scenario: 'image', model: SEEDREAM_MODELS[0] }
   return { root, rows, config, auth, fetcher, create, input }
 }
 it('reserves different least-loaded accounts for concurrent image/video calls, caps capacity, and records the caller without secrets', async () => {
@@ -74,6 +76,13 @@ it('selects accounts by exact model instead of treating every model under a prov
   expect(await pool.configured('ark', 'video', 'doubao-seedance-2-5-260628')).toBe(false)
   await expect(pool.acquire('ark', { ...f.input, model: 'doubao-seedance-2-5-260628', scenario: 'video' }))
     .rejects.toMatchObject({ code: 'accounts/unavailable' })
+})
+it.each(SEEDANCE_MODELS)('allocates only an account explicitly enabled for $label', async ({ value }) => {
+  const f = await setup()
+  f.rows[0].models = ['doubao-seedream-5-0-pro-260628']
+  f.rows[1].models = [value]
+  const pool = f.create()
+  expect((await pool.acquire('ark', { ...f.input, model: value, scenario: 'video' })).receipt.providerAccountRef).toBe('ARK-2')
 })
 it('retains the original environment key for an existing task after enabling the private pool', async () => {
   const f = await setup()

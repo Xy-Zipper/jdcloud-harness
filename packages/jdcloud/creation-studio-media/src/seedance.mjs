@@ -2,13 +2,13 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
-import { buildSeedanceRequest, decodeGenerationPrompt, SEEDANCE_MODEL } from './seedance-request.mjs'
+import { buildSeedanceRequest, decodeGenerationPrompt, seedanceModel } from './seedance-request.mjs'
 import { confirmedStoryboardUpstream, frontendHash } from './upstream.mjs'
 import { generatedImagePending } from './image-generation.mjs'
 import { decodeStoryboardSupplement, narrationForShot } from './narration.mjs'
 import { parseBuffer } from 'music-metadata'
 
-/** Seedance 2.5 服务端代理。平台权限逐次核对；方舟密钥只取服务端环境，不返回浏览器。 */
+/** Seedance 服务端代理。平台权限逐次核对；方舟密钥只取服务端环境，不返回浏览器。 */
 const MENU = {
 	project: "6ad81c131f280486bb45ac3f",
 	plan: "6ad81c871f280486bb45ac49",
@@ -168,7 +168,7 @@ export function createSeedanceService(env, transport = fetch) {
 		return `data:${source.mime};base64,${bytes.toString("base64")}`;
 	}
 	/** 音色只取当前可读的共享/本空间目录；实际解码核对时长，不信任调用方 URL 或时长。 */
-	async function audioData(token, scope, reference) {
+	async function audioData(token, scope, reference, maxSeconds) {
 		const voice = await detail(token, MENU.voice, reference.voiceId);
 		if (voice?._id !== reference.voiceId || (voice.spaceId && voice.spaceId !== scope.spaceId)
 			|| !id(voice.fileId) || !["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(voice.mime))
@@ -187,8 +187,8 @@ export function createSeedanceService(env, transport = fetch) {
 		const bytes = Buffer.concat(chunks);
 		const metadata = await parseBuffer(bytes, { mimeType: voice.mime }, { duration: true });
 		const duration = metadata.format.duration;
-		if (!Number.isFinite(duration) || duration < 2 || duration > 30)
-			throw new ApiError(`旁白音色“${reference.name}”的样音须为2–30秒。`);
+		if (!Number.isFinite(duration) || duration < 2 || duration > maxSeconds)
+			throw new ApiError(`旁白音色“${reference.name}”的样音须为2–${maxSeconds}秒。`);
 		const mime = voice.mime.includes("wav") ? "audio/wav" : "audio/mp3";
 		return { duration, url: `data:${mime};base64,${bytes.toString("base64")}` };
 	}
@@ -207,6 +207,7 @@ export function createSeedanceService(env, transport = fetch) {
 		if (batch?.spaceId !== input.spaceId || batch.projectId !== input.projectId || batch.planId !== input.planId) throw new ApiError("生成批次不属于当前方案。", 403);
 		const { prompt, generation } = decodeGenerationPrompt(batch.prompt || "");
 		if (!generation) throw new ApiError("请先保存本批次参考图片、用途与生成设置。");
+		const selectedModel = seedanceModel(generation.model);
 		const fullPrompt = `${plan.globalPrompt?.trim() ? `全片约束：\n${plan.globalPrompt.trim()}\n\n` : ""}${prompt}`;
 		const filters = [
 			filter("projectId", input.projectId),
@@ -295,9 +296,9 @@ export function createSeedanceService(env, transport = fetch) {
 		const audioUrls = [];
 		let audioDuration = 0;
 		for (const reference of audioReferences) {
-			const audio = await audioData(token, input, reference);
+			const audio = await audioData(token, input, reference, selectedModel.maxSeconds);
 			audioDuration += audio.duration;
-			if (audioDuration > 30) throw new ApiError("参考音频总时长超过30秒，请选择更短的音色样音或分批生成。");
+			if (audioDuration > selectedModel.maxSeconds) throw new ApiError(`参考音频总时长超过${selectedModel.maxSeconds}秒，请选择更短的音色样音或分批生成。`);
 			audioUrls.push(audio.url);
 		}
 		const request = buildSeedanceRequest(generation, finalPrompt, duration, urls, audioUrls);
@@ -309,7 +310,7 @@ export function createSeedanceService(env, transport = fetch) {
 			spaceId: input.spaceId,
 			projectId: input.projectId,
 			planId: input.planId,
-			model: SEEDANCE_MODEL,
+			model: request.model,
 			status: "submitting",
 			createdAt: (/* @__PURE__ */ new Date()).toISOString(),
 			duration,

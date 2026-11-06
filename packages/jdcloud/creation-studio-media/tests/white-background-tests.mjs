@@ -26,6 +26,7 @@ async function setup() {
   const uploads = []
   let lostRelation = false
   const auth = {
+    currentScopeKey: async () => 'actor',
     status: async () => ({ authenticated: true, corpId: config.tenantId, baseUrl: config.platformURL }),
     writableMenus: async () => ({ menus: [MATERIAL, RELATION].map(menuId => ({ menuId, agentPermissions: ['addData'] })) }),
     downloadFileAuthenticated: vi.fn(async () => new Response(png, { headers: { 'Content-Type': 'image/png' } })),
@@ -33,7 +34,7 @@ async function setup() {
       if (path === '/api/oauth/currentUser') return { userInfo: { id: 'actor', corpId: config.tenantId } }
       if (path.endsWith('/info')) {
         if (body.menuId === PROJECT) return { _id: input.projectId, spaceId: input.spaceId }
-        if (body.menuId === SPACE) return { _id: input.spaceId, ownerUserId: 'actor', status: 'active' }
+        if (body.menuId === SPACE) return { _id: input.spaceId, ownerUserId: 'actor', status: 'active', points: '20' }
         if (body.menuId === MATERIAL) return source
       }
       if (path === '/api/file/uploader') {
@@ -71,7 +72,11 @@ it('generates white-background images with the selected Seedream model and recor
   const pool = createProviderAccountPool(f.config, f.auth, async key => key === 'ARK_API_KEY' ? 'ark-test-key' : '')
   f.provider.mockImplementation(async (url, init) => {
     expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations')
-    expect(JSON.parse(init.body)).toMatchObject({ model: 'doubao-seedream-5-0-flash-260915', size: '1536x864' })
+    const body = JSON.parse(init.body)
+    expect(body).toMatchObject({ model: 'doubao-seedream-5-0-flash-260915', size: '1536x864' })
+    expect(body.prompt).toContain('只编辑背景，不重新设计或重绘商品')
+    expect(body.prompt).toContain('不修改包装文字、图案、按钮及接口')
+    expect(body.prompt).toContain('不增加原图中不存在的配件')
     return Response.json({ data: [{ b64_json: f.png.toString('base64') }] })
   })
   f.input.model = 'doubao-seedream-5-0-flash-260915'
@@ -87,6 +92,23 @@ it('generates white-background images with the selected Seedream model and recor
   expect(JSON.parse(audit)).toMatchObject({ providerAccountRef: 'ENV-ARK', initiatedByUserId: 'actor', status: 'succeeded' })
   expect(audit).not.toMatch(/access-key|secret-key/u)
 })
+it('blocks a new white-background submission at zero points while preserving a paid task for recovery', async () => {
+  const f = await setup()
+  const original = f.auth.requestAuthenticated.getMockImplementation()
+  let points = '0'
+  f.auth.requestAuthenticated.mockImplementation(async request => {
+    const data = await original(request)
+    return request.path.endsWith('/info') && request.body.menuId === SPACE ? { ...data, points } : data
+  })
+  const service = f.service()
+  await expect(service.run('tasks', f.input)).rejects.toMatchObject({ code: 'creation-studio/insufficient-points' })
+  expect(f.provider).not.toHaveBeenCalled()
+  points = '0.001'
+  expect((await service.run('tasks', f.input)).status).toBe('in_queue')
+  points = '-1'
+  expect((await service.run('refresh', f.input)).status).toBe('succeeded')
+  expect(f.provider.mock.calls.filter(([url]) => url.includes('SubmitTask'))).toHaveLength(1)
+})
 
 it('signs a forced single-image edit, preserves the original and uploads a reusable project material', async () => {
   const f = await setup()
@@ -97,7 +119,7 @@ it('signs a forced single-image edit, preserves the original and uploads a reusa
   expect(f.provider.mock.calls[0][1].headers.Authorization).toContain('SignedHeaders=content-type;host;x-content-sha256;x-date')
   expect(body).toMatchObject({ req_key: 'jimeng_t2i_v40', force_single: true, width: 2048, height: 2048 })
   expect(body.prompt).toContain('只保留红色水杯')
-  expect(body.prompt).toContain('纯白底商品图')
+  expect(body.prompt).toContain('纯白背景（#FFFFFF）')
   expect(body.image_urls).toHaveLength(1)
   const result = await runtime.run('refresh', f.input)
   expect(result.status).toBe('succeeded')
@@ -117,6 +139,12 @@ it('removes poster text while preserving product lettering when subject instruct
   const { prompt } = JSON.parse(f.provider.mock.calls[0][1].body)
   expect(prompt).toContain('删除原图中商品之外的所有文字')
   expect(prompt).toContain('保留商品本体上的文字与标识')
+  expect(prompt).toContain('保留商品轮廓、比例、颜色与材质')
+  expect(prompt).toContain('不修改包装文字、图案、按钮及接口')
+  expect(prompt).toContain('保留自然接触阴影')
+  expect(prompt).toContain('保留原图视角、朝向、商品数量及可见结构')
+  expect(prompt).toContain('看不清或被遮挡的细节不得猜测、补写或重构')
+  expect(prompt).toContain('不增加原图中不存在的配件')
   await expect(`${prompt}\n`).toMatchFileSnapshot('./expected/white-background-prompt.txt')
 })
 
@@ -129,6 +157,7 @@ it('sends the user multi-view request with layout and structure constraints rath
   expect(body.prompt).toContain('不限制其中的视角数量')
   expect(body.prompt).toContain('正面、侧面、四分之三视角')
   expect(body.prompt).toContain('避免畸形、扭曲')
+  expect(body.prompt).toContain('不得以多视角要求为由改变商品结构或编造未见细节')
   expect(body.force_single).toBe(true)
   await expect(`${body.prompt}\n`).toMatchFileSnapshot('./expected/white-background-multiview-prompt.txt')
 })

@@ -3,12 +3,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createAccountPoolReader } from './account-pool-reader.mjs'
+import { SEEDANCE_MODELS } from './seedance-request.mjs'
+import { assertSpacePoints } from './project-points.mjs'
 
 const open = new Set(['reserved', 'submitting', 'pending', 'queued', 'running', 'unknown', 'in_queue', 'generating'])
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failure = (message, code) => Object.assign(new Error(message), { code, status: 503 })
 const modelsByKind = {
-  ark: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', 'doubao-seedance-2-5-260628'],
+  ark: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', ...SEEDANCE_MODELS.map(model => model.value)],
   jimeng: ['jimeng_t2i_v40'],
 }
 
@@ -100,6 +102,8 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     /** A reservation is durable before the provider POST; unknown outcomes retain capacity until reconciled. */
     acquire(kind, input) {
       return serial(async () => {
+        // 图片、视频和白底图只在新占用供应商账号时查积分，原任务查询不受余额影响。
+        await assertSpacePoints(auth, input.spaceId)
         const rows = await accounts(kind)
         const receipts = await reservations()
         const loads = new Map()

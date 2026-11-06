@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/seedance-model-selection/guide.md
+/:
+  en: 2426cf8a0518653b
+  zh: 79f9f38d4ee503c0
+/preserve-the-selected-seedance-model:
+  en: 81d993449912e22e
+  zh: a1e5fdec01e686a7
+/preserve-the-selected-seedance-model/change:
+  en: 633bf10fd0868933
+  zh: 9239aa0c060f1e4d
+/preserve-the-selected-seedance-model/migration:
+  en: c062d11060450a4a
+  zh: 0d6cc6ee60b1688c

@@ -11,6 +11,8 @@ import { createWhiteBackgroundService } from './white-background.mjs'
 import { createProviderAccountPool } from './provider-accounts.mjs'
 import { DEFAULT_IMAGE_MODEL, SEEDREAM_MODELS } from './seedream.mjs'
 import { calculateShadowCharge } from './billing-price.mjs'
+import { SEEDANCE_MODEL, SEEDANCE_MODELS } from './seedance-request.mjs'
+import { assertSpacePoints } from './project-points.mjs'
 
 const MATERIAL = '6ad81c871f280486bb45ac43'
 const RELATION = '6ad81c871f280486bb45ac45'
@@ -185,12 +187,12 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (operation.startsWith('white-background/')) return whiteBackground.run(operation.slice('white-background/'.length), input)
     const env = { CREATION_STUDIO_PLATFORM_URL: platform, CREATION_STUDIO_TENANT_ID: config.tenantId, CREATION_STUDIO_IMAGE_STATE_DIR: join(config.stateDirectory, 'images'), CREATION_STUDIO_IMAGE_RETRY_LIMIT: config.imageRetryLimit, CREATION_STUDIO_VIDEO_STATE_DIR: join(config.stateDirectory, 'seedance'), GPT_IMAGE_API_KEY: await keys(config.imageKeyRef || 'GPT_IMAGE_API_KEY'), ARK_API_KEY: await keys(config.arkKeyRef || 'ARK_API_KEY'), SEEDREAM_MODEL: defaultImageModel, PROVIDER_ACCOUNTS: accounts, IMAGE_BACKGROUND: imageBackground }
     if (operation === 'config') {
-      return { image: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS }, video: { configured: await accounts.configured('ark', 'video'), model: 'doubao-seedance-2-5-260628' },
+      return { image: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS }, video: { configured: await accounts.configured('ark', 'video'), model: SEEDANCE_MODEL, models: SEEDANCE_MODELS.map(model => model.value) },
         whiteBackground: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS } }
     }
-    if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'shadow', rows: [], total: 0 }
-    if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'shadow', processed: 0 }
-    const images = createImageService(env, transport)
+    if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'metered', rows: [], total: 0 }
+    if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'metered', processed: 0 }
+    const images = createImageService({ ...env, CHECK_POINTS: spaceId => assertSpacePoints(auth, spaceId) }, transport)
     const videos = createSeedanceService(env, transport)
     if (operation === 'images/quote') {
       const request = await images.quote('host-authenticated', input)
@@ -199,7 +201,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       const fee = calculateShadowCharge({ scenario: 'image', provider: 'ark', modelKey: request.model, payer: 'customer',
         status: 'succeeded', usageStatus: 'reported', delivered: true, occurredAt: Date.now(), imageCount: 1, imageInputCount: request.referenceCount,
         parameters: { imagePixels: width * height, imageSize: request.size, imageOperation: request.referenceCount ? 'edit' : 'generation' } }, binding?.prices || [])
-      return { ...request, estimatedCredits: fee.customerChargeMicros === undefined ? undefined : (Number(fee.customerChargeMicros) / 1_000_000).toString(),
+      return { ...request, estimatedCredits: fee.customerCharge,
         priceVersionId: fee.priceVersionId, reason: fee.reason, estimated: true }
     }
     if (operation === 'images/tasks') {
@@ -341,8 +343,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
               ? { ...billingParameters, imagePixels: result.width * result.height, imageSize: `${result.width}x${result.height}` } : billingParameters
             try {
               const fee = await billing.media(input, binding, scenario, task, actualParameters)
-              if (fee) result = { ...result, consumption: { credits: fee.customerChargeMicros === undefined ? undefined
-                : (Number(fee.customerChargeMicros) / 1_000_000).toString(), status: fee.chargeStatus, reason: fee.reason } }
+              if (fee) result = { ...result, consumption: { credits: fee.customerCharge, status: fee.chargeStatus, reason: fee.reason } }
             }
             catch (error) { return { ...result, billingWarning: `生成状态已保存，但用量记录待恢复：${error.message}` } }
           }

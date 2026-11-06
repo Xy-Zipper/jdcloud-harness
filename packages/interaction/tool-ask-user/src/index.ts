@@ -106,6 +106,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         })),
         ...exec.agent !== undefined ? { agent: exec.agent } : {},
         signal: exec.signal,
+        ...(exec.agent === undefined ? {} : { wait: { callId: exec.callId } }),
       })
       return {
         answers: result.answers.map(answer => ({

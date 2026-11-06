@@ -74,12 +74,18 @@ function restoreUserQuestionError(reason: unknown): unknown {
 }
 
 type QueuedReply = { messageId: MessageId; claimedTurn?: number }
+type OpenQuestion = {
+  request: AskUserQuestionRequest
+  resolve: (answer: AskUserQuestionAnswer) => void
+  close: () => void
+}
 
 /** `ctx.userQuestions`: validation plus the scoped answerer waterfall. */
 export class UserQuestionService extends TypertRemoteService {
   static Config = z.object({})
   private readonly waits = new Map<Agent, Map<ToolCallId, TimedQuestionWait>>()
   private readonly queuedReplies = new WeakMap<Session, Map<ToolCallId, QueuedReply>>()
+  private readonly openQuestions = new Map<Agent, Map<ToolCallId, OpenQuestion>>()
 
   constructor(ctx: Context) {
     super(ctx, 'userQuestions')
@@ -91,6 +97,10 @@ export class UserQuestionService extends TypertRemoteService {
         for (const wait of calls.values()) wait.close(abortedQuestion())
       }
       this.waits.clear()
+      for (const calls of this.openQuestions.values()) {
+        for (const question of calls.values()) question.close()
+      }
+      this.openQuestions.clear()
     }, 'userQuestions: foreground waits')
     ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
       const source = message.source
@@ -146,6 +156,48 @@ export class UserQuestionService extends TypertRemoteService {
   private continued(agent: Agent): readonly PendingUserQuestion[] {
     const state = this.ctx.get('sessionProjections')?.stateOf(agent.session, 'userQuestions')
     return (state?.questions.active ?? []).filter(question => question.state === 'continued')
+  }
+
+  /**
+   * Read unanswered foreground calls without starting a turn.
+   * @param agent - Exact live root owning the calls.
+   * @returns Open calls; closed and cancelled requests are absent.
+   */
+  pendingOpen(agent: Agent): readonly PendingUserQuestion[] {
+    return [...(this.openQuestions.get(agent) ?? [])].map(([callId, pending]) => ({
+      callId, questions: pending.request.questions, state: 'open' as const,
+    }))
+  }
+
+  /**
+   * Answer one still-open call through an authenticated caller's existing request.
+   * @param agent - Exact live root owning the call.
+   * @param callId - Foreground call returned by pendingOpen.
+   * @param answer - One answer per question; options must belong to that question.
+   * @returns False if another client already settled the call.
+   */
+  answerOpen(agent: Agent, callId: ToolCallId, answer: AskUserQuestionAnswer): boolean {
+    this.assertLiveRoot(agent)
+    const calls = this.openQuestions.get(agent)
+    const pending = calls?.get(callId)
+    if (pending === undefined) return false
+    const questions = pending.request.questions
+    if (answer.answers.length !== questions.length
+      || new Set(answer.answers.map(item => item.id)).size !== questions.length
+      || !questions.every(question => answer.answers.some(item => item.id === question.id))) {
+      throw new UserQuestionError('the answer batch must name each question exactly once', 'BAD_ANSWER')
+    }
+    for (const item of answer.answers) {
+      const question = questions.find(question => question.id === item.id)
+      if (question === undefined || (!question.multiSelect && item.selected.length > 1)
+        || new Set(item.selected).size !== item.selected.length
+        || item.selected.some(label => !question.options?.some(option => option.label === label))) {
+        throw new UserQuestionError('selected answers must name options offered by this question', 'BAD_ANSWER')
+      }
+    }
+    calls?.delete(callId)
+    pending.resolve(answer)
+    return true
   }
 
   /**
@@ -319,15 +371,29 @@ export class UserQuestionService extends TypertRemoteService {
       'no user-questions answerer accepted the request',
       'NO_PROVIDER',
     ))
+    const callId = request.wait?.callId
+    const controller = agent !== undefined && callId !== undefined ? new AbortController() : undefined
+    const signal = controller === undefined ? request.signal
+      : request.signal === undefined ? controller.signal : AbortSignal.any([request.signal, controller.signal])
+    const externalAnswer = Promise.withResolvers<AskUserQuestionAnswer>()
+    const aborted = () => externalAnswer.reject(abortedQuestion())
+    if (controller !== undefined)
+      signal?.addEventListener('abort', aborted, { once: true })
+    if (agent !== undefined && callId !== undefined) {
+      const calls = this.openQuestions.get(agent) ?? new Map<ToolCallId, OpenQuestion>()
+      calls.set(callId, { request, resolve: externalAnswer.resolve, close: () => { controller?.abort() } })
+      this.openQuestions.set(agent, calls)
+    }
     try {
-      return await (agent === undefined
+      const dispatch = agent === undefined
         ? this.ctx.waterfall('user-questions/request', request, noAnswerer)
         : this.ctx.waterfall(
           scopeTarget(agent, agent),
           'user-questions/request',
-          { ...request, agent },
+          { ...request, agent, ...(signal === undefined ? {} : { signal }) },
           noAnswerer,
-        ))
+        )
+      return await (controller === undefined ? dispatch : Promise.race([externalAnswer.promise, dispatch]))
     } catch (error) {
       const restored = restoreUserQuestionError(error)
       if (restored instanceof UserQuestionError) throw restored
@@ -335,6 +401,15 @@ export class UserQuestionService extends TypertRemoteService {
         throw abortedQuestion(error)
       }
       throw restored
+    } finally {
+      if (agent !== undefined && callId !== undefined) {
+        const calls = this.openQuestions.get(agent)
+        calls?.delete(callId)
+        if (calls?.size === 0) this.openQuestions.delete(agent)
+      }
+      // A foreground answer accepted by another client closes the original answer UI.
+      controller?.abort()
+      signal?.removeEventListener('abort', aborted)
     }
   }
 }

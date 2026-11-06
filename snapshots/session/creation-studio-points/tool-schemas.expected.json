@@ -1,0 +1,31 @@
+{
+  "initial": [
+    {
+      "name": "jdcloud_lowcode_create",
+      "description": "Create one form record or start one workflow. Host execution requires addData and rejects values that do not match the live field writeType or omit a required field.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "menu_id": {
+            "type": "string",
+            "description": "Exact menuId from the current JDCloud capability snapshot."
+          },
+          "auth_group_id": {
+            "type": "string",
+            "description": "Optional JDCloud data-permission group id when the target function requires one."
+          },
+          "data": {
+            "type": "object",
+            "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "menu_id",
+          "data"
+        ]
+      }
+    }
+  ],
+  "changes": []
+}

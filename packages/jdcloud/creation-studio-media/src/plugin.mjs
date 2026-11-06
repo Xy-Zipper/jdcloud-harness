@@ -5,13 +5,14 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createHarnessMediaRuntime } from './runtime.mjs';
 import { createBillingRecorder } from './billing-recorder.mjs';
+import { registerModelPointsGuard, registerProjectPointsGuard } from './project-points.mjs';
 import { IMAGE_SIZES } from './image-generation.mjs';
 import { DEFAULT_IMAGE_MODEL, SEEDREAM_MODELS } from './seedream.mjs';
 export const name = 'creation-studio-media';
 const prefix = '/api/external/v1/creation-studio/media/';
 const operations = ['config', 'images/generate', 'images/quote', 'images/tasks', 'images/refresh', 'images/list', 'video/tasks', 'video/refresh', 'video/list', 'billing/list', 'billing/sync', 'white-background/tasks', 'white-background/refresh', 'white-background/list'];
 /** 工具只能操作本轮真实用户消息绑定的项目，工具结果不能重绑定项目上下文。 */
-function assertProjectTurn(exec, args, tenantId) {
+function assertProjectTurn(exec, args, tenantId, paidImage = false) {
     const event = exec.agent?.session.snapshotEvents().findLast((event) => event.type === 'user/message' && event.data.source?.kind === 'user');
     const content = event?.data.content?.filter(part => part.type === 'text').map(part => part.text).join('\n') || '';
     const message = content.trim().startsWith('/') ? content.slice(content.indexOf('\n') + 1) : content;
@@ -26,6 +27,9 @@ function assertProjectTurn(exec, args, tenantId) {
         || (context.planId && context.planId !== args.planId)) {
         throw new Error('媒体工具参数不属于本轮项目、方案或空间。');
     }
+    // 规划轮次可查询和报价，但不能绕过页面积分确认调用付费生图。
+    if (paidImage && request?.generateImages === false)
+        throw new Error('本轮只整理分镜和报价，请在页面确认积分后再生成图片。');
     if (args.prompt !== undefined && request?.model !== undefined) {
         if (!SEEDREAM_MODELS.includes(request.model) || (args.model !== undefined && args.model !== request.model))
             throw new Error('生图模型必须与用户本轮选择一致。');
@@ -43,8 +47,10 @@ export function apply(ctx, config) {
         || !/^[a-f0-9]{24}$/iu.test(config.tenantId)) {
         throw new Error('媒体插件平台地址或租户配置无效。');
     }
+    registerProjectPointsGuard(ctx, config, ctx.jdcloudAuthController);
     const keys = async (ref) => (await ctx.credentials.resolve(credentialRef(ref)))?.value || '';
     const billing = createBillingRecorder(config, ctx.jdcloudAuthController, keys);
+    registerModelPointsGuard(ctx, billing);
     const pending = new Set();
     const observe = (operation) => {
         const task = operation.catch(error => { ctx.logger.warn('影子计量待恢复：%s', error.message); }).finally(() => pending.delete(task));
@@ -125,7 +131,7 @@ export function apply(ctx, config) {
         presentCall: () => ({ card: 'generic', title: description, kind: 'other' }),
     })), toolName);
     register('creation_studio_image_generate', '为当前分镜或资产生成图片并上传项目素材；默认自有，仍须用户确认画面。', { ...scope, model: { type: 'string', enum: SEEDREAM_MODELS, description: '用户选择的即梦模型；未指定时使用 Seedream 5.0 pro。' }, requestId: { type: 'string', required: true, description: '稳定请求编号；重试必须沿用，不重新付费。' }, prompt: { type: 'string', required: true, description: '图片描述，说明各参考图片的职责。' }, size: { type: 'string', required: true, enum: IMAGE_SIZES }, referenceIds: { type: 'array', required: true, items: { type: 'string' }, description: '最多10张当前项目真实图片引用 ID，按图1、图2顺序。' } }, (args, exec) => {
-        const model = assertProjectTurn(exec, args, config.tenantId);
+        const model = assertProjectTurn(exec, args, config.tenantId, true);
         return runtime.run('images/generate', { ...args, model: model || args.model || DEFAULT_IMAGE_MODEL });
     });
     register('creation_studio_image_task', '报价、提交、查询或列出即梦 Seedream 5.0 图片任务；生成前报价，完成后返回实际积分，仍须人工确认。',
@@ -136,12 +142,12 @@ export function apply(ctx, config) {
             size: { type: 'string', enum: IMAGE_SIZES },
             referenceIds: { type: 'array', items: { type: 'string' }, description: '提交必填，当前项目真实图片引用 ID，按顺序对应参考图；没有参考时传空数组。' } },
         async ({ action, ...args }, exec) => {
-            const model = assertProjectTurn(exec, args, config.tenantId);
+            const model = assertProjectTurn(exec, args, config.tenantId, action === 'submit');
             const result = await runtime.run(action === 'quote' ? 'images/quote' : action === 'submit' ? 'images/tasks' : action === 'refresh' ? 'images/refresh' : 'images/list',
                 ['submit', 'quote'].includes(action) ? { ...args, model: model || args.model || DEFAULT_IMAGE_MODEL } : args);
             return action === 'list' ? { tasks: result } : result;
         });
-    register('creation_studio_video_task', '提交、查询或列出已保存批次的 Seedance 2.5 参考生视频任务；完成后上传项目素材。', { ...scope, action: { type: 'string', required: true, enum: ['submit', 'refresh', 'list'] }, requestId: { type: 'string', description: '提交及查询使用的稳定请求编号。' }, batchId: { type: 'string', description: '提交时必填，当前方案已保存的视频批次 ID。' } }, async ({ action, ...args }, exec) => {
+    register('creation_studio_video_task', '按已保存批次选择的 Seedance 2.0、2.0-fast、2.0-mini 或2.5模型提交参考生视频，或查询、列出任务；完成后上传项目素材。', { ...scope, action: { type: 'string', required: true, enum: ['submit', 'refresh', 'list'] }, requestId: { type: 'string', description: '提交及查询使用的稳定请求编号。' }, batchId: { type: 'string', description: '提交时必填，当前方案已保存的视频批次 ID。' } }, async ({ action, ...args }, exec) => {
         assertProjectTurn(exec, args, config.tenantId);
         const result = await runtime.run(action === 'submit' ? 'video/tasks' : action === 'refresh' ? 'video/refresh' : 'video/list', args);
         return action === 'list' ? { tasks: result } : result;

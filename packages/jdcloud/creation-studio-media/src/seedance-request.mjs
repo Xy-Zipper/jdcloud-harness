@@ -1,15 +1,30 @@
-/** Seedance 2.5 全能参考的浏览器／服务端共同契约，无密钥和运行环境依赖。 */
+/** Seedance 全模态参考的浏览器／服务端共同契约，无密钥和运行环境依赖。 */
 export const SEEDANCE_MODEL = 'doubao-seedance-2-5-260628';
+/** 按官方能力限制每批参数；2.0 系列不沿用 2.5 的时长和参考素材上限。 */
+export const SEEDANCE_MODELS = [
+    { label: 'Doubao-Seedance-2.5', value: SEEDANCE_MODEL, resolutions: ['480p', '720p', '1080p'], maxSeconds: 30, maxImages: 30, maxAudio: 10 },
+    { label: 'Doubao-Seedance-2.0', value: 'doubao-seedance-2-0-260128', resolutions: ['480p', '720p', '1080p', '4k'], maxSeconds: 15, maxImages: 9, maxAudio: 3 },
+    { label: 'Doubao-Seedance-2.0-fast', value: 'doubao-seedance-2-0-fast-260128', resolutions: ['480p', '720p'], maxSeconds: 15, maxImages: 9, maxAudio: 3 },
+    { label: 'Doubao-Seedance-2.0-mini', value: 'doubao-seedance-2-0-mini-260615', resolutions: ['480p', '720p'], maxSeconds: 15, maxImages: 9, maxAudio: 3 },
+];
+/** 缺少模型的历史草稿沿用原默认值；未知模型不自动替换为其他付费模型。 */
+export function seedanceModel(value = SEEDANCE_MODEL) {
+    const model = SEEDANCE_MODELS.find(model => model.value === value);
+    if (!model)
+        throw new Error('请选择已支持的视频模型。');
+    return model;
+}
 export const SEEDANCE_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9', 'adaptive'];
-export const SEEDANCE_RESOLUTIONS = ['480p', '720p', '1080p'];
+export const SEEDANCE_RESOLUTIONS = ['480p', '720p', '1080p', '4k'];
 export function defaultGenerationConfig() {
-    return { ratio: '16:9', resolution: '720p', generateAudio: false, watermark: false, references: [] };
+    return { model: SEEDANCE_MODEL, ratio: '16:9', resolution: '720p', generateAudio: false, watermark: false, references: [] };
 }
 export function isGenerationConfig(value) {
     if (!value || typeof value !== 'object')
         return false;
     const v = value;
-    return typeof v.ratio === 'string' && typeof v.resolution === 'string' && typeof v.generateAudio === 'boolean'
+    return (v.model === undefined || SEEDANCE_MODELS.some(model => model.value === v.model))
+        && typeof v.ratio === 'string' && typeof v.resolution === 'string' && typeof v.generateAudio === 'boolean'
         && typeof v.watermark === 'boolean' && Array.isArray(v.references) && v.references.every(ref => ref
         && typeof ref.relationId === 'string' && typeof ref.name === 'string' && typeof ref.purpose === 'string')
         && (v.audioReferences === undefined || Array.isArray(v.audioReferences) && v.audioReferences.every(ref => ref
@@ -20,14 +35,17 @@ export function isGenerationConfig(value) {
 /** 草稿允许缺图；提交生成时必须校验完整，编号只能引用实际提交的图片。 */
 export function seedanceIssues(config, prompt, duration) {
     const issues = [];
-    if (!SEEDANCE_RATIOS.includes(config.ratio) || !SEEDANCE_RESOLUTIONS.includes(config.resolution))
-        issues.push('请选择 Seedance 2.5 支持的画幅与分辨率。');
-    if (!Number.isSafeInteger(duration) || duration < 4 || duration > 30)
-        issues.push('生成时长须为 4–30 秒的整数。');
+    const model = SEEDANCE_MODELS.find(model => model.value === (config.model ?? SEEDANCE_MODEL));
+    if (!model)
+        return ['请选择已支持的视频模型。'];
+    if (!SEEDANCE_RATIOS.includes(config.ratio) || !model.resolutions.includes(config.resolution))
+        issues.push(`请选择 ${model.label} 支持的画幅与分辨率。`);
+    if (!Number.isSafeInteger(duration) || duration < 4 || duration > model.maxSeconds)
+        issues.push(`生成时长须为 4–${model.maxSeconds} 秒的整数，请拆分批次或选择支持更长时长的模型。`);
     if (!prompt.trim())
         issues.push('请填写本批次提示词。');
-    if (!config.references.length || config.references.length > 30)
-        issues.push('全能参考每批需要 1–30 张图片。');
+    if (!config.references.length || config.references.length > model.maxImages)
+        issues.push(`${model.label} 全模态参考每批需要 1–${model.maxImages} 张图片，请调整批次或选择其他模型。`);
     const ids = new Set();
     config.references.forEach((ref, i) => {
         if (!/^[a-f0-9]{24}$/iu.test(ref.relationId))
@@ -46,9 +64,10 @@ export function seedanceIssues(config, prompt, duration) {
     if (/@(?:图片|图像|image)\[已移除\]/iu.test(authoredText))
         issues.push('提示词包含已移除的参考图，请替换对应图片说明后再生成。');
     const audio = config.audioReferences ?? [];
-    if (audio.length > 10 || new Set(audio.map(ref => ref.voiceId)).size !== audio.length
-        || audio.some(ref => !/^[a-f0-9]{24}$/iu.test(ref.voiceId) || !ref.speakerIds.length || !ref.speakerNames.length))
-        issues.push('旁白参考音频须为最多10个不重复的真实音色。');
+    if (audio.length > model.maxAudio || new Set(audio.map(ref => ref.voiceId)).size !== audio.length
+        || audio.some(ref => !/^[a-f0-9]{24}$/iu.test(ref.voiceId) || !ref.speakerIds.length || !ref.speakerNames.length)) {
+        issues.push(`旁白参考音频须为最多${model.maxAudio}个不重复的真实音色。`);
+    }
     if (audio.length && !config.generateAudio)
         issues.push('已选择旁白音色，请开启生成音频。');
     for (const match of prompt.matchAll(/@音频\s*(\d+)/gu)) {
@@ -60,7 +79,8 @@ export function seedanceIssues(config, prompt, duration) {
 /** 删除后重排仍存在图片的编号；被删除图片保留醒目标记并阻止生成，不能悄悄指向另一张图。 */
 export function promptAfterReferenceRemoval(prompt, removedIndex) {
     return prompt.replace(/@(?:图片|图像|image)\s*(\d+)/giu, (mention, index) => Number(index) === removedIndex + 1
-        ? '@图片[已移除]' : Number(index) > removedIndex + 1 ? `@图片${Number(index) - 1}` : mention);
+        ? '@图片[已移除]'
+        : Number(index) > removedIndex + 1 ? `@图片${Number(index) - 1}` : mention);
 }
 /** 用途声明与图片顺序由同一数组生成，移除图片后不默默重写用户正文，悬空编号会阻止提交。 */
 export function buildSeedanceRequest(config, prompt, duration, urls, audioUrls = []) {
@@ -68,18 +88,20 @@ export function buildSeedanceRequest(config, prompt, duration, urls, audioUrls =
     if (issues.length || urls.length !== config.references.length || audioUrls.length !== (config.audioReferences?.length ?? 0))
         throw new Error(issues[0] || '参考媒体数量与提交内容不一致。');
     const voiceText = config.audioReferences?.length
-        ? `\n\n旁白音色（仅参考音色，不朗读样音中的示例台词）：\n${config.audioReferences.map((ref, i) => `@音频${i + 1}：${ref.speakerNames.join('、')}使用${ref.name}的音色，按每镜指定台词和时间朗读。`).join('\n')}` : '';
+        ? `\n\n旁白音色（仅参考音色，不朗读样音中的示例台词）：\n${config.audioReferences.map((ref, i) => `@音频${i + 1}：${ref.speakerNames.join('、')}使用${ref.name}的音色，按每镜指定台词和时间朗读。`).join('\n')}`
+        : '';
     const text = `${prompt.trim()}\n\n参考图片用途（编号严格对应本次提交顺序）：\n${config.references.map((ref, i) => `@图片${i + 1}：${ref.name}；${ref.purpose}`).join('\n')}${voiceText}`;
-    return { model: SEEDANCE_MODEL, omni_reference_task_type: 'reference', output_format: 'mp4', content: [
+    const model = seedanceModel(config.model);
+    // 任务类型引导和输出格式参数仅适用于 2.5，2.0 系列使用其默认 MP4 输出。
+    return { model: model.value, ...(model.value === SEEDANCE_MODEL ? { omni_reference_task_type: 'reference', output_format: 'mp4' } : {}), content: [
             { type: 'text', text },
             ...urls.map(url => ({ type: 'image_url', image_url: { url }, role: 'reference_image' })),
             ...audioUrls.map(url => ({ type: 'audio_url', audio_url: { url }, role: 'reference_audio' })),
-        ], duration, resolution: config.resolution, ratio: config.ratio,
-        generate_audio: config.generateAudio, watermark: config.watermark };
+        ], duration, resolution: config.resolution, ratio: config.ratio, generate_audio: config.generateAudio, watermark: config.watermark };
 }
 /** 既有批次 prompt 字段使用版本化扩展，界面仍展示纯正文，旧记录原样读取。 */
 export function encodeGenerationPrompt(prompt, generation) {
-    return generation ? JSON.stringify({ schemaVersion: 'seedance-2.5-1', prompt, generation }) : prompt;
+    return generation ? JSON.stringify({ schemaVersion: 'seedance-models-1', prompt, generation: { ...generation, model: generation.model ?? SEEDANCE_MODEL } }) : prompt;
 }
 export function decodeGenerationPrompt(raw) {
     if (!raw.trimStart().startsWith('{'))
@@ -91,9 +113,10 @@ export function decodeGenerationPrompt(raw) {
     catch {
         return { prompt: raw };
     }
-    if (!['seedance-2.0-1', 'seedance-2.5-1'].includes(value?.schemaVersion))
+    if (!['seedance-2.0-1', 'seedance-2.5-1', 'seedance-models-1'].includes(value?.schemaVersion))
         return { prompt: raw };
-    if (typeof value.prompt !== 'string' || !isGenerationConfig(value.generation))
+    if (typeof value.prompt !== 'string' || !isGenerationConfig(value.generation)
+        || (value.schemaVersion === 'seedance-models-1' && !value.generation.model))
         throw new Error('视频批次参考配置格式无效，已停止载入。');
     return { prompt: value.prompt, generation: value.generation };
 }

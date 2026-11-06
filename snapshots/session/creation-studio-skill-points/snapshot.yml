@@ -1,0 +1,9 @@
+version: 1
+scenario: creation-studio-skill-points
+profile: headless
+composition: creation-studio-points
+recording: authored
+header:
+  class: creation-studio-points
+workspace:
+  final: true

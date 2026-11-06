@@ -7,6 +7,8 @@ import sharp from 'sharp'
 import { whiteBackgroundPrompt } from './image-prompts.mjs'
 import { DEFAULT_IMAGE_MODEL, requestSeedreamImage, SEEDREAM_MODELS } from './seedream.mjs'
 import { IMAGE_SIZES } from './image-generation.mjs'
+import { assertSpacePoints } from './project-points.mjs'
+import { roundCredits } from './billing-price.mjs'
 
 // 官方签名模块是 CommonJS，Node ESM 与打包器的 default 解包层数不同。
 const Signer = typeof signerModule === 'function' ? signerModule : signerModule.default
@@ -139,7 +141,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
     return { requestId: state.requestId, taskId: state.taskId, projectId: state.projectId, sourceMaterialId: state.source.id,
       ...(state.providerAccountRef ? { providerAccountRef: state.providerAccountRef } : {}),
       ...(SEEDREAM_MODELS.includes(state.model) ? { model: state.model, size: state.size } : {}),
-      ...(state.consumption ? { consumption: state.consumption } : {}),
+      ...(state.consumption ? { consumption: { ...state.consumption, credits: roundCredits(state.consumption.credits) } } : {}),
       name: state.source.name, prompt: state.prompt, status: state.status, error: state.error,
       ...(state.result ? { result: state.result } : {}) }
   }
@@ -150,7 +152,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
         imageInputCount: 1, createdAt: state.createdAt, result: state.result },
       SEEDREAM_MODELS.includes(state.model) ? { imageOperation: 'edit', imageSize: state.size, imagePixels: state.outputPixels }
         : { imageOperation: 'edit', imageQuality: 'white-background', imageSize: '2048x2048' })
-      if (fee) state.consumption = { credits: fee.customerChargeMicros === undefined ? undefined : (Number(fee.customerChargeMicros) / 1_000_000).toString(), status: fee.chargeStatus, reason: fee.reason }
+      if (fee) state.consumption = { credits: fee.customerCharge, status: fee.chargeStatus, reason: fee.reason }
     } catch (error) { state.billingWarning = `白底图用量待恢复：${error.message}` }
   }
   /** JPEG/PNG/WebP 等可解码图片统一生成受限 JPEG 参考，原始文件不变。 */
@@ -243,6 +245,8 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
           catch (error) { if (error.code === 'EEXIST') return view(await read(pathOf(input))); throw error }
         }
         if (state.status === 'preparing') {
+          // 已有占用或历史 AK/SK 路径仍可能首次提交；查询、下载与入库不走此检查。
+          if (!accounts || state.providerAccountId) await assertSpacePoints(auth, input.spaceId)
           await prepareReference(input, state)
           // AK/SK 账号与任务一同落盘，排队、生成和查询始终使用同一账号。
           if (accounts && !state.providerAccountId) {

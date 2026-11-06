@@ -199,7 +199,7 @@ export function registerTimedAskUser(ctx: Context, timeout = 120): void {
       }
       // `wait` without `timed`: this tool's indefinite form still keys the
       // Client card by call id, so the UI can reopen a closed panel from the
-      // tool call. The legacy tool keeps its unkeyed request.
+      // tool call.
       const result = await ctx.userQuestions.ask({ ...request, wait: { callId: exec.callId } })
       return answerResult(result)
     },

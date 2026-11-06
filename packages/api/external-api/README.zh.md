@@ -30,6 +30,7 @@ kind: "package-reference"
 | `POST` | `/api/external/v1/workspaces/create` | 创建或复用一个子目录和工作区。 |
 | `GET` | `/api/external/v1/workspaces/files` | 查询工作区目录内容。 |
 | `GET` | `/api/external/v1/sessions/history` | 查询当前身份拥有的 Session 文本历史。 |
+| `POST` | `/api/external/v1/sessions/questions/answer` | 回答所属 Session 的前台问题，不提交新的模型 prompt。 |
 | `POST` | `/api/external/v1/sessions/create` | 创建 Session，不调用模型。 |
 | `GET` | `/api/external/v1/sessions/file` | 通过所属 Session 读取完整有界文本文件。 |
 | `POST` | `/api/external/v1/sessions/files/upload` | 暂存原始文件字节并返回 Session 专属凭据。 |
@@ -42,6 +43,8 @@ kind: "package-reference"
 文件读取接受 `sessionId/path`，复用 Session 归属及 Workspace 文件读取策略，拒绝不完整的文本预览。创建 Session 接受 `workspaceId`。附件上传接受 `sessionId/name` 查询和 `application/octet-stream` 原始字节，受 30 MiB 请求上限约束；返回的 `receiptId` 放入同一 Session 的 `/chat.fileReceiptIds`，附件准入与持久化继续由 Session 服务处理。
 
 历史还返回 running，分别在快照前后读取实时 Agent，两次任一次运行中即为 true。历史窗口含当前 turn/start 时，startedAt 返回该事件时间。页面重载后可以轮询此已认证只读接口，无需再次提交 prompt；运行期间禁用发送和推荐，变为 false 后才读取最终产物。中途 Assistant 文本不代表轮次结束。
+
+历史响应包含 `pendingQuestions`，提供问题正文、选项、原 `callId` 和 `answerable`。实时历史按可见消息计数，工具事件不会挤掉聊天正文；运行中轮次可向前分页读取至该轮起点，恢复尚未回答的调用。`POST /api/external/v1/sessions/questions/answer` 接受 `sessionId/callId/answers`，校验 Session 归属后只完成仍开放的原提问，不发送新 prompt。关闭或切换客户端视图保留问题。旧 Host 持有的请求仍以 `answerable=false` 显示，须在原 Harness 窗口回答；阻塞调用开放期间不要重启该 Host。
 
 <a id="model-experience"></a>
 ## 模型体验
