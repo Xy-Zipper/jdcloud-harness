@@ -134,7 +134,7 @@ export function apply(ctx, config) {
         const model = assertProjectTurn(exec, args, config.tenantId, true);
         return runtime.run('images/generate', { ...args, model: model || args.model || DEFAULT_IMAGE_MODEL });
     });
-    register('creation_studio_image_task', '报价、提交、查询或列出即梦 Seedream 5.0 图片任务；生成前报价，完成后返回实际积分，仍须人工确认。',
+    register('creation_studio_image_task', '报价、提交、查询或列出即梦 Seedream 5.0 图片任务；账号满载时排队并沿用原编号查询，生成前报价，完成后返回实际积分，仍须人工确认。',
         { ...scope, action: { type: 'string', required: true, enum: ['submit', 'refresh', 'list', 'quote'] },
             requestId: { type: 'string', description: '提交和查询必填，先写入分镜图片项的稳定 requestId；重试必须沿用。' },
             prompt: { type: 'string', description: '提交必填，说明参考图片的职责和需要保持的产品外观。' },

@@ -1,7 +1,8 @@
 /** Host-only account credentials and durable generation reservations; public receipts contain account IDs only. */
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { createAccountPoolReader } from './account-pool-reader.mjs'
 import { SEEDANCE_MODELS } from './seedance-request.mjs'
 import { assertSpacePoints } from './project-points.mjs'
@@ -25,6 +26,8 @@ const modelsByKind = {
 export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
   const directory = join(config.stateDirectory, 'provider-calls')
   const reader = createAccountPoolReader(config, keys, fetcher)
+  const capacityWaiters = new Set()
+  let queueStopped = false
   let tail = Promise.resolve()
   const serial = operation => {
     const next = tail.then(operation)
@@ -32,11 +35,8 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     return next
   }
   async function persist(receipt) {
-    await mkdir(directory, { recursive: true, mode: 0o700 })
     const path = join(directory, `${receipt.providerLeaseId}.json`)
-    const temporary = `${path}.${randomUUID()}.tmp`
-    await writeFile(temporary, JSON.stringify(receipt), { mode: 0o600 })
-    await rename(temporary, path)
+    await writeFileAtomic(path, JSON.stringify(receipt), { mode: 0o600, dirMode: 0o700 })
   }
   async function environmentAccount(kind) {
     const row = kind === 'ark'
@@ -98,37 +98,67 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     return Promise.all(files.filter(name => /^[a-f0-9]{64}\.json$/u.test(name))
       .map(async name => JSON.parse(await readFile(join(directory, name), 'utf8'))))
   }
+  /** Waiting happens outside the reservation lock so settlement can release account slots. */
+  async function acquire(kind, input, waitForCapacity) {
+    for (;;) {
+      let wake
+      // Register before reading capacity; a settlement during that read cannot be missed.
+      const changed = waitForCapacity ? new Promise(resolve => { wake = resolve; capacityWaiters.add(wake) }) : undefined
+      try {
+        return await serial(async () => {
+          if (queueStopped)
+            throw failure('媒体账号队列正在停止，排队任务已保留。', 'accounts/queue-stopped')
+          // 图片、视频和白底图只在新占用供应商账号时查积分，原任务查询不受余额影响。
+          await assertSpacePoints(auth, input.spaceId)
+          const rows = await accounts(kind)
+          const receipts = await reservations()
+          const loads = new Map()
+          for (const receipt of receipts.filter(item => open.has(item.status)))
+            loads.set(receipt.providerAccountId, (loads.get(receipt.providerAccountId) || 0) + 1)
+          const eligible = rows.filter(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(input.scenario) && row.models.includes(input.model))
+          if (!eligible.length)
+            throw failure('没有启用且支持该模型的媒体账号，请联系管理员配置账号池。', 'accounts/unavailable')
+          const available = eligible.filter(row => (loads.get(row._id) || 0) < row.maxConcurrent)
+          if (!available.length)
+            throw failure('媒体账号并发已满，请等待当前任务完成后重试。', 'accounts/busy')
+          const minimum = Math.min(...available.map(row => (loads.get(row._id) || 0) / row.maxConcurrent))
+          const candidates = available.filter(row => (loads.get(row._id) || 0) / row.maxConcurrent === minimum)
+          const account = candidates[Math.floor(Math.random() * candidates.length)]
+          const user = await auth.requestAuthenticated({ path: '/api/oauth/currentUser', method: 'GET' }, AbortSignal.timeout(30_000))
+          if (user.userInfo?.corpId !== config.tenantId || !user.userInfo?.id)
+            throw failure('媒体调用的操作者身份无效。', 'accounts/invalid-caller')
+          if (queueStopped)
+            throw failure('媒体账号队列正在停止，排队任务已保留。', 'accounts/queue-stopped')
+          const receipt = {
+            providerLeaseId: digest([kind, input.spaceId, input.projectId, input.planId, input.requestId, randomUUID()]),
+            providerAccountId: account._id, providerAccountRef: account.accountCode, provider: kind,
+            scenario: input.scenario, model: input.model, requestId: input.requestId,
+            projectId: input.projectId, planId: input.planId, spaceId: input.spaceId,
+            initiatedByUserId: user.userInfo.id, createdAt: new Date().toISOString(), status: 'reserved',
+          }
+          await persist(receipt)
+          return { account, receipt }
+        })
+      }
+      catch (error) {
+        if (!waitForCapacity || error.code !== 'accounts/busy')
+          throw error
+        await changed
+      }
+      finally {
+        if (wake) capacityWaiters.delete(wake)
+      }
+    }
+  }
   return {
-    /** A reservation is durable before the provider POST; unknown outcomes retain capacity until reconciled. */
-    acquire(kind, input) {
-      return serial(async () => {
-        // 图片、视频和白底图只在新占用供应商账号时查积分，原任务查询不受余额影响。
-        await assertSpacePoints(auth, input.spaceId)
-        const rows = await accounts(kind)
-        const receipts = await reservations()
-        const loads = new Map()
-        for (const receipt of receipts.filter(item => open.has(item.status)))
-          loads.set(receipt.providerAccountId, (loads.get(receipt.providerAccountId) || 0) + 1)
-        const available = rows.filter(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(input.scenario) && row.models.includes(input.model)
-          && (loads.get(row._id) || 0) < row.maxConcurrent)
-        if (!available.length)
-          throw failure('没有可用的媒体账号，请稍后重试或联系管理员配置账号池。', 'accounts/unavailable')
-        const minimum = Math.min(...available.map(row => (loads.get(row._id) || 0) / row.maxConcurrent))
-        const candidates = available.filter(row => (loads.get(row._id) || 0) / row.maxConcurrent === minimum)
-        const account = candidates[Math.floor(Math.random() * candidates.length)]
-        const user = await auth.requestAuthenticated({ path: '/api/oauth/currentUser', method: 'GET' }, AbortSignal.timeout(30_000))
-        if (user.userInfo?.corpId !== config.tenantId || !user.userInfo?.id)
-          throw failure('媒体调用的操作者身份无效。', 'accounts/invalid-caller')
-        const receipt = {
-          providerLeaseId: digest([kind, input.spaceId, input.projectId, input.planId, input.requestId, randomUUID()]),
-          providerAccountId: account._id, providerAccountRef: account.accountCode, provider: kind,
-          scenario: input.scenario, model: input.model, requestId: input.requestId,
-          projectId: input.projectId, planId: input.planId, spaceId: input.spaceId,
-          initiatedByUserId: user.userInfo.id, createdAt: new Date().toISOString(), status: 'reserved',
-        }
-        await persist(receipt)
-        return { account, receipt }
-      })
+    /** Reserve immediately; full accounts reject without submitting a provider request. */
+    acquire: (kind, input) => acquire(kind, input, false),
+    /** Wait for a released slot; missing accounts and stopped queues reject explicitly. */
+    waitForAccount: (kind, input) => acquire(kind, input, true),
+    /** Stop unreserved work without cancelling already-submitted provider requests. */
+    stopQueue() {
+      queueStopped = true
+      for (const wake of capacityWaiters) wake()
     },
     /** Disabled accounts remain usable for their original async task; another key never replaces a missing account. */
     async resolve(kind, receipt) {
@@ -144,6 +174,8 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
       return serial(async () => {
         const previous = JSON.parse(await readFile(join(directory, `${receipt.providerLeaseId}.json`), 'utf8'))
         await persist({ ...previous, status, providerRequestId, updatedAt: new Date().toISOString() })
+        if (!open.has(status))
+          for (const wake of capacityWaiters) wake()
       })
     },
     async configured(kind, scenario, model) {

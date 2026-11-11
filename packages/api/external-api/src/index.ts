@@ -20,6 +20,7 @@ import {
 } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-files'
+import { AttachmentId, type FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { bridge, type ConnectionFetchHandler, type PeerScope } from '@deepseek-ai/dsh-client-connection'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
@@ -91,9 +92,11 @@ const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Respo
   [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
   [`${API_PREFIX}/sessions/history`, sessionHistory],
   [`${API_PREFIX}/sessions/questions/answer`, answerSessionQuestion],
+  [`${API_PREFIX}/sessions/cancel`, cancelSession],
   [`${API_PREFIX}/sessions/create`, sessionCreate],
   [`${API_PREFIX}/sessions/file`, sessionFile],
   [`${API_PREFIX}/sessions/files/upload`, sessionFileUpload],
+  [`${API_PREFIX}/sessions/files/content`, sessionFileContent],
   [`${API_PREFIX}/chat`, chat],
 ])
 
@@ -330,6 +333,26 @@ async function answerSessionQuestion(ctx: Context, request: Request): Promise<Re
   })
 }
 
+/** Request cancellation only after the current identity can read the Session; acceptance does not imply quiescence. */
+async function cancelSession(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async () => {
+    const body = await jsonBody(request)
+    const sessionId = brandString<SessionId>(requiredString(body['sessionId'], 'sessionId'))
+    const iterator = ctx.sessionController.follow({ address: { kind: 'session', sessionId }, maxMessages: 1 }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') throw badRequest('Session history is unavailable')
+      if (ctx.agents.get(sessionId)?.status === 'running') {
+        ctx.sessionController.cancel({ sessionId })
+      }
+      return { accepted: true, sessionId }
+    } finally {
+      await iterator.return?.()
+    }
+  })
+}
+
 /** Create an owned Session without submitting a model turn, so files can be staged first. */
 async function sessionCreate(ctx: Context, request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed('POST')
@@ -381,6 +404,71 @@ async function sessionFileUpload(ctx: Context, request: Request): Promise<Respon
     const name = url.searchParams.get('name') ?? 'attachment'
     return uploads.uploadStream({ sessionId, name, data: requestFileChunks(request), signal: request.signal })
   })
+}
+
+/** Return stored file bytes only when an owned Session's user history references the file. */
+async function sessionFileContent(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET')
+  return authenticated(ctx, request, async () => {
+    const url = new URL(request.url)
+    const sessionId = brandString<SessionId>(requiredString(url.searchParams.get('sessionId'), 'sessionId'))
+    const attachmentId = requiredString(url.searchParams.get('attachmentId'), 'attachmentId')
+    const address = { kind: 'session' as const, sessionId }
+    const iterator = ctx.sessionController.follow({ address, maxMessages: 200 }, request.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await iterator.next()
+      if (opening.done || opening.value.type !== 'snapshot') throw badRequest('Session history is unavailable')
+      let records = opening.value.records
+      let hasMore = opening.value.hasMore
+      let ref = userFileAttachment(records, attachmentId)
+      while (ref === undefined && hasMore) {
+        const page = await ctx.sessionController.page({
+          address, throughSeq: opening.value.cursor,
+          beforeSeq: records[0]?.event.seq ?? opening.value.cursor + 1, maxMessages: 200,
+        }, request.signal)
+        records = page.records
+        hasMore = page.hasMore
+        ref = userFileAttachment(records, attachmentId)
+      }
+      if (ref === undefined) throw badRequest('File is not referenced by this Session')
+      if (ref.bytes > MAX_REQUEST_BODY_BYTES) throw badRequest('File exceeds the attachment read limit')
+      const attachments = ctx.get('attachments')
+      if (attachments === undefined) throw badRequest('File attachment storage is unavailable')
+      const chunks: Uint8Array<ArrayBuffer>[] = []
+      let bytes = 0
+      for await (const chunk of attachments.readFileStream(ref, request.signal)) {
+        bytes += chunk.byteLength
+        if (bytes > MAX_REQUEST_BODY_BYTES) throw badRequest('File exceeds the attachment read limit')
+        chunks.push(Uint8Array.from(chunk))
+      }
+      if (bytes !== ref.bytes) throw badRequest('Stored file length differs from its reference')
+      return new Response(new Blob(chunks), { headers: {
+        'content-type': 'application/octet-stream',
+        'content-disposition': 'attachment',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      } })
+    } finally {
+      await iterator.return?.()
+    }
+  })
+}
+
+function userFileAttachment(records: readonly SessionHistoryRecord[], attachmentId: string): FileAttachmentRef | undefined {
+  for (const { event } of records) {
+    const data = event.data
+    if (event.type !== 'user/message' || !isPlainRecord(data) || !isPlainRecord(data.source)
+      || data.source.kind !== 'user' || !Array.isArray(data.content)) continue
+    for (const block of data.content) {
+      if (!isPlainRecord(block) || block.type !== 'file' || !isPlainRecord(block.attachment)) continue
+      const ref = block.attachment
+      if (ref.attachmentId === attachmentId && typeof ref.name === 'string'
+        && typeof ref.bytes === 'number' && Number.isSafeInteger(ref.bytes) && ref.bytes >= 0) {
+        return { attachmentId: AttachmentId(attachmentId), name: ref.name, bytes: ref.bytes }
+      }
+    }
+  }
+  return undefined
 }
 
 async function* requestFileChunks(request: Request): AsyncIterable<Uint8Array> {
@@ -633,7 +721,7 @@ async function authenticated(
       request.signal,
       () => operation(authenticator),
     )
-    return successResponse(value)
+    return value instanceof Response ? value : successResponse(value)
   } catch (error: unknown) {
     return errorResponse(error)
   }

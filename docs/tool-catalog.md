@@ -141,7 +141,7 @@ Source: [`packages/jdcloud/creation-studio-media/src/index.ts`](../packages/jdcl
 
 ### `creation_studio_image_task`
 
-报价、提交、查询或列出即梦 Seedream 5.0 图片任务；生成前报价，完成后返回实际积分，仍须人工确认。
+报价、提交、查询或列出即梦 Seedream 5.0 图片任务；账号满载时排队并沿用原编号查询，生成前报价，完成后返回实际积分，仍须人工确认。
 
 ```json
 {

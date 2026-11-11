@@ -1,12 +1,14 @@
 /** 同源生图代理：核对项目权限、读取平台参考图，外部密钥只保留在服务端。 */
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { confirmedStoryboardUpstream } from './upstream.mjs'
-import { generatedImagePending, isImageGenerationRequest } from './image-generation.mjs'
+import { isImageGenerationRequest } from './image-generation.mjs'
 import { imagePrompt } from './image-prompts.mjs'
 import { createSeedreamTasks, SEEDREAM_MODELS } from './seedream.mjs'
+import { normalizeMaterialAuthorization } from './material-authorization.mjs'
 
 const MENU = { project: '6ad81c131f280486bb45ac3f', plan: '6ad81c871f280486bb45ac49', shot: '6ad81c871f280486bb45ac4b', material: '6ad81c871f280486bb45ac43', relation: '6ad81c871f280486bb45ac45', space: '6adb0fbec3ca9f3dcdaf499a', member: '6adb0fbec3ca9f3dcdaf499d' }
 const id = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
@@ -80,9 +82,8 @@ export function createImageService(env, transport = fetch) {
     catch (error) { if (error.code === 'ENOENT') return null; throw error }
   }
   async function storeTask(input, task) {
-    const path = taskPath(input)
-    await writeFile(`${path}.tmp`, JSON.stringify(task), { mode: 0o600 })
-    await rename(`${path}.tmp`, path)
+    // 批量查询与后台写回会重叠，使用已有的 Windows 原子替换重试。
+    await writeFileAtomic(taskPath(input), JSON.stringify(task), { mode: 0o600, dirMode: 0o700 })
   }
   async function platformCall(token, path, body) {
     const response = await transport(`${platform}${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'Authorization': token, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), redirect: 'error', signal: AbortSignal.timeout(30_000) })
@@ -130,20 +131,20 @@ export function createImageService(env, transport = fetch) {
       .sort((left, right) => Number(left.sortOrder) - Number(right.sortOrder))
     const requirement = { ...project, specification: parse(project.specification), caseIds: parse(project.caseIds || '[]'), _meta: { schemaVersion: '1.0', artifactType: 'creation-studio-requirement-intake', syncStatus: 'synced', tenantId: tenant, projectId: input.projectId, spaceId: input.spaceId, revision: Number(project.formRevision), baseRevision: Number(project.formRevision) } }
     confirmedStoryboardUpstream(requirement, project, plan, shots)
+    return user.id
   }
-  /** 只把已核验项目文件的预览 URL 交给供应商，不附平台 Token 或任意模型 URL。 */
+  /** 生图参考允许待确认画面，仅传已核验项目文件 URL；视频仍单独核验画面确认。 */
   async function referenceData(token, input, relationId) {
     const relation = await detail(token, MENU.relation, relationId)
     if (relation?._id !== relationId || relation.projectId !== input.projectId || relation.spaceId !== input.spaceId || !id(relation.materialId))
       throw new ApiError('参考图不属于当前项目。', 403)
     const material = await detail(token, MENU.material, relation.materialId)
     const source = Number(material?.revision) === Number(relation.sourceRevision) ? material : parse(relation.usageSnapshot)
-    if (material?._id !== relation.materialId || material.spaceId !== input.spaceId || !['自有', '可商用'].includes(material.authorization)
+    if (material?._id !== relation.materialId || material.spaceId !== input.spaceId || !['自有', '可商用'].includes(normalizeMaterialAuthorization(material.authorization))
       || !source || !id(source.fileId) || Number(source.revision) !== Number(relation.sourceRevision)
-      || !['uploaded', 'referenced', 'generated'].includes(source.sourceKind) || !['自有', '可商用'].includes(source.authorization)
-      || generatedImagePending(material.sourceKind, material.sourceDescription) || generatedImagePending(source.sourceKind, source.sourceDescription)
+      || !['uploaded', 'referenced', 'generated'].includes(source.sourceKind) || !['自有', '可商用'].includes(normalizeMaterialAuthorization(source.authorization))
       || !['image/png', 'image/jpeg', 'image/webp'].includes(source.mime)) {
-      throw new ApiError('参考图文件、使用范围或人工确认无效。')
+      throw new ApiError('参考图文件或使用范围无效。')
     }
     return { url: `${platform}/api/file/previewImage/${tenant}/${source.fileId}`,
       mime: source.mime, name: source.originalName || 'reference.png', fileId: source.fileId, revision: source.revision }
@@ -221,7 +222,7 @@ export function createImageService(env, transport = fetch) {
     await authorize(token, input)
     const task = await readTask(input)
     if (!task) throw new ApiError('没有找到当前项目的图片任务。', 404)
-    if (SEEDREAM_MODELS.includes(task.source?.model)) return seedream.refresh(input, task)
+    if (SEEDREAM_MODELS.includes(task.source?.model)) return seedream.refresh(token, input, task)
     if (task.status === 'failed') return retryTask(token, input, task)
     if (!task.taskId || ['succeeded', 'unknown'].includes(task.status)) return task
     if (!apiKey) throw new ApiError('生图服务尚未配置 GPT_IMAGE_API_KEY。', 503)

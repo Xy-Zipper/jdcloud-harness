@@ -1,0 +1,14 @@
+{
+  "requestId": "request-test-001",
+  "provider": "ark",
+  "model": "doubao-seedream-5-0-pro-260628",
+  "imageInputCount": 0,
+  "providerAccountRef": "ENV-ARK",
+  "status": "pending",
+  "taskId": "seedream-request-test-001",
+  "fingerprint": "4d0e894ecdf560f036ec413388a0079cfe0220857e2fd6135c81f69c70a581ca",
+  "consumption": {
+    "status": "pending",
+    "reason": "实际用量尚未完整返回，暂不计算费用。"
+  }
+}

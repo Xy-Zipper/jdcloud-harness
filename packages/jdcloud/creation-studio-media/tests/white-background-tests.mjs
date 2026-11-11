@@ -67,6 +67,26 @@ async function setup() {
     loseNextRelationAcknowledgement() { lostRelation = true } }
 }
 
+// Stop at reference download to exercise default usage without calling the provider.
+it.each([undefined, '', '待确认', ' 自有 '])('defaults white-background usage %s to owned without rewriting the source', async authorization => {
+  const f = await setup()
+  f.source.authorization = authorization
+  const before = JSON.stringify(f.source)
+  f.auth.downloadFileAuthenticated.mockRejectedValueOnce(new Error('reference-preflight-complete'))
+  await expect(f.service().run('tasks', f.input)).rejects.toThrow('reference-preflight-complete')
+  expect(JSON.stringify(f.source)).toBe(before)
+  const states = await readdir(join(f.directory, 'white-background'))
+  const state = JSON.parse(await readFile(join(f.directory, 'white-background', states.find(name => name.endsWith('.json'))), 'utf8'))
+  expect(state.source.authorization).toBe('自有')
+  expect(f.provider).not.toHaveBeenCalled()
+})
+it.each(['仅内部参考', '仅供内部参考'])('rejects white-background usage %s before downloading or calling the provider', async authorization => {
+  const f = await setup()
+  f.source.authorization = authorization
+  await expect(f.service().run('tasks', f.input)).rejects.toThrow('自有或可商用')
+  expect(f.auth.downloadFileAuthenticated).not.toHaveBeenCalled()
+  expect(f.provider).not.toHaveBeenCalled()
+})
 it('generates white-background images with the selected Seedream model and records the Ark account', async () => {
   const f = await setup()
   const pool = createProviderAccountPool(f.config, f.auth, async key => key === 'ARK_API_KEY' ? 'ark-test-key' : '')

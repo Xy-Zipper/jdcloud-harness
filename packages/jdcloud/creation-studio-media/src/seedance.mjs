@@ -5,6 +5,7 @@ import { resolve, join } from 'node:path'
 import { buildSeedanceRequest, decodeGenerationPrompt, seedanceModel } from './seedance-request.mjs'
 import { confirmedStoryboardUpstream, frontendHash } from './upstream.mjs'
 import { generatedImagePending } from './image-generation.mjs'
+import { normalizeMaterialAuthorization } from './material-authorization.mjs'
 import { decodeStoryboardSupplement, narrationForShot } from './narration.mjs'
 import { parseBuffer } from 'music-metadata'
 
@@ -138,10 +139,10 @@ export function createSeedanceService(env, transport = fetch) {
 		const relation = await detail(token, MENU.relation, reference.relationId);
 		if (relation?._id !== reference.relationId || relation.spaceId !== scope.spaceId || relation.projectId !== scope.projectId || !id(relation.materialId)) throw new ApiError(`参考图“${reference.name}”不属于当前项目。`);
 		const material = await detail(token, MENU.material, relation.materialId);
-		if (material?._id !== relation.materialId || material.spaceId !== scope.spaceId || !["自有", "可商用"].includes(material.authorization)) throw new ApiError(`参考图“${reference.name}”尚未确认使用范围。`);
+		if (material?._id !== relation.materialId || material.spaceId !== scope.spaceId || !["自有", "可商用"].includes(normalizeMaterialAuthorization(material.authorization))) throw new ApiError(`参考图“${reference.name}”尚未确认使用范围。`);
 		if (generatedImagePending(material.sourceKind, material.sourceDescription)) throw new ApiError(`参考图“${reference.name}”是尚待人工确认的 AI 图片。`);
 		const source = Number(material.revision) === Number(relation.sourceRevision) ? material : parse(relation.usageSnapshot);
-		if (!object(source) || Number(source.revision) !== Number(relation.sourceRevision) || !id(source.fileId) || !["自有", "可商用"].includes(source.authorization) || ![
+		if (!object(source) || Number(source.revision) !== Number(relation.sourceRevision) || !id(source.fileId) || !["自有", "可商用"].includes(normalizeMaterialAuthorization(source.authorization)) || ![
 			"uploaded",
 			"referenced",
 			"generated"
@@ -254,8 +255,10 @@ export function createSeedanceService(env, transport = fetch) {
 		};
 		if (stamps.storyboard.storyboardHash !== frontendHash(board)) throw new ApiError("分镜确认已过期，请重新确认当前分镜。");
 		const requiredAssets = new Set(allShots.flatMap((shot) => parse(shot.assetObjectIds || "[]") || []));
-		const requiredPictures = [...allShots.map((shot) => shot.storyboardImageRefId), ...assets.filter((asset) => requiredAssets.has(asset._id)).map((asset) => asset.imageRefId)];
-		if (requiredPictures.some((value) => !id(value))) throw new ApiError("分镜或所需资产图片尚未补齐。");
+		// 分镜与资产图片可留空；已选图片仍须通过项目归属、来源和人工确认核验。
+		const requiredPictures = [...allShots.map((shot) => shot.storyboardImageRefId), ...assets.filter((asset) => requiredAssets.has(asset._id)).map((asset) => asset.imageRefId)]
+			.filter((value) => value !== undefined && value !== null && value !== "");
+		if (requiredPictures.some((value) => !id(value))) throw new ApiError("已选分镜或资产图片引用无效，请重新选择图片。");
 		for (const relationId of new Set(requiredPictures)) await referenceData(token, input, {
 			relationId,
 			name: "分镜或资产图片"
@@ -274,16 +277,17 @@ export function createSeedanceService(env, transport = fetch) {
 				const index = audioReferences.findIndex(reference => reference.voiceId === line.voiceId && reference.speakerIds.includes(line.speakerId));
 				if (index < 0 || !generation.generateAudio) throw new ApiError("请先在分镜资产为每位旁白选择音色并开启生成音频。");
 				usedAudio.add(index);
-				sound.push(`${start}–${end}秒 ${line.speakerName}参考@音频${index + 1}，只朗读一次：“${line.text}”`);
+				sound.push(`${start}–${end}秒 ${line.speakerName}参考@音频${index + 1}，只朗读一次：{${line.text}}`);
 			}
 			for (const [key, label] of [["music", "音乐"], ["soundEffects", "音效"], ["subtitle", "字幕"]]) {
-				if (detail?.[key]) sound.push(`${start}–${end}秒 ${label}：${detail[key]}`);
+				if (detail?.[key]) sound.push(`${start}–${end}秒 ${label}：${key === "subtitle" ? `〖${detail[key]}〗` : detail[key]}`);
 			}
 			start = end;
 		}
 		if (audioReferences.some((_reference, index) => !usedAudio.has(index)))
 			throw new ApiError("参考音频必须对应本批脚本中的真实旁白角色。");
-		const finalPrompt = sound.length ? `${fullPrompt}\n\n已确认脚本声音与字幕（优先按此时间段执行，不朗读样音示例）：\n${sound.join("\n")}` : fullPrompt;
+		// 已确认原文放在长画面提示词之前；这仍是生成指令，不代表产物已通过逐字校验。
+		const finalPrompt = sound.length ? `已确认脚本声音与字幕（原文优先于下方画面描述及参考素材）：\n{}内只作朗读台词，〖〗内只作屏幕字幕，分隔符不显示也不朗读。逐字保留原文、字形、标点及顺序，不增删、改写、同音替字或转换简繁体；旁白与对应字幕同步，不把画面文字、说明或样音示例当台词。未指定字幕或旁白的时段不自行补充。\n${sound.join("\n")}\n\n${fullPrompt}` : fullPrompt;
 		buildSeedanceRequest(generation, finalPrompt, duration, generation.references.map(() => "pending"), audioReferences.map(() => "pending"));
 		const urls = [];
 		let encodedSize = 0;

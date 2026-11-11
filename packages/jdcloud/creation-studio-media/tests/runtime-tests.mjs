@@ -284,6 +284,87 @@ it('quotes Seedream using the actual request without reserving an account or inv
     expect(f.provider).not.toHaveBeenCalled();
     expect(f.counts().uploads).toBe(0);
 });
+// Reject the download after validation so this regression never reaches a video provider request.
+it.each([undefined, '', '待确认', ' 自有 '].flatMap(authorization =>
+    [false, true].map(snapshot => ({ authorization, snapshot }))))('defaults reference usage for image quotes and video preflight ($authorization, snapshot=$snapshot)', async ({ authorization, snapshot }) => {
+    const f = await setup();
+    const ref = f.imageReferences[0];
+    const material = f.records.get(ref.materialId);
+    const relation = f.records.get(ref.relationId);
+    material.authorization = authorization;
+    if (snapshot) {
+        relation.usageSnapshot = JSON.stringify({ ...material, authorization });
+        material.revision += 1;
+    }
+    const before = JSON.stringify(material);
+    const runtime = f.runtime();
+    try {
+        const quote = await runtime.run('images/quote', { ...f.input, prompt: 'reference', size: '1024x1024', referenceIds: [ref.relationId] });
+        expect(quote.referenceCount).toBe(1);
+        f.auth.downloadFileAuthenticated.mockRejectedValueOnce(new Error('reference-preflight-complete'));
+        await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow('reference-preflight-complete');
+        expect(JSON.stringify(material)).toBe(before);
+        expect(f.provider).not.toHaveBeenCalled();
+    }
+    finally {
+        await runtime.close();
+    }
+});
+it.each(['仅内部参考', '仅供内部参考'].flatMap(authorization =>
+    [false, true].map(snapshot => ({ authorization, snapshot }))))('retains explicit reference usage restrictions ($authorization, snapshot=$snapshot)', async ({ authorization, snapshot }) => {
+    const f = await setup();
+    const ref = f.imageReferences[0];
+    const material = f.records.get(ref.materialId);
+    if (snapshot) {
+        f.records.get(ref.relationId).usageSnapshot = JSON.stringify({ ...material, authorization });
+        material.revision += 1;
+    }
+    else material.authorization = authorization;
+    const runtime = f.runtime();
+    try {
+        await expect(runtime.run('images/quote', { ...f.input, prompt: 'reference', size: '1024x1024', referenceIds: [ref.relationId] })).rejects.toThrow('使用范围');
+        await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow(/使用范围|文件、版本或格式/u);
+        expect(f.provider).not.toHaveBeenCalled();
+    }
+    finally {
+        await runtime.close();
+    }
+});
+// Image editing can reuse a pending picture; video submission still requires its review.
+it('quotes and generates with pending image references without approving their pictures', async () => {
+    const f = await setup();
+    const original = f.records.get(f.imageReferences[0].materialId);
+    original.sourceKind = 'generated';
+    original.sourceDescription = JSON.stringify({ generatedImage: { requestId: 'pending-original', confirmedAt: '' } });
+    const before = original.sourceDescription;
+    const runtime = f.runtime();
+    const request = { ...f.input, prompt: 'adjust reference lighting', size: '1024x1024', referenceIds: [f.imageReferences[0].relationId] };
+    const quote = await runtime.run('images/quote', request);
+    expect(quote).toMatchObject({ referenceCount: 1 });
+    expect(f.provider).not.toHaveBeenCalled();
+    const result = await runtime.run('images/generate', request);
+    expect(result).toMatchObject({ needsConfirmation: true, generation: { confirmedAt: '' } });
+    expect(original.sourceDescription).toBe(before);
+    await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId, requestId: 'pending-video' })).rejects.toThrow('人工确认');
+    expect(f.counts()).toMatchObject({ imageCalls: 1, videoCalls: 0 });
+    await expect(`${JSON.stringify({
+        referenceCount: quote.referenceCount,
+        originalConfirmedAt: JSON.parse(original.sourceDescription).generatedImage.confirmedAt,
+        resultNeedsConfirmation: result.needsConfirmation,
+        resultConfirmedAt: result.generation.confirmedAt,
+        videoSubmissions: f.counts().videoCalls,
+    }, null, 2)}\n`).toMatchFileSnapshot('./expected/pending-image-reference.json');
+    await runtime.close();
+});
+it('keeps a quote with missing prices lossless without inventing an amount or price version', async () => {
+    const f = await setup();
+    const quote = await f.runtime().run('images/quote', { ...f.input, prompt: 'scene', size: '1536x864', referenceIds: [] });
+    expect(quote).toStrictEqual(JSON.parse(JSON.stringify(quote)));
+    expect(quote).not.toHaveProperty('estimatedCredits');
+    expect(quote).not.toHaveProperty('priceVersionId');
+    expect(quote.reason).toContain('售价');
+    expect(f.provider).not.toHaveBeenCalled();
+});
 it('submits official 2.5 reference tasks, uploads completed videos, and restores platform results without another paid request', async () => {
     const f = await setup();
     const request = { ...f.input, batchId: f.batchId };
@@ -311,6 +392,89 @@ it('submits official 2.5 reference tasks, uploads completed videos, and restores
     const usage = [...f.records.values()].filter(row => row.usageEventKey);
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ videoOutputTokens: 144512, customerCharge: '14.45', deliveryStatus: 'delivered' });
+});
+
+it('submits product-only reference video without per-shot images and rejects unconfirmed selected products', async () => {
+    const f = await setup();
+    for (const row of f.rows) row.storyboardImageRefId = '';
+    const stamps = JSON.parse(f.plan.stageConfirmations);
+    stamps.storyboard.storyboardHash = frontendHash({
+        consistency: f.plan.consistency, assets: [], shots: f.rows.map((row, index) => ({
+            code: `SHOT-${String(index + 1).padStart(2, '0')}`, prompt: row.prompt, supplement: '', assetIds: [], imageRefId: '',
+        })),
+    });
+    f.plan.stageConfirmations = JSON.stringify(stamps);
+    const request = { ...f.input, batchId: f.batchId };
+    const task = await f.runtime().run('video/tasks', request);
+    expect(task.status).toBe('queued');
+    const body = JSON.parse(f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init?.method === 'POST')[1].body);
+    expect(body.content.filter(item => item.type === 'image_url')).toHaveLength(1);
+    await expect(`${body.content[0].text}\n`).toMatchFileSnapshot('./expected/product-only-video-prompt.txt');
+    const material = f.records.get(f.imageReferences[0].materialId);
+    material.sourceKind = 'generated';
+    material.sourceDescription = JSON.stringify({ generatedImage: { requestId: 'unconfirmed', confirmedAt: '' } });
+    await expect(f.runtime().run('video/tasks', { ...request, requestId: 'unconfirmed-product' })).rejects.toThrow('人工确认');
+    expect(f.counts().videoCalls).toBe(1);
+});
+
+// Inspect the actual provider request: confirmed copy must precede editable visual prose.
+it('places confirmed Chinese subtitles and narration before visual prompts without rewriting the copy', async () => {
+    const f = await setup();
+    const voiceId = 'a'.repeat(24), audioFileId = 'b'.repeat(24);
+    const copy = ['下单，报价，开标。', '麓山云，做软件开发。'];
+    f.rows.forEach((row, index) => {
+        const detail = JSON.parse(row.scriptDetail);
+        detail.subtitle = copy[index] || '';
+        detail.narration = copy[index] || '';
+        row.scriptDetail = JSON.stringify(detail);
+        row.voiceover = copy[index] ? `字幕：${copy[index]}\n旁白：${copy[index]}` : '';
+        row.supplement = copy[index] ? JSON.stringify({ schemaVersion: 'storyboard-speech-1', supplement: '',
+            speech: [{ speakerId: 'narrator', speakerName: '旁白', text: copy[index], voiceId }] }) : '';
+    });
+    const stamps = JSON.parse(f.plan.stageConfirmations);
+    stamps.script.scriptHash = frontendHash(f.rows.map(row => ({
+        code: row.code, shotSize: row.shotSize, camera: row.cameraMove, visual: row.visual,
+        voiceover: row.voiceover, seconds: row.expectedSeconds, scene: row.scene, emotion: row.emotion,
+        scriptDetail: JSON.parse(row.scriptDetail),
+    })));
+    stamps.storyboard = { ...stamps.storyboard, scriptHash: stamps.script.scriptHash, storyboardHash: frontendHash({
+        consistency: f.plan.consistency, assets: [], shots: f.rows.map((row, index) => ({
+            code: `SHOT-${String(index + 1).padStart(2, '0')}`, prompt: row.prompt, supplement: row.supplement || '',
+            assetIds: [], imageRefId: row.storyboardImageRefId,
+        })),
+    }) };
+    f.plan.stageConfirmations = JSON.stringify(stamps);
+    f.plan.globalPrompt = '冷蓝背景，公司名保持参考图样式。';
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation,
+        audioReferences: [{ voiceId, name: '男声', speakerIds: ['narrator'], speakerNames: ['旁白'] }] });
+    f.records.set(voiceId, { _id: voiceId, spaceId: '', fileId: audioFileId, mime: 'audio/wav' });
+    const wav = Buffer.alloc(44 + 8000 * 2 * 3);
+    wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
+    wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40);
+    f.auth.downloadFileAuthenticated.mockImplementation(async fileId => fileId === audioFileId
+        ? new Response(wav, { headers: { 'content-type': 'audio/wav' } })
+        : new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } }));
+    const runtime = f.runtime();
+    try {
+        await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+        const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init?.method === 'POST');
+        const body = JSON.parse(call[1].body);
+        const text = body.content[0].text;
+        for (const [index, line] of copy.entries()) {
+            const time = `${index * 3}–${(index + 1) * 3}秒`;
+            expect(text).toContain(`${time} 字幕：〖${line}〗`);
+            expect(text).toContain(`${time} 旁白参考@音频1，只朗读一次：{${line}}`);
+            expect(text.indexOf(`〖${line}〗`)).toBeLessThan(text.indexOf(f.plan.globalPrompt));
+        }
+        expect(body.content.filter(item => item.type === 'audio_url')).toHaveLength(1);
+        expect(text).not.toContain('开锦');
+        await expect(`${text}\n`).toMatchFileSnapshot('./expected/confirmed-video-copy-prompt.txt');
+    } finally {
+        await runtime.close();
+    }
 });
 
 it('automatically stores synchronous image usage after upload and updates the same low-code row on recovery', async () => {
@@ -423,6 +587,124 @@ it('submits multiple Seedream requests before completion and restores each uploa
     expect(created).toBe(2);
 });
 
+it('queues eight accepted images behind five account slots and starts waiting work as each slot is released', async () => {
+    const f = await setup();
+    const rows = [{ _id: '1'.repeat(24), accountCode: 'ARK-IMAGE', provider: 'ark',
+        models: ['doubao-seedream-5-0-pro-260628'], scenarios: ['image'], enabled: 1, maxConcurrent: 5, apiKey: 'pooled-image-key' }];
+    const releases = [];
+    let active = 0, peak = 0, releaseAll = false;
+    f.provider.mockImplementation(async (_url, init) => {
+        expect(init.headers.Authorization).toBe('Bearer pooled-image-key');
+        const release = Promise.withResolvers();
+        releases.push(release);
+        active++;
+        peak = Math.max(peak, active);
+        if (!releaseAll) await release.promise;
+        active--;
+        return Response.json({ data: [{ b64_json: png }] });
+    });
+    const runtime = f.runtime(undefined, rows);
+    const requests = Array.from({ length: 8 }, (_, index) => ({ ...f.input, requestId: `queued-image-${index}`,
+        prompt: `view ${index}`, size: '1024x1024', referenceIds: [] }));
+    try {
+        const tasks = await Promise.all(requests.map(input => runtime.run('images/tasks', input)));
+        expect(tasks.filter(task => task.status === 'pending')).toHaveLength(5);
+        expect(tasks.filter(task => task.status === 'queued')).toHaveLength(3);
+        await vi.waitFor(() => expect(releases).toHaveLength(5));
+        const running = await runtime.run('images/list', f.input);
+        expect(running.filter(task => task.status === 'pending')).toHaveLength(5);
+        expect(running.filter(task => task.status === 'queued')).toHaveLength(3);
+        expect(running.some(task => task.error)).toBe(false);
+        const queued = running.find(task => task.status === 'queued');
+        expect(await runtime.run('images/refresh', { ...f.input, requestId: queued.requestId })).toMatchObject({ status: 'queued' });
+        expect(await runtime.run('images/tasks', requests.find(input => input.requestId === queued.requestId))).toMatchObject({ status: 'queued' });
+        expect(releases).toHaveLength(5);
+        releases[0].resolve();
+        await vi.waitFor(() => expect(releases).toHaveLength(6));
+        expect(peak).toBe(5);
+        releaseAll = true;
+        releases.forEach(release => release.resolve());
+        await vi.waitFor(async () => {
+            const finished = await runtime.run('images/list', f.input);
+            expect(finished.filter(task => task.status === 'upload_pending'),
+                JSON.stringify(finished.map(task => ({ requestId: task.requestId, status: task.status, error: task.error })))).toHaveLength(8);
+        });
+        const uploaded = await runtime.run('images/refresh', { ...f.input, taskIds: tasks.map(task => task.taskId) });
+        expect(uploaded.every(task => task.status === 'succeeded')).toBe(true);
+        expect(releases).toHaveLength(8);
+        expect(peak).toBe(5);
+    } finally {
+        releaseAll = true;
+        releases.forEach(release => release.resolve());
+        await runtime.close();
+    }
+});
+
+it('preserves unsubmitted queued images during shutdown and resumes the same receipt after restart', async () => {
+    const f = await setup();
+    const rows = [{ _id: '1'.repeat(24), accountCode: 'ARK-IMAGE', provider: 'ark',
+        models: ['doubao-seedream-5-0-pro-260628'], scenarios: ['image'], enabled: 1, maxConcurrent: 1, apiKey: 'pooled-image-key' }];
+    const release = Promise.withResolvers();
+    f.provider.mockImplementationOnce(async () => {
+        await release.promise;
+        return Response.json({ data: [{ b64_json: png }] });
+    });
+    const runtime = f.runtime(undefined, rows);
+    const first = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
+    const waiting = { ...first, requestId: 'restart-queued-image' };
+    await runtime.run('images/tasks', first);
+    expect(await runtime.run('images/tasks', waiting)).toMatchObject({ status: 'queued' });
+    const shutdown = runtime.close();
+    release.resolve();
+    await shutdown;
+    expect(f.provider).toHaveBeenCalledTimes(1);
+    const restored = f.runtime(undefined, rows);
+    try {
+        const saved = await restored.run('images/list', f.input);
+        expect(saved.find(task => task.requestId === waiting.requestId)).toMatchObject({ status: 'queued' });
+        expect(f.provider).toHaveBeenCalledTimes(1);
+        await restored.run('images/refresh', waiting);
+        await vi.waitFor(async () => {
+            expect((await restored.run('images/list', f.input)).find(task => task.requestId === waiting.requestId)?.status).toBe('upload_pending');
+        });
+        expect((await restored.run('images/refresh', waiting)).status).toBe('succeeded');
+        await restored.run('images/tasks', waiting);
+        expect(f.provider).toHaveBeenCalledTimes(2);
+    } finally {
+        await restored.close();
+    }
+});
+
+it('rechecks queued write permission before paid dispatch and releases the unused account slot', async () => {
+    const f = await setup();
+    const rows = [{ _id: '1'.repeat(24), accountCode: 'ARK-IMAGE', provider: 'ark',
+        models: ['doubao-seedream-5-0-pro-260628'], scenarios: ['image'], enabled: 1, maxConcurrent: 1, apiKey: 'pooled-image-key' }];
+    const release = Promise.withResolvers();
+    f.provider.mockImplementationOnce(async () => {
+        await release.promise;
+        return Response.json({ data: [{ b64_json: png }] });
+    });
+    const runtime = f.runtime(undefined, rows);
+    try {
+        const request = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
+        await runtime.run('images/tasks', request);
+        expect(await runtime.run('images/tasks', { ...request, requestId: 'revoked-queued-image' })).toMatchObject({ status: 'queued' });
+        f.denyWrites();
+        release.resolve();
+        await vi.waitFor(async () => {
+            const task = (await runtime.run('images/list', f.input)).find(task => task.requestId === 'revoked-queued-image');
+            expect(task).toMatchObject({ status: 'failed', error: expect.stringContaining('权限') });
+        });
+        expect(f.provider).toHaveBeenCalledTimes(1);
+        const receipts = await Promise.all((await readdir(join(f.config.stateDirectory, 'provider-calls')))
+            .map(name => readFile(join(f.config.stateDirectory, 'provider-calls', name), 'utf8')));
+        expect(receipts.map(text => JSON.parse(text).status).sort()).toEqual(['failed', 'succeeded']);
+    } finally {
+        release.resolve();
+        await runtime.close();
+    }
+});
+
 it('uploads a completed Seedream image while another generation remains pending and rejects foreign task IDs', async () => {
     const f = await setup();
     const release = Promise.withResolvers();
@@ -447,6 +729,34 @@ it('uploads a completed Seedream image while another generation remains pending 
     expect(usage.find(row => row.imageCount === 1).customerCharge).toBe('2.00');
     release.resolve();
     await runtime.close();
+});
+
+it('returns lossless tool results while image consumption is still pending, without resubmitting', async () => {
+    const f = await setup();
+    const release = Promise.withResolvers();
+    f.provider.mockImplementationOnce(async () => {
+        await release.promise;
+        return Response.json({ data: [{ b64_json: png }] });
+    });
+    const billing = createBillingRecorder(f.config, f.auth, async () => '');
+    const runtime = f.runtime(billing);
+    const request = { ...f.input, prompt: 'white liquid', size: '1536x864', referenceIds: [] };
+    try {
+        for (const action of ['tasks', 'list', 'refresh']) {
+            const result = await runtime.run(`images/${action}`, request);
+            expect(result).toStrictEqual(JSON.parse(JSON.stringify(result)));
+            const task = action === 'list' ? result[0] : result;
+            expect(task).toMatchObject({ status: 'pending', consumption: { status: 'pending' } });
+            expect(task.consumption).not.toHaveProperty('credits');
+            const { createdAt: _createdAt, ...visibleTask } = task;
+            await expect(`${JSON.stringify(visibleTask, null, 2)}\n`).toMatchFileSnapshot('./expected/pending-image-task.json');
+        }
+        expect(f.provider).toHaveBeenCalledTimes(1);
+    } finally {
+        release.resolve();
+        await runtime.close();
+        await billing.close();
+    }
 });
 
 it('reports one failed refresh without discarding another uploaded image', async () => {

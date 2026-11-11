@@ -56,6 +56,7 @@ function context(services: {
   readonly workspaces?: object
   readonly files?: object
   readonly uploads?: object
+  readonly attachments?: object
   readonly agents?: object
   readonly questions?: object
 } = {}): Context {
@@ -84,6 +85,7 @@ function context(services: {
   ctx.provide('workspaceFiles', services.files ?? {} as never)
   if (services.questions !== undefined) ctx.provide('userQuestions', services.questions as never)
   if (services.uploads !== undefined) ctx.provide('fileUploads', services.uploads as never)
+  if (services.attachments !== undefined) ctx.provide('attachments', services.attachments as never)
   return ctx
 }
 
@@ -379,6 +381,55 @@ describe('external API chat stream', () => {
   })
 })
 
+describe('external API Session cancellation', () => {
+  it('checks Session ownership before cancelling the active turn and closes its reader', async () => {
+    const close = vi.fn()
+    const cancel = vi.fn(() => ({ accepted: true }))
+    const follow = vi.fn(async function* () {
+      try { yield { type: 'snapshot', records: [], cursor: 0, hasMore: false } }
+      finally { close() }
+    })
+    const ctx = context({ sessions: { follow, cancel }, agents: { get: () => ({ status: 'running' }) } })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/cancel', {
+      method: 'POST', body: JSON.stringify({ sessionId: 'owned-session' }),
+    }, { 'content-type': 'application/json' }))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ data: { accepted: true, sessionId: 'owned-session' } })
+    expect(follow).toHaveBeenCalledWith({ address: { kind: 'session', sessionId: 'owned-session' }, maxMessages: 1 }, expect.any(AbortSignal))
+    expect(follow.mock.invocationCallOrder[0]).toBeLessThan(cancel.mock.invocationCallOrder[0]!)
+    expect(cancel).toHaveBeenCalledWith({ sessionId: 'owned-session' })
+    expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('does not cancel another identity’s Session or create a replacement Agent', async () => {
+    const cancel = vi.fn()
+    const follow = async function* () {
+      throw new RemoteError('session/not-found', 'not owned', { sessionId: brandString<SessionId>('foreign-session') })
+    }
+    const get = vi.fn()
+    const ctx = context({ sessions: { follow, cancel }, agents: { get } })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/cancel', {
+      method: 'POST', body: JSON.stringify({ sessionId: 'foreign-session' }),
+    }, { 'content-type': 'application/json' }))
+    expect(response.status).toBe(404)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('accepts an already idle owned Session without starting or cancelling work', async () => {
+    const cancel = vi.fn()
+    const ctx = context({
+      sessions: { follow: async function* () { yield { type: 'snapshot', records: [], cursor: 0, hasMore: false } }, cancel },
+      agents: { get: () => ({ status: 'idle' }) },
+    })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/cancel', {
+      method: 'POST', body: JSON.stringify({ sessionId: 'idle-session' }),
+    }, { 'content-type': 'application/json' }))
+    expect(response.status).toBe(200)
+    expect(cancel).not.toHaveBeenCalled()
+  })
+})
+
 describe('external API Session files', () => {
   function snapshot() {
     return { type: 'snapshot', header: { id: 'session-files', cwd: '/owned/project' }, cursor: -1, records: [], hasMore: false }
@@ -466,6 +517,100 @@ describe('external API Session files', () => {
     expect((await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/upload?sessionId=session-files', {
       method: 'POST', body: 'content',
     }, { 'content-type': 'application/json' }))).status).toBe(400)
+  })
+
+  function attachmentRecord(id = 'sha256:image') {
+    return { event: { type: 'user/message', seq: 1, time: 1, data: {
+      role: 'user', source: { kind: 'user' },
+      content: [{ type: 'file', attachment: { attachmentId: id, name: 'image.png', bytes: 3 } }],
+    } } }
+  }
+
+  it('returns exact attachment bytes after matching an owned user message and closes the reader', async () => {
+    let closed = false
+    const follow = async function* () {
+      try { yield { ...snapshot(), records: [attachmentRecord()] } } finally { closed = true }
+    }
+    const readFileStream = vi.fn(async function* () { yield Uint8Array.of(1, 2, 3) })
+    const ctx = context({ sessions: { follow }, attachments: { readFileStream } })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/octet-stream')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3])
+    expect(readFileStream).toHaveBeenCalledWith({ attachmentId: 'sha256:image', name: 'image.png', bytes: 3 }, expect.any(AbortSignal))
+    expect(closed).toBe(true)
+  })
+
+  it('finds an older attachment through authorized Session pages', async () => {
+    const follow = async function* () { yield { ...snapshot(), cursor: 10, hasMore: true } }
+    const page = vi.fn(async () => ({ records: [attachmentRecord()], hasMore: false }))
+    const ctx = context({
+      sessions: { follow, page },
+      attachments: { readFileStream: async function* () { yield Uint8Array.of(1, 2, 3) } },
+    })
+    const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))
+    expect(response.status).toBe(200)
+    expect(page).toHaveBeenCalledWith(expect.objectContaining({ throughSeq: 10, beforeSeq: 11 }), expect.any(AbortSignal))
+  })
+
+  it.each(['foreign', 'unreferenced'])('refuses %s attachments before reading stored bytes', async (mode) => {
+    const follow = async function* () {
+      if (mode === 'foreign') throw new RemoteError('session/not-found', 'not owned', { sessionId: brandString<SessionId>('foreign') })
+      yield snapshot()
+    }
+    const readFileStream = vi.fn()
+    const response = await fetchExternalApi(context({ sessions: { follow }, attachments: { readFileStream } }),
+      request('/api/external/v1/sessions/files/content?sessionId=foreign&attachmentId=sha256:image'))
+    expect(response.status).toBe(mode === 'foreign' ? 404 : 400)
+    await expect(response.json()).resolves.toMatchObject({ errorCode: mode === 'foreign' ? 'session/not-found' : 'gateway/bad-request' })
+    expect(readFileStream).not.toHaveBeenCalled()
+  })
+
+  it('rejects malformed and oversized attachment reads without returning partial bytes', async () => {
+    const file = attachmentRecord()
+    file.event.data.content[0]!.attachment.bytes = 30 * 1024 * 1024 + 1
+    const readFileStream = vi.fn()
+    const follow = async function* () { yield { ...snapshot(), records: [file] } }
+    const ctx = context({ sessions: { follow }, attachments: { readFileStream } })
+    expect((await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))).ok).toBe(false)
+    expect(readFileStream).not.toHaveBeenCalled()
+    expect((await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content?sessionId=session-files'))).status).toBe(400)
+    expect((await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content', { method: 'POST' }))).status).toBe(405)
+  })
+
+  it.each(['injected', 'malformed'])('does not authorize an %s history entry as a user file', async (mode) => {
+    const file = attachmentRecord()
+    if (mode === 'injected') file.event.data.source.kind = 'runtime-context'
+    else file.event.data.content[0]!.attachment.bytes = -1
+    const readFileStream = vi.fn()
+    const follow = async function* () { yield { ...snapshot(), records: [file] } }
+    const response = await fetchExternalApi(context({ sessions: { follow }, attachments: { readFileStream } }),
+      request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))
+    expect(response.status).toBe(400)
+    expect(readFileStream).not.toHaveBeenCalled()
+  })
+
+  it.each(['oversized-chunk', 'incorrect-length', 'storage-failure'])('returns a JSON error without partial file bytes for %s', async (mode) => {
+    const follow = async function* () { yield { ...snapshot(), records: [attachmentRecord()] } }
+    const readFileStream = async function* () {
+      if (mode === 'oversized-chunk') yield new Uint8Array(30 * 1024 * 1024 + 1)
+      else yield Uint8Array.of(1)
+      if (mode === 'storage-failure') throw new Error('private storage failure')
+    }
+    const response = await fetchExternalApi(context({ sessions: { follow }, attachments: { readFileStream } }),
+      request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))
+    expect(response.status).toBe(mode === 'storage-failure' ? 500 : 400)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(await response.text()).not.toContain('private storage failure')
+  })
+
+  it('reports unavailable history and attachment storage explicitly', async () => {
+    const requestFile = () => request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image')
+    const noHistory = context({ sessions: { follow: async function* () { /* No opening snapshot. */ } } })
+    expect((await fetchExternalApi(noHistory, requestFile())).status).toBe(400)
+    const noStorage = context({ sessions: { follow: async function* () { yield { ...snapshot(), records: [attachmentRecord()] } } } })
+    expect((await fetchExternalApi(noStorage, requestFile())).status).toBe(400)
   })
 })
 

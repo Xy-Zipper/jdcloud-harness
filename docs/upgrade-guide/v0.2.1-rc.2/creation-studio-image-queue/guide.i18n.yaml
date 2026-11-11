@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/creation-studio-image-queue/guide.md
+/:
+  en: 225ac16c31daeefa
+  zh: 57ef668275166e76
+/creation-studio-image-tasks-can-be-queued:
+  en: 7553ee7287f3c4db
+  zh: 837ff95100889670
+/creation-studio-image-tasks-can-be-queued/change:
+  en: a1a7f358b69012d1
+  zh: ce617e3df6b1d379
+/creation-studio-image-tasks-can-be-queued/migration:
+  en: ff03dd26b5835e14
+  zh: d1a5db6c055ea0cf

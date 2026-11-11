@@ -31,9 +31,11 @@ English | [中文](README.zh.md)
 | `GET` | `/api/external/v1/workspaces/files` | List one Workspace directory. |
 | `GET` | `/api/external/v1/sessions/history` | Read text history for a Session owned by the current identity. |
 | `POST` | `/api/external/v1/sessions/questions/answer` | Answer an owned foreground question without a new model prompt. |
+| `POST` | `/api/external/v1/sessions/cancel` | Request cancellation of the owned Session's active Agent turn. |
 | `POST` | `/api/external/v1/sessions/create` | Create a Session without invoking a model. |
 | `GET` | `/api/external/v1/sessions/file` | Read a complete bounded text file through its owned Session. |
 | `POST` | `/api/external/v1/sessions/files/upload` | Stage raw file bytes and return a Session-specific receipt. |
+| `GET` | `/api/external/v1/sessions/files/content` | Read stored file bytes referenced by an owned Session's user messages. |
 | `POST` | `/api/external/v1/chat` | Create or continue a Session and return SSE events. |
 
 All requests carry `Authorization: Bearer <token>`. JDCloud requires the low-code Token, `X-Tenant-Id`, and `X-JDCloud-Base-Url`; the controller accepts any syntactically valid absolute HTTP(S) address without credentials, query, or fragment. Ontology requires the Go Runtime Access Token and `X-Project-Id`, and rejects JDCloud headers. Every JSON success is `{ code: 200, data }`; every JSON failure uses a numeric `code` equal to its HTTP status and preserves the specific string identifier in `errorCode`. The history endpoint reuses Session Controller ownership checks and returns assistant text plus user text whose source kind is `user`; injected runtime and Skill context stays internal. The chat body accepts `message`, optional `sessionId`, `workspaceId` for a new Session, and optional `skillNames`. SSE emits `session`, `snapshot`, `event`, `assistant`, `done`, and `error`; each success event carries `{ code: 200, data }`, while an `error` event carries the mapped numeric code. `assistant` contains the model-provided live chunk, including provider reasoning fields when the model emits them; the API does not manufacture or expose hidden reasoning.
@@ -42,9 +44,13 @@ All requests carry `Authorization: Bearer <token>`. JDCloud requires the low-cod
 
 File reads accept `sessionId/path`, reuse Session ownership and Workspace filesystem policies, and reject partial previews. Session creation accepts `workspaceId`. Uploads accept `sessionId/name` queries and raw `application/octet-stream` bytes under the 30 MiB request cap. Pass the returned `receiptId` through the same Session's `/chat.fileReceiptIds`; the existing Session services continue to own attachment admission and persistence.
 
+Attachment content reads accept `sessionId/attachmentId`, verify ownership and a matching durable user-message file reference, and return raw `application/octet-stream` bytes with `no-store` and `nosniff`. Older references are found through authorized history pages. Reads are capped at 30 MiB and complete integrity checks before returning bytes; missing references, storage failures, or oversized files return the existing JSON error response without partial file content. No model request is submitted.
+
 History also returns `running`, read from the live Agent before and after the snapshot; either running observation keeps it true. When the history window includes the current `turn/start`, `startedAt` carries that event time. Reloaded clients can poll this authenticated read without submitting another prompt, keep sending and recommendations disabled while running, and read final artifacts only after it becomes false. Intermediate Assistant text does not mean the turn completed.
 
 The history response includes `pendingQuestions` with question text, options, the original `callId`, and `answerable`. Live history counts visible messages rather than letting tool events displace them; a running turn can read earlier pages back to its start to recover unanswered calls. `POST /api/external/v1/sessions/questions/answer` accepts `sessionId/callId/answers`, verifies Session ownership, and completes only that still-open question without a new prompt. Closing or switching a client view leaves the question active. Requests held by an older Host remain visible with `answerable=false` and must be answered in their original Harness window; do not restart that Host while its blocking call is open.
+
+Cancellation accepts `{sessionId}`, verifies ownership through Session history, and reuses Session Controller cancellation. `{accepted:true}` acknowledges the request; clients must wait for history `running=false` before sending a replacement prompt. An idle owned Session is a no-op. Cancellation does not revert completed tools or cancel separately accepted image or video tasks; existing queued Session work retains its order.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -67,7 +73,7 @@ Selecting, removing, or reordering Skills changes the logged user message and re
 ## Known Limitations and Deferred Work
 
 - Routes do not add browser CORS policy; browser applications should use a same-origin deployment or a server-side proxy.
-- Workspace file access lists directories; owned Session files support complete bounded text reads. Binary file downloads are not exposed.
+- Workspace file access lists directories; owned Session files support complete bounded text reads. Binary attachment reads require a durable user-message reference in the owned Session.
 - JDCloud callers select an unrestricted HTTP(S) destination. The Host sends the supplied Token to that destination and can reach private-network addresses, so deployments must trust callers or add an upstream allowlist before exposing these routes.
 
 <a id="dev-note"></a>

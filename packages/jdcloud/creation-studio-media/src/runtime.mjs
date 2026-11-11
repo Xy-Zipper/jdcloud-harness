@@ -30,12 +30,14 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   const jobKey = input => JSON.stringify([input.spaceId, input.projectId, input.planId, input.requestId])
   /** Background generation remains owned until its receipt is durable, including during plugin disposal. */
   const imageBackground = {
+    authorize: input => authorizeWrites(input),
     start(input, operation) {
       const key = jobKey(input)
       const job = Promise.resolve().then(operation)
-        .catch(() => { console.warn('即梦后台任务保存失败，请查询原请求并核对供应商记录。') })
+        .catch(error => { console.warn('即梦后台任务保存失败（%s），请查询原请求并核对供应商记录。', error.code || error.name) })
         .finally(() => imageJobs.delete(key))
       imageJobs.set(key, job)
+      return job
     },
     has: input => imageJobs.has(jobKey(input)),
     wait: input => imageJobs.get(jobKey(input)),
@@ -201,8 +203,8 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       const fee = calculateShadowCharge({ scenario: 'image', provider: 'ark', modelKey: request.model, payer: 'customer',
         status: 'succeeded', usageStatus: 'reported', delivered: true, occurredAt: Date.now(), imageCount: 1, imageInputCount: request.referenceCount,
         parameters: { imagePixels: width * height, imageSize: request.size, imageOperation: request.referenceCount ? 'edit' : 'generation' } }, binding?.prices || [])
-      return { ...request, estimatedCredits: fee.customerCharge,
-        priceVersionId: fee.priceVersionId, reason: fee.reason, estimated: true }
+      return { ...request, ...(fee.customerCharge === undefined ? {} : { estimatedCredits: fee.customerCharge }),
+        ...(fee.priceVersionId === undefined ? {} : { priceVersionId: fee.priceVersionId }), reason: fee.reason, estimated: true }
     }
     if (operation === 'images/tasks') {
       await authorizeWrites(input)
@@ -343,7 +345,8 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
               ? { ...billingParameters, imagePixels: result.width * result.height, imageSize: `${result.width}x${result.height}` } : billingParameters
             try {
               const fee = await billing.media(input, binding, scenario, task, actualParameters)
-              if (fee) result = { ...result, consumption: { credits: fee.customerCharge, status: fee.chargeStatus, reason: fee.reason } }
+              // 费用待回执时省略金额；undefined 会使 Agent 工具的严格 JSON 投影失败。
+              if (fee) result = { ...result, consumption: { ...(fee.customerCharge === undefined ? {} : { credits: fee.customerCharge }), status: fee.chargeStatus, reason: fee.reason } }
             }
             catch (error) { return { ...result, billingWarning: `生成状态已保存，但用量记录待恢复：${error.message}` } }
           }
@@ -355,6 +358,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     /** 卸载先拒绝新操作，再等待在途生成和上传落盘，不把未完成回执丢成成功。 */
     async close() {
       closing = true
+      accounts.stopQueue()
       await Promise.allSettled([...active.values()])
       await Promise.allSettled([...imageJobs.values()])
     },

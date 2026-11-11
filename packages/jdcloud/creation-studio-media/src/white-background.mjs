@@ -9,6 +9,7 @@ import { DEFAULT_IMAGE_MODEL, requestSeedreamImage, SEEDREAM_MODELS } from './se
 import { IMAGE_SIZES } from './image-generation.mjs'
 import { assertSpacePoints } from './project-points.mjs'
 import { roundCredits } from './billing-price.mjs'
+import { normalizeMaterialAuthorization } from './material-authorization.mjs'
 
 // 官方签名模块是 CommonJS，Node ESM 与打包器的 default 解包层数不同。
 const Signer = typeof signerModule === 'function' ? signerModule : signerModule.default
@@ -234,12 +235,12 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
           const source = await detail(MATERIAL, input.materialId)
           if (source?._id !== input.materialId || source.spaceId !== input.spaceId || !recordId(source.fileId)
             || (!String(source.mime).startsWith('image/') && !/\.(?:png|jpe?g|webp|gif|bmp|avif)$/iu.test(source.originalName || source.name || '')) || source.sourceKind === 'demo'
-            || !['自有', '可商用'].includes(source.authorization)) throw new Error('请选择当前空间内可用于生成的自有或可商用图片。')
+            || !['自有', '可商用'].includes(normalizeMaterialAuthorization(source.authorization))) throw new Error('请选择当前空间内可用于生成的自有或可商用图片。')
           if (!model) await credentials()
           state = { requestId: input.requestId, projectId: input.projectId, spaceId: input.spaceId, fingerprint,
             ...(model ? { model, size } : {}),
             prompt: input.prompt.trim(), status: 'preparing', createdAt: new Date().toISOString(),
-            source: { id: source._id, fileId: source.fileId, name: source.name || source.originalName, revision: source.revision, authorization: source.authorization },
+            source: { id: source._id, fileId: source.fileId, name: source.name || source.originalName, revision: source.revision, authorization: normalizeMaterialAuthorization(source.authorization) },
             binding: billing ? await billing.beginMedia(input) : undefined }
           try { await persist(input, state, true) }
           catch (error) { if (error.code === 'EEXIST') return view(await read(pathOf(input))); throw error }

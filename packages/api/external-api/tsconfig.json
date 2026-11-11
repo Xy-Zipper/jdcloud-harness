@@ -9,6 +9,7 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../attachment/attachment" },
     { "path": "../../core/agent" },
     { "path": "../../llm/llm" },
     { "path": "../../interaction/user-questions" },

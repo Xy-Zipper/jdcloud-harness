@@ -50,25 +50,83 @@ export function createSeedreamTasks({ authorize, referenceData, readTask, create
   const fingerprint = input => createHash('sha256').update(JSON.stringify([
     input.prompt, input.size, input.referenceIds, input.model || defaultModel,
   ])).digest('hex')
+  /** Queued receipts have no paid submission; only the background owner can advance them to pending. */
+  function start(token, input, task) {
+    if (background.has(input)) return Promise.resolve(structuredClone(task))
+    const accepted = Promise.withResolvers()
+    const job = background.start(input, async () => {
+      let selected
+      let submitted = false
+      try {
+        // A refresh can finish reading an old queued receipt after its original job has settled.
+        const saved = await readTask(input)
+        if (saved.status !== 'queued') {
+          Object.assign(task, saved)
+          return
+        }
+        if (!validate({ prompt: input.prompt, size: input.size, referenceIds: input.referenceIds, model: input.model })
+          || fingerprint(input) !== task.fingerprint)
+          throw new Error('排队图片参数与原任务不一致，请核对原请求后处理。')
+        const model = task.source.model
+        try {
+          selected = await pool.acquire('ark', { ...input, scenario: 'image', model })
+        }
+        catch (error) {
+          if (error.code !== 'accounts/busy') throw error
+          accepted.resolve(structuredClone(task))
+          selected = await pool.waitForAccount('ark', { ...input, scenario: 'image', model })
+        }
+        // Permissions may change while waiting for another image to finish.
+        const caller = await authorize(token, input)
+        if (caller !== task.initiatedByUserId || selected.receipt.initiatedByUserId !== task.initiatedByUserId)
+          throw Object.assign(new Error('排队图片的提交账号已变化，请使用原账号恢复该任务。'), { code: 'image/queue-owner-mismatch' })
+        await background.authorize(input)
+        const references = []
+        for (const relationId of input.referenceIds) references.push(await referenceData(token, input, relationId))
+        Object.assign(task, selected.receipt)
+        task.status = 'pending'
+        task.taskId = `seedream-${input.requestId}`
+        task.source.providerAccountRef = task.providerAccountRef
+        await storeTask(input, task)
+        accepted.resolve(structuredClone(task))
+        submitted = true
+        const image = await requestSeedreamImage(selected.account.apiKey, model, input, references, transport)
+        task.result = { b64: image.b64, mime: image.mime, source: { ...task.source, taskId: task.taskId } }
+        task.usage = image.usage
+        task.status = 'succeeded'
+      }
+      catch (error) {
+        if (error.code === 'accounts/queue-stopped') return
+        task.status = !submitted || error.providerRejected ? 'failed' : 'unknown'
+        task.errorCode = !submitted ? error.code || 'image/account-unavailable'
+          : error.providerRejected ? 'image/provider-rejected' : 'image/submission-unknown'
+        task.error = !submitted || error.providerRejected ? error.message : '即梦提交结果未确认，请核对原请求；不会自动重复付费提交。'
+      }
+      await storeTask(input, task)
+      if (selected) await pool.settle(selected.receipt, task.status, task.taskId)
+    })
+    void job.then(() => accepted.resolve(structuredClone(task)), accepted.reject)
+    return accepted.promise
+  }
   async function submit(token, input) {
     if (!validate({ prompt: input.prompt, size: input.size, referenceIds: input.referenceIds, ...(input.model ? { model: input.model } : {}) }))
       throw new Error('图片提示词、模型、尺寸或参考图参数无效。')
-    await authorize(token, input)
+    const initiatedByUserId = await authorize(token, input)
     const previous = await readTask(input)
     if (previous) {
       const legacyFingerprint = createHash('sha256').update(JSON.stringify([input.prompt, input.size, input.referenceIds])).digest('hex')
       const originalModel = previous.source?.model || previous.result?.source?.model
       if (previous.fingerprint !== fingerprint(input) && !(originalModel?.startsWith('gpt-image-') && !input.model && previous.fingerprint === legacyFingerprint))
         throw new Error('该请求编号已用于其他参数，请新建生成请求。')
-      return previous
+      return previous.status === 'queued' ? start(token, input, previous) : previous
     }
-    const references = []
-    for (const relationId of input.referenceIds) references.push(await referenceData(token, input, relationId))
+    for (const relationId of input.referenceIds) await referenceData(token, input, relationId)
     const model = input.model || defaultModel
     const task = {
       requestId: input.requestId, taskId: `seedream-${input.requestId}`, tenantId: input.tenantId,
+      initiatedByUserId,
       projectId: input.projectId, planId: input.planId, spaceId: input.spaceId,
-      fingerprint: fingerprint(input), status: 'submitting', provider: 'ark', model,
+      fingerprint: fingerprint(input), status: 'queued', provider: 'ark', model,
       source: { requestId: input.requestId, model, prompt: input.prompt, size: input.size,
         referenceIds: [...input.referenceIds], createdAt: new Date().toISOString(), confirmedAt: '' },
     }
@@ -76,47 +134,16 @@ export function createSeedreamTasks({ authorize, referenceData, readTask, create
       const saved = await readTask(input)
       if (saved.fingerprint !== fingerprint(input))
         throw new Error('该请求编号已用于其他参数，请新建生成请求。')
-      return saved
+      return saved.status === 'queued' ? start(token, input, saved) : saved
     }
-    let selected
-    try {
-      selected = await pool.acquire('ark', { ...input, scenario: 'image', model })
-      Object.assign(task, selected.receipt)
-      task.status = 'pending'
-      task.taskId = `seedream-${input.requestId}`
-      task.source.providerAccountRef = task.providerAccountRef
-      await storeTask(input, task)
-    }
-    catch (error) {
-      task.status = 'failed'
-      task.errorCode = error.code || 'image/account-unavailable'
-      task.error = error.message
-      await storeTask(input, task)
-      if (selected) await pool.settle(task, 'failed')
-      return task
-    }
-    const run = async () => {
-      try {
-        const image = await requestSeedreamImage(selected.account.apiKey, model, input, references, transport)
-        task.result = { b64: image.b64, mime: image.mime, source: { ...task.source, taskId: task.taskId } }
-        task.usage = image.usage
-        task.status = 'succeeded'
-      }
-      catch (error) {
-        task.status = error.providerRejected ? 'failed' : 'unknown'
-        task.errorCode = error.providerRejected ? 'image/provider-rejected' : 'image/submission-unknown'
-        task.error = error.providerRejected ? error.message : '即梦提交结果未确认，请核对原请求；不会自动重复付费提交。'
-      }
-      await storeTask(input, task)
-      await pool.settle(task, task.status, task.taskId)
-    }
-    background.start(input, run)
-    // The background operation owns its mutable receipt; the submit response is a stable snapshot.
-    return structuredClone(task)
+    return start(token, input, task)
   }
   return {
     submit,
-    async refresh(input, task) {
+    async refresh(token, input, task) {
+      if (task.status === 'queued')
+        return start(token, { ...input, tenantId: task.tenantId, prompt: task.source.prompt, size: task.source.size,
+          referenceIds: task.source.referenceIds, model: task.source.model }, task)
       if (['pending', 'submitting'].includes(task.status) && !background.has(input)) {
         task.status = 'unknown'
         task.errorCode = 'image/submission-unknown'
@@ -124,7 +151,7 @@ export function createSeedreamTasks({ authorize, referenceData, readTask, create
         await storeTask(input, task)
         await pool.settle(task, 'unknown', task.taskId)
       }
-      return task
+      return structuredClone(task)
     },
   }
 }

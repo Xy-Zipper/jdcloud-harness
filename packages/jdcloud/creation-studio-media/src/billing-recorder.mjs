@@ -302,7 +302,8 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     async consumption(input, scenario) {
       const eventKey = `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`
       const record = await read(join(directory, `${hash([config.tenantId, eventKey])}.json`))
-      return record ? { credits: record.row.customerCharge, status: record.row.chargeStatus, reason: record.row.reason } : undefined
+      return record ? { ...(record.row.customerCharge === undefined ? {} : { credits: record.row.customerCharge }),
+        status: record.row.chargeStatus, reason: record.row.reason } : undefined
     },
     async media(input, binding, scenario, task, parameters) {
       if (!binding) return
