@@ -13,23 +13,34 @@ export const DEFAULT_IMAGE_MODEL = SEEDREAM_MODELS[0]
  * @param input - Validated prompt and dimensions.
  * @param references - Authorized platform image URLs in the user's selected order.
  * @param transport - Provider transport.
- * @returns The original provider response including image bytes and usage.
+ * @returns An original text-to-image URL and creation time, or image-edit bytes, with reported usage.
  */
 export async function requestSeedreamImage(apiKey, model, input, references, transport = fetch) {
   const response = await transport('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
     method: 'POST', redirect: 'error',
     headers: { Authorization: `Bearer ${apiKey.trim().replace(/^Bearer\s+/iu, '')}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model, prompt: imagePrompt(input.prompt), size: input.size, response_format: 'b64_json', output_format: 'png',
+      // 文生图保留原始 URL；图生图不具备原始人像产物信任资格，仍沿用字节输出。
+      model, prompt: imagePrompt(input.prompt), size: input.size, response_format: references.length ? 'b64_json' : 'url', output_format: 'png',
       watermark: false, ...(references.length ? { image: references.map(reference => reference.url) } : {}),
     }),
     signal: AbortSignal.timeout(300_000),
   })
   const data = await response.json()
   if (!response.ok) {
-    throw Object.assign(new Error('即梦生图请求失败，请查看调用记录并核对账号或提示词。'), {
+    throw Object.assign(new Error(`${data.error?.code || 'image/provider-rejected'}：即梦生图请求失败，请查看调用记录并核对账号或提示词。`), {
+      code: data.error?.code,
       providerRejected: response.status >= 400 && response.status < 500,
     })
+  }
+  if (!references.length) {
+    const raw = data.data?.[0]?.url
+    const url = typeof raw === 'string' ? new URL(raw) : undefined
+    if (data.data?.length !== 1 || !url || url.protocol !== 'https:' || url.username || url.password
+      || !url.hostname.endsWith('.volces.com'))
+      throw new Error('即梦未返回有效的原始图片 URL，请核对原请求，勿重复提交。')
+    const generatedAt = new Date(Number.isFinite(data.created) ? data.created * 1000 : Date.now()).toISOString()
+    return { url: raw, mime: 'image/png', usage: data.usage, generatedAt }
   }
   const encoded = data.data?.[0]?.b64_json
   if (data.data?.length !== 1 || typeof encoded !== 'string' || !encoded.length
@@ -91,7 +102,9 @@ export function createSeedreamTasks({ authorize, referenceData, readTask, create
         accepted.resolve(structuredClone(task))
         submitted = true
         const image = await requestSeedreamImage(selected.account.apiKey, model, input, references, transport)
-        task.result = { b64: image.b64, mime: image.mime, source: { ...task.source, taskId: task.taskId } }
+        if (image.url) Object.assign(task.source, { originalUrl: image.url, generatedAt: image.generatedAt,
+          originalUrlExpiresAt: new Date(Date.parse(image.generatedAt) + 24 * 60 * 60 * 1000).toISOString() })
+        task.result = { ...(image.url ? { url: image.url } : { b64: image.b64 }), mime: image.mime, source: { ...task.source, taskId: task.taskId } }
         task.usage = image.usage
         task.status = 'succeeded'
       }
@@ -99,7 +112,7 @@ export function createSeedreamTasks({ authorize, referenceData, readTask, create
         if (error.code === 'accounts/queue-stopped') return
         task.status = !submitted || error.providerRejected ? 'failed' : 'unknown'
         task.errorCode = !submitted ? error.code || 'image/account-unavailable'
-          : error.providerRejected ? 'image/provider-rejected' : 'image/submission-unknown'
+          : error.providerRejected ? error.code || 'image/provider-rejected' : 'image/submission-unknown'
         task.error = !submitted || error.providerRejected ? error.message : '即梦提交结果未确认，请核对原请求；不会自动重复付费提交。'
       }
       await storeTask(input, task)

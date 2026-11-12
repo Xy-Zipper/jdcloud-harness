@@ -115,7 +115,9 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
           const loads = new Map()
           for (const receipt of receipts.filter(item => open.has(item.status)))
             loads.set(receipt.providerAccountId, (loads.get(receipt.providerAccountId) || 0) + 1)
-          const eligible = rows.filter(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(input.scenario) && row.models.includes(input.model))
+          // 原始模型人像仅能在生成它的同一方舟账号下使用，不转到其他空闲账号。
+          const eligible = rows.filter(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(input.scenario) && row.models.includes(input.model)
+            && (input.requiredAccountId === undefined || row._id === input.requiredAccountId))
           if (!eligible.length)
             throw failure('没有启用且支持该模型的媒体账号，请联系管理员配置账号池。', 'accounts/unavailable')
           const available = eligible.filter(row => (loads.get(row._id) || 0) < row.maxConcurrent)

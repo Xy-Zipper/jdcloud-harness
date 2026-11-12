@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/creation-studio-original-images/guide.md
+/:
+  en: 696578d38cf913d4
+  zh: 59d912fe641dbe5e
+/preserve-original-images-for-creation-studio-video:
+  en: 387354e4ace88f14
+  zh: b8412af6219b156e
+/preserve-original-images-for-creation-studio-video/change:
+  en: a6a7abcc6ea1e4e9
+  zh: 357a18ba8088fbe7
+/preserve-original-images-for-creation-studio-video/migration:
+  en: 879f4b9e5c34a4f0
+  zh: ee04e71cc21fc4d2

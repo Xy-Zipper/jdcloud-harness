@@ -128,13 +128,14 @@ export function createSeedanceService(env, transport = fetch) {
 		status: task.status,
 		videoUrl: task.videoUrl,
 		error: task.error,
+		errorCode: task.errorCode,
 		createdAt: task.createdAt,
 		duration: task.duration,
 		usage: task.usage,
 		billingParameters: task.billingParameters,
 		...(task.storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt: task.storyboardConfirmedAt })
 	});
-	/** 每张图从当前平台引用读取，认证头仅发送给固定平台，不将私有URL交给方舟拉取。 */
+	/** 每张图先核对平台引用；文生图原始产物从 Host 回执解析，普通图片使用认证下载。 */
 	async function referenceData(token, scope, reference, download = true) {
 		const relation = await detail(token, MENU.relation, reference.relationId);
 		if (relation?._id !== reference.relationId || relation.spaceId !== scope.spaceId || relation.projectId !== scope.projectId || !id(relation.materialId)) throw new ApiError(`参考图“${reference.name}”不属于当前项目。`);
@@ -158,6 +159,8 @@ export function createSeedanceService(env, transport = fetch) {
 		].includes(source.mime)) throw new ApiError(`参考图“${reference.name}”文件、版本或格式无效。`);
 		if (Number(source.width) > 0 && Number(source.height) > 0 && (source.width < 300 || source.width > 6e3 || source.height < 300 || source.height > 6e3 || source.width / source.height < .4 || source.width / source.height > 2.5)) throw new ApiError(`参考图“${reference.name}”宽高须为300–6000像素，宽高比须为0.4–2.5。`);
 		if (!download) return source;
+		const original = env.ORIGINAL_IMAGE ? await env.ORIGINAL_IMAGE(scope, reference, source) : null;
+		if (original) return original;
 		const response = await transport(`${platform}/api/file/dowloadFile/${tenant}/${source.fileId}`, {
 			headers: { Authorization: token },
 			redirect: "error",
@@ -166,7 +169,7 @@ export function createSeedanceService(env, transport = fetch) {
 		if (!response.ok || Number(response.headers.get("content-length")) >= 30 * 1024 * 1024) throw new ApiError(`参考图“${reference.name}”下载失败或超过30MB。`);
 		const bytes = Buffer.from(await response.arrayBuffer());
 		if (!bytes.length || bytes.length >= 30 * 1024 * 1024 || response.headers.get("content-type")?.includes("text/html")) throw new ApiError(`参考图“${reference.name}”返回内容无效。`);
-		return `data:${source.mime};base64,${bytes.toString("base64")}`;
+		return { url: `data:${source.mime};base64,${bytes.toString("base64")}` };
 	}
 	/** 音色只取当前可读的共享/本空间目录；实际解码核对时长，不信任调用方 URL 或时长。 */
 	async function audioData(token, scope, reference, maxSeconds) {
@@ -267,36 +270,51 @@ export function createSeedanceService(env, transport = fetch) {
 		const duration = batchShots.reduce((sum, shot) => sum + Number(shot.expectedSeconds), 0);
 		const audioReferences = generation.audioReferences ?? [];
 		const sound = [];
+		const blocks = prompt.split(/(?=^镜号\d+\r?$)/mu);
+		let completeSound = true;
 		const usedAudio = new Set();
 		let start = 0;
 		for (const shot of batchShots) {
 			const end = start + Number(shot.expectedSeconds);
+			const lines = blocks.find(block => block.split(/\r?\n/u, 1)[0] === `镜号${allShots.indexOf(shot) + 1}`)?.split(/\r?\n/u) ?? [];
+			// 仅在同一镜号、时间和音色完整对应已确认脚本时省略前置清单。
+			completeSound &&= lines.includes(`时间码：${start}–${end} 秒`);
 			const detail = parse(shot.scriptDetail);
 			const speech = narrationForShot({ detail }, decodeStoryboardSupplement(shot.supplement || "").speech);
 			for (const line of speech) {
 				const index = audioReferences.findIndex(reference => reference.voiceId === line.voiceId && reference.speakerIds.includes(line.speakerId));
 				if (index < 0 || !generation.generateAudio) throw new ApiError("请先在分镜资产为每位旁白选择音色并开启生成音频。");
 				usedAudio.add(index);
+				completeSound &&= lines.includes(`旁白 · ${line.speakerName}（音色参考@音频${index + 1}）台词：{${line.text}}`);
 				sound.push(`${start}–${end}秒 ${line.speakerName}参考@音频${index + 1}，只朗读一次：{${line.text}}`);
 			}
 			for (const [key, label] of [["music", "音乐"], ["soundEffects", "音效"], ["subtitle", "字幕"]]) {
-				if (detail?.[key]) sound.push(`${start}–${end}秒 ${label}：${key === "subtitle" ? `〖${detail[key]}〗` : detail[key]}`);
+				if (detail?.[key]) {
+					completeSound &&= lines.includes(`${label}：${key === "subtitle" ? `〖${detail[key]}〗` : detail[key]}`);
+					sound.push(`${start}–${end}秒 ${label}：${key === "subtitle" ? `〖${detail[key]}〗` : detail[key]}`);
+				}
 			}
 			start = end;
 		}
 		if (audioReferences.some((_reference, index) => !usedAudio.has(index)))
 			throw new ApiError("参考音频必须对应本批脚本中的真实旁白角色。");
-		// 已确认原文放在长画面提示词之前；这仍是生成指令，不代表产物已通过逐字校验。
-		const finalPrompt = sound.length ? `已确认脚本声音与字幕（原文优先于下方画面描述及参考素材）：\n{}内只作朗读台词，〖〗内只作屏幕字幕，分隔符不显示也不朗读。逐字保留原文、字形、标点及顺序，不增删、改写、同音替字或转换简繁体；旁白与对应字幕同步，不把画面文字、说明或样音示例当台词。未指定字幕或旁白的时段不自行补充。\n${sound.join("\n")}\n\n${fullPrompt}` : fullPrompt;
+		// 逐字规则始终保留；正文缺项时前置已确认原文，不代表产物已通过逐字校验。
+		const finalPrompt = sound.length ? `已确认脚本声音与字幕（原文优先于下方画面描述及参考素材）：\n{}内只作朗读台词，〖〗内只作屏幕字幕，分隔符不显示也不朗读。逐字保留原文、字形、标点及顺序，不增删、改写、同音替字或转换简繁体；旁白与对应字幕同步，不把画面文字、说明或样音示例当台词。未指定字幕或旁白的时段不自行补充。\n${completeSound ? "各镜台词只朗读一次。" : sound.join("\n")}\n\n${fullPrompt}` : fullPrompt;
 		buildSeedanceRequest(generation, finalPrompt, duration, generation.references.map(() => "pending"), audioReferences.map(() => "pending"));
 		const urls = [];
+		const originalAccounts = new Set();
 		let encodedSize = 0;
 		for (const reference of generation.references) {
-			const url = await referenceData(token, input, reference);
+			const picture = await referenceData(token, input, reference);
+			const { url } = picture;
+			if (picture.providerAccountId) originalAccounts.add(picture.providerAccountId);
 			encodedSize += url.length;
 			if (encodedSize > 63 * 1024 * 1024) throw new ApiError("参考图编码后超过方舟64MB请求体上限，请减小图片文件。");
 			urls.push(url);
 		}
+		if (originalAccounts.size > 1) throw new ApiError("本批文生图原始产物来自不同方舟账号，不能合并提交。请返回分镜，使用同账号产物或调整批次。");
+		const requiredAccountId = [...originalAccounts][0];
+		if (requiredAccountId && !env.PROVIDER_ACCOUNTS) throw new ApiError("缺少原始生图账号解析能力，未提交视频；请联系管理员恢复原账号池。");
 		const audioUrls = [];
 		let audioDuration = 0;
 		for (const reference of audioReferences) {
@@ -334,14 +352,16 @@ export function createSeedanceService(env, transport = fetch) {
 		let account = { apiKey };
 		if (env.PROVIDER_ACCOUNTS) {
 			try {
-				const selected = await env.PROVIDER_ACCOUNTS.acquire('ark', { ...input, scenario: 'video', model: task.model });
+				const selected = await env.PROVIDER_ACCOUNTS.acquire('ark', { ...input, scenario: 'video', model: task.model,
+					...(requiredAccountId ? { requiredAccountId } : {}) });
 				account = selected.account;
 				Object.assign(task, selected.receipt);
 				task.status = 'submitting';
 				await store(input, task);
 			} catch (error) {
 				task.status = 'failed';
-				task.error = error.message;
+				task.error = requiredAccountId ? `原始图片须使用同一方舟账号生成视频。${error.message}` : error.message;
+				task.errorCode = error.code;
 				await store(input, task);
 				if (task.providerLeaseId) await env.PROVIDER_ACCOUNTS.settle(task, 'failed');
 				return view(task);
@@ -360,7 +380,10 @@ export function createSeedanceService(env, transport = fetch) {
 			const data = await response.json();
 			if (!response.ok || !data.id) {
 				task.status = "failed";
-				task.error = data.error?.message || "方舟未接受生成任务。";
+				task.errorCode = data.error?.code;
+				const denied = /content\[(\d+)\]/u.exec(data.error?.param || data.error?.message || '');
+				const reference = denied ? generation.references[Number(denied[1]) - 1] : undefined;
+				task.error = `${data.error?.code ? `${data.error.code}：` : ''}${reference ? `参考图“${reference.name}”：` : ''}${data.error?.message || "方舟未接受生成任务。"}`;
 			} else {
 				task.id = data.id;
 				task.status = "queued";
@@ -389,7 +412,8 @@ export function createSeedanceService(env, transport = fetch) {
 		const data = await response.json();
 		if (!response.ok) throw new ApiError(data.error?.message || "查询方舟任务失败。", 502);
 		task.status = data.status;
-		task.error = data.error?.message || "";
+		task.errorCode = data.error?.code;
+		task.error = data.error?.code ? `${data.error.code}：${data.error.message || ''}` : data.error?.message || "";
 		// 用量在下载之前落盘；total_tokens仅核对，不与completion_tokens重复相加。
 		if (data.usage !== undefined) task.usage = data.usage;
 		task.billingParameters = { ...task.billingParameters,

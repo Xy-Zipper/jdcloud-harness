@@ -13,6 +13,9 @@ afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {
 const { frontendHash } = await import(new URL('../src/upstream.mjs', import.meta.url).href);
 import { decodeGenerationPrompt, encodeGenerationPrompt, SEEDANCE_MODELS } from '../src/seedance-request.mjs';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VZkAAAAASUVORK5CYII=';
+const originalImageUrl = 'https://result.tos-cn-beijing.volces.com/original.png';
+const seedreamResult = () => Response.json({ created: Math.floor(Date.now() / 1000), data: [{ url: originalImageUrl }] });
+const originalImageBytes = () => new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
 it('sends one Bearer prefix and no inferred Content-Type on URL reference edits', async () => {
     const transport = vi.fn(async (url, init) => {
         const request = new Request(url, init);
@@ -100,8 +103,13 @@ async function setup() {
         expect(String(init.headers?.Authorization || '')).not.toContain('platform');
         if (url.endsWith('/images/generations')) {
             imageCalls++;
-            return Response.json({ data: [{ b64_json: png }] });
+            const body = JSON.parse(init.body);
+            return Response.json(body.response_format === 'url'
+                ? { created: Math.floor(Date.now() / 1000), data: [{ url: 'https://result.tos-cn-beijing.volces.com/original.png' }] }
+                : { data: [{ b64_json: png }] });
         }
+        if (url === 'https://result.tos-cn-beijing.volces.com/original.png')
+            return new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
         if (url.includes('contents/generations/tasks')) {
             if (init.method === 'POST') {
                 videoCalls++;
@@ -131,6 +139,146 @@ async function setup() {
         failNextRelation() { failRelation = true; }, denyWrites() { denyWrite = true; },
         counts: () => ({ imageCalls, videoCalls, uploads }) };
 }
+
+/** Adopt an actually generated and uploaded picture, preserving the real confirmation checks. */
+async function originalPictureFixture(poolRows) {
+    const f = await setup();
+    const runtime = f.runtime(undefined, poolRows);
+    const request = { ...f.input, prompt: '一位虚构的成年店员，正面人像', size: '1024x1024', referenceIds: [] };
+    await runtime.run('images/tasks', request);
+    let task;
+    await vi.waitFor(async () => {
+        task = await runtime.run('images/refresh', f.input);
+        expect(task.status).toBe('succeeded');
+    });
+    const image = task.result;
+    const material = f.records.get(image.materialId);
+    const description = JSON.parse(material.sourceDescription);
+    description.generatedImage.confirmedAt = new Date().toISOString();
+    material.sourceDescription = JSON.stringify(description);
+    f.rows.forEach(row => { row.storyboardImageRefId = image.relationId; });
+    const stamps = JSON.parse(f.plan.stageConfirmations);
+    stamps.storyboard.storyboardHash = frontendHash({
+        consistency: f.plan.consistency, assets: [], shots: f.rows.map((row, index) => ({
+            code: `SHOT-${String(index + 1).padStart(2, '0')}`, prompt: row.prompt, supplement: '', assetIds: [], imageRefId: image.relationId,
+        })),
+    });
+    f.plan.stageConfirmations = JSON.stringify(stamps);
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation,
+        references: [{ relationId: image.relationId, name: '虚拟店员.png', purpose: '人物外观' }] });
+    return { ...f, runtime, image, material, request };
+}
+
+it('sends the original text-to-image URL and original account after low-code upload and a Host restart', async () => {
+    const f = await originalPictureFixture();
+    expect(f.image.generation).toMatchObject({
+        originalUrl: 'https://result.tos-cn-beijing.volces.com/original.png',
+        providerAccountRef: 'ENV-ARK', referenceIds: [],
+    });
+    expect(f.image.generation.originalUrlExpiresAt).toBeTruthy();
+    await f.runtime.close();
+    const restored = createHarnessMediaRuntime(f.config, f.auth, async key => key === 'ARK_API_KEY' ? 'ark-key' : '',
+        async () => ({ width: 1024, height: 1024 }), f.provider);
+    const task = await restored.run('video/tasks', { ...f.input, batchId: f.batchId });
+    expect(task.status).toBe('queued');
+    const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init.method === 'POST');
+    const request = JSON.parse(call[1].body);
+    expect(request.content.filter(item => item.type === 'image_url')).toEqual([
+        { type: 'image_url', image_url: { url: f.image.generation.originalUrl }, role: 'reference_image' },
+    ]);
+    await expect(`${JSON.stringify(request.content.filter(item => item.type === 'image_url'), null, 2)}\n`)
+        .toMatchFileSnapshot('./expected/original-image-video-input.json');
+    expect(f.auth.downloadFileAuthenticated).not.toHaveBeenCalled();
+    expect(task.providerAccountRef).toBe('ENV-ARK');
+    await restored.close();
+});
+
+it('rejects an expired original instead of falling back to platform bytes or creating a replacement', async () => {
+    const f = await originalPictureFixture();
+    const files = await readdir(join(f.config.stateDirectory, 'images'));
+    const path = join(f.config.stateDirectory, 'images', files.find(name => name.endsWith('.json')));
+    const receipt = JSON.parse(await readFile(path, 'utf8'));
+    receipt.result.source.originalUrlExpiresAt = new Date(Date.now() - 1000).toISOString();
+    await writeFile(path, JSON.stringify(receipt));
+    await expect(f.runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toMatchObject({ code: 'image/original-expired' });
+    expect(f.counts()).toMatchObject({ imageCalls: 1, videoCalls: 0 });
+    expect(f.auth.downloadFileAuthenticated).not.toHaveBeenCalled();
+    await f.runtime.close();
+});
+
+it('refuses a changed platform file without the matching Host upload binding', async () => {
+    const f = await originalPictureFixture();
+    f.material.fileId = '0'.repeat(24);
+    await expect(f.runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toMatchObject({ code: 'image/original-invalid' });
+    expect(f.counts().videoCalls).toBe(0);
+    await f.runtime.close();
+});
+
+it('rejects mixed original generating accounts before a video provider call', async () => {
+    const poolRows = [1, 2].map(index => ({
+        _id: String(index).repeat(24), accountCode: `ARK-${index}`, provider: 'ark',
+        models: ['doubao-seedream-5-0-pro-260628', 'doubao-seedance-2-5-260628'],
+        scenarios: ['image', 'video'], enabled: 1, maxConcurrent: 1, apiKey: `key-${index}`,
+    }));
+    const f = await originalPictureFixture(poolRows);
+    poolRows.find(row => row.accountCode === f.image.generation.providerAccountRef).enabled = 0;
+    const request = { ...f.request, requestId: 'another-original-image' };
+    await f.runtime.run('images/tasks', request);
+    let second;
+    await vi.waitFor(async () => {
+        const task = await f.runtime.run('images/refresh', request);
+        expect(task.status).toBe('succeeded');
+        second = task.result;
+    });
+    const material = f.records.get(second.materialId);
+    const description = JSON.parse(material.sourceDescription);
+    description.generatedImage.confirmedAt = new Date().toISOString();
+    material.sourceDescription = JSON.stringify(description);
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation,
+        references: [...saved.generation.references, { relationId: second.relationId, name: '另一张人像', purpose: '人物外观' }] });
+    await expect(f.runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow('不同方舟账号');
+    expect(f.counts().videoCalls).toBe(0);
+    await f.runtime.close();
+});
+
+it('keeps the paid original receipt when downloading fails and recovers it without another generation', async () => {
+    const f = await setup();
+    const provider = f.provider.getMockImplementation();
+    let denyDownload = true;
+    f.provider.mockImplementation((url, init) => url === originalImageUrl && denyDownload
+        ? Promise.resolve(new Response('unavailable', { status: 503 })) : provider(url, init));
+    const runtime = f.runtime();
+    const request = { ...f.input, prompt: '虚拟人物', size: '1024x1024', referenceIds: [] };
+    await runtime.run('images/tasks', request);
+    let task;
+    await vi.waitFor(async () => {
+        task = await runtime.run('images/refresh', f.input);
+        expect(task.status).toBe('upload_failed');
+    });
+    denyDownload = false;
+    const recovered = await runtime.run('images/refresh', f.input);
+    expect(recovered).toMatchObject({ status: 'succeeded', result: { generation: { originalUrl: originalImageUrl } } });
+    expect(f.counts().imageCalls).toBe(1);
+    await runtime.close();
+});
+
+it('names the rejected picture and keeps its provider policy code without another paid request', async () => {
+    const f = await setup();
+    f.provider.mockImplementationOnce(async () => Response.json({
+        error: { code: 'InputImageSensitiveContentDetected.PrivacyInformation', message: 'input may contain real person', param: 'content[1]' },
+    }, { status: 400 }));
+    const runtime = f.runtime();
+    const task = await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+    expect(task).toMatchObject({ status: 'failed', errorCode: 'InputImageSensitiveContentDetected.PrivacyInformation' });
+    expect(task.error).toContain('参考图“product.png”');
+    expect((await runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).errorCode).toBe(task.errorCode);
+    expect(f.provider).toHaveBeenCalledOnce();
+    await runtime.close();
+});
 it.each(SEEDANCE_MODELS)('submits the saved $label model and preserves it when the same request is recovered', async ({ value }) => {
     const f = await setup();
     const batch = f.records.get(f.batchId);
@@ -417,8 +565,8 @@ it('submits product-only reference video without per-shot images and rejects unc
     expect(f.counts().videoCalls).toBe(1);
 });
 
-// Inspect the actual provider request: confirmed copy must precede editable visual prose.
-it('places confirmed Chinese subtitles and narration before visual prompts without rewriting the copy', async () => {
+// Provider text omits the duplicate schedule only when each shot retains its confirmed audio and copy.
+it.each(['incomplete', 'complete', 'swapped'])('preserves confirmed Chinese subtitles and narration with a %s shot prompt', async (mode) => {
     const f = await setup();
     const voiceId = 'a'.repeat(24), audioFileId = 'b'.repeat(24);
     const copy = ['下单，报价，开标。', '麓山云，做软件开发。'];
@@ -447,7 +595,16 @@ it('places confirmed Chinese subtitles and narration before visual prompts witho
     f.plan.globalPrompt = '冷蓝背景，公司名保持参考图样式。';
     const batch = f.records.get(f.batchId);
     const saved = decodeGenerationPrompt(batch.prompt);
-    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation,
+    const complete = f.rows.map((row, index) => {
+        const detail = JSON.parse(row.scriptDetail);
+        const line = copy[mode === 'swapped' && index < 2 ? 1 - index : index];
+        return [`镜号${index + 1}`, `时间码：${index * 3}–${(index + 1) * 3} 秒`, '主画面描述：商品保持不变。',
+            ...(line ? [`旁白 · 旁白（音色参考@音频1）台词：{${line}}`, `字幕：〖${line}〗`] : []),
+            ...(detail.music ? [`音乐：${detail.music}`] : []),
+            ...(detail.soundEffects ? [`音效：${detail.soundEffects}`] : []),
+        ].join('\n');
+    }).join('\n\n');
+    batch.prompt = encodeGenerationPrompt(mode === 'incomplete' ? saved.prompt : complete, { ...saved.generation,
         audioReferences: [{ voiceId, name: '男声', speakerIds: ['narrator'], speakerNames: ['旁白'] }] });
     f.records.set(voiceId, { _id: voiceId, spaceId: '', fileId: audioFileId, mime: 'audio/wav' });
     const wav = Buffer.alloc(44 + 8000 * 2 * 3);
@@ -465,13 +622,22 @@ it('places confirmed Chinese subtitles and narration before visual prompts witho
         const text = body.content[0].text;
         for (const [index, line] of copy.entries()) {
             const time = `${index * 3}–${(index + 1) * 3}秒`;
-            expect(text).toContain(`${time} 字幕：〖${line}〗`);
-            expect(text).toContain(`${time} 旁白参考@音频1，只朗读一次：{${line}}`);
-            expect(text.indexOf(`〖${line}〗`)).toBeLessThan(text.indexOf(f.plan.globalPrompt));
+            expect(text).toContain(`〖${line}〗`);
+            expect(text).toContain(`{${line}}`);
+            if (mode === 'complete') {
+                expect(text).not.toContain(`${time} 字幕：`);
+                expect(text.split(`{${line}}`)).toHaveLength(2);
+                expect(text.split(`〖${line}〗`)).toHaveLength(2);
+            } else {
+                expect(text).toContain(`${time} 字幕：〖${line}〗`);
+                expect(text).toContain(`${time} 旁白参考@音频1，只朗读一次：{${line}}`);
+                expect(text.indexOf(`〖${line}〗`)).toBeLessThan(text.indexOf(f.plan.globalPrompt));
+            }
         }
         expect(body.content.filter(item => item.type === 'audio_url')).toHaveLength(1);
         expect(text).not.toContain('开锦');
-        await expect(`${text}\n`).toMatchFileSnapshot('./expected/confirmed-video-copy-prompt.txt');
+        if (mode === 'incomplete') await expect(`${text}\n`).toMatchFileSnapshot('./expected/confirmed-video-copy-prompt.txt');
+        if (mode === 'complete') await expect(`${text}\n`).toMatchFileSnapshot('./expected/complete-video-copy-prompt.txt');
     } finally {
         await runtime.close();
     }
@@ -511,7 +677,7 @@ it('waits for a started generation to finish saving when the plugin is disposed'
     f.provider.mockImplementationOnce(async () => {
         started.resolve();
         await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const runtime = f.runtime();
     const pending = runtime.run('images/generate', { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' });
@@ -544,13 +710,13 @@ it('stops late media uploads after account changes and recovers the paid result 
     const f = await setup();
     let owner = 'owner';
     f.auth.currentScopeKey = async () => owner;
-    f.provider.mockImplementationOnce(async () => { owner = 'other'; return Response.json({ data: [{ b64_json: png }] }); });
+    f.provider.mockImplementationOnce(async () => { owner = 'other'; return seedreamResult(); });
     const request = { ...f.input, prompt: 'product', referenceIds: [], size: '1024x1024' };
     await expect(f.runtime().run('images/generate', request)).rejects.toThrow('账号已变化');
     expect(f.counts().uploads).toBe(0);
     owner = 'owner';
     expect((await f.runtime().run('images/generate', request)).relationId).toHaveLength(24);
-    expect(f.provider).toHaveBeenCalledTimes(1);
+    expect(f.provider.mock.calls.filter(([url]) => url.endsWith('/images/generations'))).toHaveLength(1);
 });
 
 it('submits multiple Seedream requests before completion and restores each uploaded result', async () => {
@@ -593,7 +759,8 @@ it('queues eight accepted images behind five account slots and starts waiting wo
         models: ['doubao-seedream-5-0-pro-260628'], scenarios: ['image'], enabled: 1, maxConcurrent: 5, apiKey: 'pooled-image-key' }];
     const releases = [];
     let active = 0, peak = 0, releaseAll = false;
-    f.provider.mockImplementation(async (_url, init) => {
+    f.provider.mockImplementation(async (url, init = {}) => {
+        if (url === originalImageUrl) return originalImageBytes();
         expect(init.headers.Authorization).toBe('Bearer pooled-image-key');
         const release = Promise.withResolvers();
         releases.push(release);
@@ -601,7 +768,7 @@ it('queues eight accepted images behind five account slots and starts waiting wo
         peak = Math.max(peak, active);
         if (!releaseAll) await release.promise;
         active--;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const runtime = f.runtime(undefined, rows);
     const requests = Array.from({ length: 8 }, (_, index) => ({ ...f.input, requestId: `queued-image-${index}`,
@@ -647,7 +814,7 @@ it('preserves unsubmitted queued images during shutdown and resumes the same rec
     const release = Promise.withResolvers();
     f.provider.mockImplementationOnce(async () => {
         await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const runtime = f.runtime(undefined, rows);
     const first = { ...f.input, prompt: 'product', size: '1024x1024', referenceIds: [] };
@@ -669,7 +836,7 @@ it('preserves unsubmitted queued images during shutdown and resumes the same rec
         });
         expect((await restored.run('images/refresh', waiting)).status).toBe('succeeded');
         await restored.run('images/tasks', waiting);
-        expect(f.provider).toHaveBeenCalledTimes(2);
+        expect(f.provider.mock.calls.filter(([url]) => url.endsWith('/images/generations'))).toHaveLength(2);
     } finally {
         await restored.close();
     }
@@ -682,7 +849,7 @@ it('rechecks queued write permission before paid dispatch and releases the unuse
     const release = Promise.withResolvers();
     f.provider.mockImplementationOnce(async () => {
         await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const runtime = f.runtime(undefined, rows);
     try {
@@ -709,9 +876,10 @@ it('uploads a completed Seedream image while another generation remains pending 
     const f = await setup();
     const release = Promise.withResolvers();
     let created = 0;
-    f.provider.mockImplementation(async () => {
+    f.provider.mockImplementation(async (url) => {
+        if (url === originalImageUrl) return originalImageBytes();
         if (++created === 2) await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const billing = createBillingRecorder(f.config, f.auth, async () => '');
     const runtime = f.runtime(billing);
@@ -736,7 +904,7 @@ it('returns lossless tool results while image consumption is still pending, with
     const release = Promise.withResolvers();
     f.provider.mockImplementationOnce(async () => {
         await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const billing = createBillingRecorder(f.config, f.auth, async () => '');
     const runtime = f.runtime(billing);

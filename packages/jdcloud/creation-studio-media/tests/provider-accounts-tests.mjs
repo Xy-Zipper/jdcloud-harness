@@ -146,3 +146,26 @@ it.each(SEEDREAM_MODELS)('sends the selected model %s with one Ark Bearer key an
   await requestSeedreamImage('Bearer key', model, { prompt: 'product', size: '1024x1536' }, [{ url: 'https://platform.example/reference' }], transport)
   expect(transport.mock.calls[0][0]).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations')
 })
+
+it('keeps the original URL for text-to-image without adding reference images', async () => {
+  const url = 'https://result.tos-cn-beijing.volces.com/original.png?signature=fixture'
+  const transport = vi.fn(async (_url, init) => {
+    const body = JSON.parse(init.body)
+    expect(body.response_format).toBe('url')
+    expect(body).not.toHaveProperty('image')
+    return Response.json({ created: 1794438000, data: [{ url }] })
+  })
+  expect(await requestSeedreamImage('key', SEEDREAM_MODELS[0], { prompt: '虚拟人物', size: '1024x1024' }, [], transport))
+    .toMatchObject({ url, mime: 'image/png' })
+})
+
+it('reserves the original generating account for trusted video inputs even when another account is free', async () => {
+  const f = await setup()
+  const pool = f.create()
+  const selected = await pool.acquire('ark', { ...f.input, requiredAccountId: f.rows[0]._id })
+  expect(selected.account._id).toBe(f.rows[0]._id)
+  await expect(pool.acquire('ark', { ...f.input, requestId: 'video', scenario: 'video',
+    model: 'doubao-seedance-2-5-260628', requiredAccountId: f.rows[0]._id })).rejects.toMatchObject({ code: 'accounts/busy' })
+  f.rows[0].enabled = 0
+  await expect(pool.acquire('ark', { ...f.input, requiredAccountId: f.rows[0]._id })).rejects.toMatchObject({ code: 'accounts/unavailable' })
+})

@@ -13,6 +13,7 @@ import { DEFAULT_IMAGE_MODEL, SEEDREAM_MODELS } from './seedream.mjs'
 import { calculateShadowCharge } from './billing-price.mjs'
 import { SEEDANCE_MODEL, SEEDANCE_MODELS } from './seedance-request.mjs'
 import { assertSpacePoints } from './project-points.mjs'
+import { createOriginalImageReader } from './original-images.mjs'
 
 const MATERIAL = '6ad81c871f280486bb45ac43'
 const RELATION = '6ad81c871f280486bb45ac45'
@@ -26,6 +27,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   const platform = config.platformURL.replace(/\/$/u, '')
   const defaultImageModel = config.imageModel || DEFAULT_IMAGE_MODEL
   const accounts = createProviderAccountPool(config, auth, keys, fetcher)
+  const originalImage = createOriginalImageReader(config)
   const imageJobs = new Map()
   const jobKey = input => JSON.stringify([input.spaceId, input.projectId, input.planId, input.requestId])
   /** Background generation remains owned until its receipt is durable, including during plugin disposal. */
@@ -143,7 +145,26 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     await persist(path, progress)
     return progress.result
   }
-  /** 对外只投影任务状态和平台引用，供应商内容、密钥和 Base64 留在 Host。 */
+  /** 原始图片下载独立于付费生成；同步入口和异步上传共用同一恢复路径。 */
+  async function imageBytes(result) {
+    let bytes
+    if (result.url) {
+      const response = await transport(result.url, { redirect: 'error', signal: AbortSignal.timeout(60_000) })
+      if (!response.ok || !response.body || response.headers.get('content-type')?.includes('text/html'))
+        throw new Error('原始图片尚未下载成功，请用原任务继续上传。')
+      const chunks = []
+      let size = 0
+      for await (const chunk of response.body) {
+        size += chunk.length
+        if (size > 50 * 1024 * 1024) throw new Error('原始图片超过50MB。')
+        chunks.push(chunk)
+      }
+      bytes = Buffer.concat(chunks)
+    }
+    else bytes = Buffer.from(result.b64, 'base64')
+    return { bytes, mime: result.mime, dimensions: await inspectImage(bytes, result.mime) }
+  }
+  /** 对外只投影任务状态和平台引用，密钥和 Base64 留在 Host。 */
   async function imageTaskView(task, input, upload) {
     const source = task.source ?? task.result?.source
     const view = { requestId: task.requestId ?? input.requestId,
@@ -173,10 +194,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (!upload && !progress?.result) return view
     try {
       if (upload) await authorizeWrites(input)
-      const result = await saveResult(input, 'image', task.result.source, async () => {
-        const bytes = Buffer.from(task.result.b64, 'base64')
-        return { bytes, mime: task.result.mime, dimensions: await inspectImage(bytes, task.result.mime) }
-      })
+      const result = await saveResult(input, 'image', task.result.source, () => imageBytes(task.result))
       return { ...view, status: 'succeeded', result, billingParameters: { imageOperation: source.referenceIds?.length ? 'edit' : 'generation',
         imageSize: `${result.width}x${result.height}`, imagePixels: result.width * result.height } }
     }
@@ -195,7 +213,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'metered', rows: [], total: 0 }
     if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'metered', processed: 0 }
     const images = createImageService({ ...env, CHECK_POINTS: spaceId => assertSpacePoints(auth, spaceId) }, transport)
-    const videos = createSeedanceService(env, transport)
+    const videos = createSeedanceService({ ...env, ORIGINAL_IMAGE: originalImage }, transport)
     if (operation === 'images/quote') {
       const request = await images.quote('host-authenticated', input)
       const binding = billing ? await billing.beginMedia(input) : undefined
@@ -243,10 +261,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (operation === 'images/generate') {
       await authorizeWrites(input)
       const result = await images.generate('host-authenticated', input)
-      return saveResult(input, 'image', result.source, async () => {
-        const bytes = Buffer.from(result.b64, 'base64')
-        return { bytes, mime: result.mime, dimensions: await inspectImage(bytes, result.mime) }
-      })
+      return saveResult(input, 'image', result.source, () => imageBytes(result))
     }
     if (operation === 'video/tasks') {
       await authorizeWrites(input)

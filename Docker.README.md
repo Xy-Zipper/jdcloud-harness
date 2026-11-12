@@ -46,7 +46,7 @@ docker compose up -d --no-build --force-recreate
 在项目根目录的 PowerShell 中运行[发版脚本](scripts/release-docker.ps1)，将 `1.0.0` 替换为本次版本号；省略 `-Version` 时会提示输入。需要已安装 Git、Docker 已启动，以及本机 `35347` 端口的 HTTP 代理可用。
 
 ```powershell
-.\scripts\release-docker.ps1 -Version 1.0.0
+.\scripts\release-docker.ps1 -Version 0.2.1-rc.2-v6
 ```
 
 脚本删除本地 `jdcloud-harness:local` 标签（不存在则跳过），设置提交哈希及 HTTP/HTTPS 代理并清除 `DOCKER_BUILDKIT`，从当前工作区构建 `jdcloud-harness:local`，以 `萧影科技` 登录，再打标签并推送到 `crpi-is7b7e9g1wrfpsor.cn-guangzhou.personal.cr.aliyuncs.com/lushanyun-docker/jdcloud-harness:1.0.0`。登录需要密码时，在 Docker 提示中输入；脚本不接收或保存密码。环境变量设置保留在当前 PowerShell 进程，构建包含未提交文件。任一步失败即停止，已完成的镜像操作不回滚；推送失败时先检查仓库中的目标标签及 Docker 错误。实际仓库登录和推送由发版操作者验证。
