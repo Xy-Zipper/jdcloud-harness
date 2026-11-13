@@ -24,6 +24,8 @@ import {
   readTraversal,
 } from './runtime.ts'
 import type { OntologyActionDetail, OntologyActionParameterSummary } from './types.ts'
+import { readDataSourceInspection, readDraftBindingResult, readDraftResult } from './draft.ts'
+import { installModelingSkill } from './modeling-skill.ts'
 
 export type * from './types.ts'
 
@@ -57,6 +59,7 @@ const APPROVAL_PRIMARY_KEY_LIMIT = 80
 
 /** Register the stable Ontology tool suite and its compact usage policy. */
 export function apply(ctx: Context): void {
+  installModelingSkill(ctx)
   ctx.systemPrompt.section({
     name: 'tool:ontology',
     order: ctx.systemPrompt.getSectionOrder('TOOL_SESSION_QUERY') + 20,
@@ -284,6 +287,171 @@ export function apply(ctx: Context): void {
       }, exec.signal)))
     },
   }))
+
+  // Runtime owns administrator authorization,
+  // revision checks, reference validation, and the atomic Project save.
+  ctx.tools.register(defineTool({
+    name: 'ontology_get_draft',
+    description: 'Read one Project draft, its updatedAt revision, existing data sources, and trusted Function executors for modeling. Administrator access is required; unpublished Projects are supported.',
+    parameters: {
+      project_id: {
+        type: 'string', required: true,
+        description: 'Exact Project id supplied by the current management page or authorized discovery.',
+      },
+    },
+    output: JSON_OUTPUT,
+    async execute(args, exec) {
+      await assertModelingProject(ctx, args.project_id)
+      return readDraftResult(await request(ctx, {
+        method: 'GET', path: projectPath(args.project_id, 'draft'),
+      }, exec.signal), args.project_id)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'ontology_add_draft_resources',
+    description: 'Add Object Types, Properties, Links, and Actions to one Project draft without publishing or changing business records. Read ontology_get_draft first and use its exact updatedAt. Existing identical definitions are no-ops; conflicts fail atomically. Use ontology-modeler for resource field instructions.',
+    parameters: {
+      project_id: {
+        type: 'string', required: true,
+        description: 'Exact Project id from the current page and ontology_get_draft.',
+      },
+      expected_updated_at: {
+        type: 'string', required: true,
+        description: 'Exact project.updatedAt returned by the most recent ontology_get_draft. Reread the draft after a revision conflict.',
+      },
+      object_types: {
+        type: 'array',
+        description: 'New Object Type definitions using the camelCase fields in draft.objectTypes: id, label, description, dataSourceId, resourceKind, resourceRef, primaryKey, versionProperty, properties. Reuse only existing dataSourceId values.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      properties: {
+        type: 'array',
+        description: 'Properties to append to existing or new Objects: {objectTypeId, property:{id,label,description,type,sourceField,required}}.',
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            objectTypeId: { type: 'string', required: true },
+            property: { type: 'object', additionalProperties: true, required: true },
+          },
+        },
+      },
+      link_types: {
+        type: 'array',
+        description: 'New Links using draft.linkTypes fields: id,label,description,sourceType,targetType,cardinality,sourceProperty,targetProperty. References must exist in the resulting draft.',
+        items: { type: 'object', additionalProperties: true },
+      },
+      action_types: {
+        type: 'array',
+        description: 'New Actions using draft.actionTypes camelCase fields. Object Actions reference a targetType; Function Actions use only executorRef keys returned by ontology_get_draft. Never invent executor URLs, credentials, or formulas.',
+        items: { type: 'object', additionalProperties: true },
+      },
+    },
+    output: JSON_OUTPUT,
+    async execute(args, exec) {
+      await assertModelingProject(ctx, args.project_id)
+      nonEmpty(args.expected_updated_at, 'expected_updated_at')
+      const additions = [args.object_types, args.properties, args.link_types, args.action_types]
+      if (!additions.some(items => items !== undefined && items.length > 0)) {
+        throw new HarnessError('At least one draft resource is required', 'ONTOLOGY_TOOL_INVALID_ARGUMENT')
+      }
+      return readDraftResult(await request(ctx, {
+        method: 'POST',
+        path: projectPath(args.project_id, 'draft'),
+        body: {
+          expectedUpdatedAt: args.expected_updated_at,
+          ...args.object_types === undefined ? {} : { objectTypes: args.object_types },
+          ...args.properties === undefined ? {} : { properties: args.properties },
+          ...args.link_types === undefined ? {} : { linkTypes: args.link_types },
+          ...args.action_types === undefined ? {} : { actionTypes: args.action_types },
+        },
+      }, exec.signal), args.project_id, true)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'ontology_inspect_data_source',
+    description: 'Discover real table or collection names in a draft data source, or inspect actual fields for one returned resource_ref. Administrator access is required. Use this before mapping business Property ids to physical source fields; no credentials or business records are returned.',
+    parameters: {
+      project_id: { type: 'string', required: true, description: 'Current modeling Project id.' },
+      data_source_id: { type: 'string', required: true, description: 'Exact draft.dataSources id returned by ontology_get_draft, not a connection reference.' },
+      resource_ref: { type: 'string', description: 'Exact ref returned by discovery; omit to list resources.' },
+    },
+    output: JSON_OUTPUT,
+    async execute(args, exec) {
+      await assertModelingProject(ctx, args.project_id)
+      return readDataSourceInspection(await request(ctx, {
+        method: 'POST', path: projectPath(args.project_id, 'data-sources', 'inspect'),
+        body: { dataSourceId: args.data_source_id, ...args.resource_ref === undefined ? {} : { resourceRef: args.resource_ref } },
+      }, exec.signal), args.data_source_id, args.resource_ref)
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'ontology_update_draft_bindings',
+    description: 'Correct resourceRef, primaryKey and Property sourceField bindings on existing draft Objects while preserving ids, relationships and releases. Read the latest draft revision and inspect the real source first. This does not delete, publish, or write business records.',
+    parameters: {
+      project_id: { type: 'string', required: true, description: 'Current modeling Project id.' },
+      expected_updated_at: { type: 'string', required: true, description: 'Latest project.updatedAt from ontology_get_draft.' },
+      bindings: {
+        type: 'array',
+        description: 'Each binding addresses an existing Object and existing Properties using their business ids. primaryKey and sourceField contain real physical field names, which may differ from Property ids.',
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            objectTypeId: { type: 'string', required: true },
+            resourceRef: { type: 'string' },
+            primaryKey: { type: 'string' },
+            properties: {
+              type: 'array',
+              items: {
+                type: 'object', additionalProperties: false,
+                properties: {
+                  propertyId: { type: 'string', required: true },
+                  sourceField: { type: 'string', required: true },
+                  label: { type: 'string', description: 'Correct the business label when the discovered field is a code or name rather than an id.' },
+                  type: { type: 'string', enum: ['string', 'number', 'boolean', 'date', 'datetime', 'user', 'object'], description: 'Correct the Property type for discovered arrays or nested objects.' },
+                },
+              },
+            },
+          },
+        },
+      },
+      link_bindings: {
+        type: 'array',
+        description: 'Correct existing relation endpoints when physical joins use business codes instead of document primary keys; preserve the Link id and Object endpoints.',
+        items: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            linkTypeId: { type: 'string', required: true },
+            sourceProperty: { type: 'string', required: true },
+            targetProperty: { type: 'string', required: true },
+          },
+        },
+      },
+    },
+    output: JSON_OUTPUT,
+    async execute(args, exec) {
+      await assertModelingProject(ctx, args.project_id)
+      if (!args.bindings?.length && !args.link_bindings?.length) throw new HarnessError('At least one binding is required', 'ONTOLOGY_TOOL_INVALID_ARGUMENT')
+      return readDraftBindingResult(await request(ctx, {
+        method: 'POST', path: projectPath(args.project_id, 'draft'),
+        body: {
+          expectedUpdatedAt: args.expected_updated_at,
+          ...args.bindings === undefined ? {} : { bindings: args.bindings },
+          ...args.link_bindings === undefined ? {} : { linkBindings: args.link_bindings },
+        },
+      }, exec.signal), args.project_id)
+    },
+  }))
+}
+
+/** Keep embedded modeling operations on the Project selected by the management page. */
+async function assertModelingProject(ctx: Context, projectId: string): Promise<void> {
+  const context = await ctx.ontologyAuthController.currentModelingContext()
+  if (context !== undefined && context.projectId !== projectId) {
+    throw new HarnessError('Draft modeling must use the current management Project', 'ONTOLOGY_TOOL_INVALID_ARGUMENT')
+  }
 }
 
 /** Join caller-supplied Action mappings with their published Property metadata. */

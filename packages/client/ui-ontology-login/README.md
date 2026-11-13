@@ -31,6 +31,8 @@ The plugin registers localized Chinese and English copy, an Ontology graph mark,
 
 When Harness runs in an iframe, the root Slot shows a localized session-transfer page and never exposes the password form. The plugin derives the allowed parent origin from `document.referrer`, announces readiness to that origin, and accepts one versioned `ontology/runtime-session` message from `window.parent`. It validates the message fields, calls the Host `importSession()` Remote method, applies the returned redacted status, and reports only success or failure to the parent.
 
+An iframe URL with `ontologyEmbed=1` accepts a top-level `context: { projectId, projectName, mode: 'modeling' }` beside the transferred `session`. After the Host validates that Project, the page renders a compact native Chat, project history, and a New conversation action that reuses an available blank Session. History lists only conversations with content; unused blank Sessions remain stored. Native file, image, and document attachment controls retain their existing upload and analysis path. A successful handoff acknowledges the validated `projectId` and `mode`; a committed successful `ontology_add_draft_resources` or `ontology_update_draft_bindings` result sends `ontology/draft-updated` to the exact parent origin.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -45,6 +47,7 @@ The Host entry has no route behavior. The Client entry mounts the generated Remo
 |---|---|
 | [`src/client/mount.ts`](src/client/mount.ts) | Remote status lifecycle, exact-origin embedded-session bridge, root gate, account seat, and brand Slot registrations. |
 | [`src/client/EmbeddedSessionPage.tsx`](src/client/EmbeddedSessionPage.tsx) | Embedded session-transfer presentation without credential inputs. |
+| [`src/client/modeling.ts`](src/client/modeling.ts) / [`src/client/ModelingConversation.tsx`](src/client/ModelingConversation.tsx) | Private Project Workspace preparation, native conversation composition, and draft-save notifications. |
 | [`src/client/LoginPage.tsx`](src/client/LoginPage.tsx) | Account-and-password form and pending/error presentation. |
 | [`src/client/AccountSeat.tsx`](src/client/AccountSeat.tsx) | Redacted identity, service address, and logout menu. |
 
@@ -76,7 +79,7 @@ None; the plugin changes only browser-visible Slot occupants.
 
 - The package targets the Web Client and requires the root, sidebar, locale, Remote, and Workspace UI services.
 - Embedded login requires the iframe navigation to preserve the parent origin in `document.referrer`; a `no-referrer` policy disables the handoff and leaves the session-transfer page waiting.
-- The page does not select a Project; Project discovery belongs to the later Ontology tool and context workflow.
+- Modeling mode uses the parent page's selected Project; changing Projects requires a fresh iframe and handoff.
 
 <a id="dev-note"></a>
 ### Dev Note

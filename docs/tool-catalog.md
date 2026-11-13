@@ -34,7 +34,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`, `get_goal`, `update_goal` | `ctx.tools`, `ctx.agents`, `ctx.goals`, `ctx.systemPrompt`, `a calling Agent in an authorized open turn` | `tool/call`, `goal/change for mutations`, `tool/result` | - | create, edit, pause, and resume require direct-human root authority; complete and blocked also accept the exact current goal round. The default blocked lower bound is three admitted rounds. |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`, `schedule_delete`, `schedule_list` | `ctx.tools`, `ctx.sessions`, `Session persistence`, `a future live root Agent` | `tool/call`, `schedule/change create or delete`, `tool/result` | - | Registered only inside live root Agent scopes created after the opt-in Schedule plugin loads. Version 1 accepts after_seconds, explicit absolute at, and bounded fixed-rate every_seconds, and discloses session-local delivery; management reads and mutations require the shared Session persistence barrier. |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`, `ctx.lsp`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | The lsp tool keeps provider selection and language-server subprocesses behind ctx.lsp, so its model-visible schema stays stable across providers. Requires a registered provider (e.g. `@deepseek-ai/dsh-lsp-stdio`) at runtime; without one, a query returns the structured `LSP_UNAVAILABLE` error rather than changing the schema. |
-| `@deepseek-ai/dsh-tool-ontology` | `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_object`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations` | - | The nine tools discover authorized Project, Object, and Action details before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
+| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations`, `administrator draft additions` | - | Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`, `ctx.workflowEngine`, `ctx.subagents`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents every fresh round)` | `tool/call`, `tool/result`, `workflow and child session events during execution` | - | A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap. |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`, `ctx.agents`, `ctx.skills` | `tool/call`, `tool/result`, `user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`, `session_event_search`, `session_event_trace`, `session_search`, `session_trace` | `ctx.tools`, `ctx.systemPrompt`, `ctx.sessionQuery`, `a calling Agent for workspace authority` | `tool/call`, `tool/result` | - | The five read-only tools hide provider cursors and authorize every result from the immutable calling agent session. The package is opt-in; compositions that need enforced deadlines or bounded inline output also mount the generic timeout or spill policies. |
@@ -1516,6 +1516,77 @@ The lsp tool keeps provider selection and language-server subprocesses behind ct
 
 ## `@deepseek-ai/dsh-tool-ontology`
 
+### `ontology_add_draft_resources`
+
+Add Object Types, Properties, Links, and Actions to one Project draft without publishing or changing business records. Read ontology_get_draft first and use its exact updatedAt. Existing identical definitions are no-ops; conflicts fail atomically. Use ontology-modeler for resource field instructions.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id from the current page and ontology_get_draft."
+    },
+    "expected_updated_at": {
+      "type": "string",
+      "description": "Exact project.updatedAt returned by the most recent ontology_get_draft. Reread the draft after a revision conflict."
+    },
+    "object_types": {
+      "type": "array",
+      "description": "New Object Type definitions using the camelCase fields in draft.objectTypes: id, label, description, dataSourceId, resourceKind, resourceRef, primaryKey, versionProperty, properties. Reuse only existing dataSourceId values.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "properties": {
+      "type": "array",
+      "description": "Properties to append to existing or new Objects: {objectTypeId, property:{id,label,description,type,sourceField,required}}.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "objectTypeId": {
+            "type": "string"
+          },
+          "property": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "objectTypeId",
+          "property"
+        ]
+      }
+    },
+    "link_types": {
+      "type": "array",
+      "description": "New Links using draft.linkTypes fields: id,label,description,sourceType,targetType,cardinality,sourceProperty,targetProperty. References must exist in the resulting draft.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "action_types": {
+      "type": "array",
+      "description": "New Actions using draft.actionTypes camelCase fields. Object Actions reference a targetType; Function Actions use only executorRef keys returned by ontology_get_draft. Never invent executor URLs, credentials, or formulas.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "expected_updated_at"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
 ### `ontology_describe_action`
 
 Read one authorized published Action with exact required and optional parameters and its confirmation requirement.
@@ -1589,6 +1660,27 @@ Execute one prepared Ontology Action by invocation id without accepting replacem
 
 Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
+### `ontology_get_draft`
+
+Read one Project draft, its updatedAt revision, existing data sources, and trusted Function executors for modeling. Administrator access is required; unpublished Projects are supported.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id supplied by the current management page or authorized discovery."
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
 ### `ontology_get_object`
 
 Get one published Object record by the Object Type primary key.
@@ -1613,6 +1705,36 @@ Get one published Object record by the Object Type primary key.
     "project_id",
     "object_type_id",
     "primary_key"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_inspect_data_source`
+
+Discover real table or collection names in a draft data source, or inspect actual fields for one returned resource_ref. Administrator access is required. Use this before mapping business Property ids to physical source fields; no credentials or business records are returned.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Current modeling Project id."
+    },
+    "data_source_id": {
+      "type": "string",
+      "description": "Exact draft.dataSources id returned by ontology_get_draft, not a connection reference."
+    },
+    "resource_ref": {
+      "type": "string",
+      "description": "Exact ref returned by discovery; omit to list resources."
+    }
+  },
+  "required": [
+    "project_id",
+    "data_source_id"
   ]
 }
 ```
@@ -1784,7 +1906,115 @@ Traverse one published Link from a source record in the outgoing or incoming dir
 
 Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
-The nine tools discover authorized Project, Object, and Action details before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.
+### `ontology_update_draft_bindings`
+
+Correct resourceRef, primaryKey and Property sourceField bindings on existing draft Objects while preserving ids, relationships and releases. Read the latest draft revision and inspect the real source first. This does not delete, publish, or write business records.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Current modeling Project id."
+    },
+    "expected_updated_at": {
+      "type": "string",
+      "description": "Latest project.updatedAt from ontology_get_draft."
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Each binding addresses an existing Object and existing Properties using their business ids. primaryKey and sourceField contain real physical field names, which may differ from Property ids.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "objectTypeId": {
+            "type": "string"
+          },
+          "resourceRef": {
+            "type": "string"
+          },
+          "primaryKey": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "propertyId": {
+                  "type": "string"
+                },
+                "sourceField": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Correct the business label when the discovered field is a code or name rather than an id."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Correct the Property type for discovered arrays or nested objects.",
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "date",
+                    "datetime",
+                    "user",
+                    "object"
+                  ]
+                }
+              },
+              "required": [
+                "propertyId",
+                "sourceField"
+              ]
+            }
+          }
+        },
+        "required": [
+          "objectTypeId"
+        ]
+      }
+    },
+    "link_bindings": {
+      "type": "array",
+      "description": "Correct existing relation endpoints when physical joins use business codes instead of document primary keys; preserve the Link id and Object endpoints.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "linkTypeId": {
+            "type": "string"
+          },
+          "sourceProperty": {
+            "type": "string"
+          },
+          "targetProperty": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "linkTypeId",
+          "sourceProperty",
+          "targetProperty"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "expected_updated_at"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.
 
 <a id="deepseek-aidsh-tool-ralph"></a>
 

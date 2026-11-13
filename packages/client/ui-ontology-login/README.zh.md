@@ -31,6 +31,8 @@ kind: "package-reference"
 
 Harness 在 iframe 中运行时，根 Slot 会显示本地化会话中转页，并且不会暴露密码表单。本插件从 `document.referrer` 推导允许的父页面 Origin，向该 Origin 通知已就绪，并只接受 `window.parent` 发送的一个带版本 `ontology/runtime-session` 消息。它会校验消息字段，调用 Host 的 `importSession()` Remote 方法，应用返回的脱敏状态，并且只向父页面报告成功或失败。
 
+带有 `ontologyEmbed=1` 的 iframe URL 接受与传入 `session` 并列的顶层 `context: { projectId, projectName, mode: 'modeling' }`。Host 校验该 Project 后，页面会显示紧凑的原生 Chat、项目历史会话和复用可用空白 Session 的“新建会话”操作。历史列表只展示有内容的会话，未使用的空白 Session 仍保留存储。原生文件、图片和文档附件控件沿用现有上传与分析流程。交接成功后会确认已校验的 `projectId` 和 `mode`；已提交的成功 `ontology_add_draft_resources` 或 `ontology_update_draft_bindings` 结果会向精确父页面 Origin 发送 `ontology/draft-updated`。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -45,6 +47,7 @@ Host 入口没有路由行为。Client 入口挂载生成的 Remote contribution
 |---|---|
 | [`src/client/mount.ts`](src/client/mount.ts) | Remote 状态生命周期、精确 Origin 的内嵌会话桥、根登录门、账号席位与品牌 Slot 注册。 |
 | [`src/client/EmbeddedSessionPage.tsx`](src/client/EmbeddedSessionPage.tsx) | 不包含凭证输入的内嵌会话中转界面。 |
+| [`src/client/modeling.ts`](src/client/modeling.ts) / [`src/client/ModelingConversation.tsx`](src/client/ModelingConversation.tsx) | 私有 Project Workspace 准备、原生对话组合与草稿保存通知。 |
 | [`src/client/LoginPage.tsx`](src/client/LoginPage.tsx) | 账号密码表单与等待、错误呈现。 |
 | [`src/client/AccountSeat.tsx`](src/client/AccountSeat.tsx) | 脱敏身份、服务地址与注销菜单。 |
 
@@ -76,7 +79,7 @@ Host 入口没有路由行为。Client 入口挂载生成的 Remote contribution
 
 - 本包面向 Web Client，并依赖根、侧栏、locale、Remote 与 Workspace UI 服务。
 - 内嵌登录要求 iframe 导航在 `document.referrer` 中保留父页面 Origin；`no-referrer` 策略会禁用交接，此时会话中转页会保持等待状态。
-- 页面不选择 Project；Project 发现属于后续 Ontology 工具与上下文工作流。
+- 建模模式使用父页面选中的 Project；切换 Project 时需要新的 iframe 和会话交接。
 
 <a id="dev-note"></a>
 ### 开发备注

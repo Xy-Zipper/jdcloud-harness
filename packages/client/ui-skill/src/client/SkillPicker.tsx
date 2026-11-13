@@ -343,7 +343,7 @@ export function SkillPickerView({
   }
 
   const save = (): void => {
-    if (!canInstall || saving || importFiles === null || installScope === null) return
+    if (!canInstall || saving) return
     setSaving(true)
     setManagerError(null)
     void installSkill(installScope, importFiles).then((outcome) => {

@@ -108,13 +108,13 @@ async function authorizedRoots(ctx: Context): Promise<readonly FsTarget[] | unde
   const registry = ctx.get('workspaceRegistry') as { list(): readonly WorkspaceLike[] } | undefined
   if (registry !== undefined) {
     for (const workspace of registry.list()) {
-      if (await owner.owns('workspace', String(workspace.id))) roots.push(await fs.resolve(workspace.path))
+      if (await owner.owns('workspace', workspace.id)) roots.push(await fs.resolve(workspace.path))
     }
   }
   const sessions = ctx.get('sessions') as { list(): readonly SessionLike[] } | undefined
   if (sessions !== undefined) {
     for (const session of sessions.list()) {
-      if (session.header.cwd !== undefined && await owner.owns('session', String(session.id))) {
+      if (session.header.cwd !== undefined && await owner.owns('session', session.id)) {
         roots.push(await fs.resolve(session.header.cwd))
       }
     }

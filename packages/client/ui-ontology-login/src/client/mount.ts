@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {
   OntologyAuthStatus,
+  OntologyModelingContext,
   OntologyRuntimeIdentity,
   OntologyRuntimeSessionTransfer,
 } from '@deepseek-ai/dsh-api-ontology-auth-controller/types'
@@ -18,6 +19,7 @@ import { OntologyBrandMark, OntologyBrandName } from './Brand.tsx'
 import { EmbeddedSessionPage } from './EmbeddedSessionPage.tsx'
 import { LoginPage, type OntologyLoginInjected } from './LoginPage.tsx'
 import { en, NS, zh } from './locales.ts'
+import { installModelingConversation } from './modeling.ts'
 
 const AUTH_LOGIN_RECORD_PREFIX = 'ontology-auth-controller/login-'
 const BRAND_PRIORITY = -10
@@ -28,6 +30,7 @@ interface RuntimeSessionMessage {
   readonly version: 1
   readonly nonce: string
   readonly session: OntologyRuntimeSessionTransfer
+  readonly context?: OntologyModelingContext
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -76,9 +79,15 @@ function installRuntimeSessionBridge(
     const message = readRuntimeSessionMessage(event.data)
     if (message === undefined || message.nonce === handledNonce) return
     handledNonce = message.nonce
-    void ctx.remote.ontologyAuth.importSession(message.session).then((result) => {
+    const session = message.context === undefined
+      ? message.session
+      : { ...message.session, context: message.context }
+    void ctx.remote.ontologyAuth.importSession(session).then((result) => {
       if (!active) return
-      if (result.ok) {
+      const context = result.ok && result.value.authenticated ? result.value.context : undefined
+      const accepted = result.ok && (message.context === undefined
+        || context?.projectId === message.context.projectId)
+      if (accepted) {
         resetIdentityView()
         applyStatus(result.value)
       }
@@ -86,7 +95,10 @@ function installRuntimeSessionBridge(
         type: 'ontology/runtime-session-result',
         version: SESSION_MESSAGE_VERSION,
         nonce: message.nonce,
-        ok: result.ok,
+        ok: accepted,
+        ...(accepted && context !== undefined
+          ? { projectId: context.projectId, mode: context.mode }
+          : {}),
       }, parentOrigin)
     })
   }
@@ -118,8 +130,23 @@ function readRuntimeSessionMessage(value: unknown): RuntimeSessionMessage | unde
     || value.version !== SESSION_MESSAGE_VERSION) return undefined
   const nonce = nonEmptyString(value.nonce)
   const session = readRuntimeSession(value.session)
-  if (nonce === undefined || session === undefined) return undefined
-  return { type: 'ontology/runtime-session', version: SESSION_MESSAGE_VERSION, nonce, session }
+  const context = value.context === undefined ? undefined : readModelingContext(value.context)
+  if (nonce === undefined || session === undefined
+    || (value.context !== undefined && context === undefined)) return undefined
+  return {
+    type: 'ontology/runtime-session', version: SESSION_MESSAGE_VERSION, nonce, session,
+    ...(context === undefined ? {} : { context }),
+  }
+}
+
+/** Validate the management page's selected Project before importing it into the Host. */
+function readModelingContext(value: unknown): OntologyModelingContext | undefined {
+  if (!isRecord(value) || value.mode !== 'modeling') return undefined
+  const projectId = nonEmptyString(value.projectId)
+  const projectName = nonEmptyString(value.projectName)
+  return projectId === undefined || projectName === undefined
+    ? undefined
+    : { projectId, projectName, mode: 'modeling' }
 }
 
 /** Validate Runtime tokens and identity without retaining the incoming message object. */
@@ -172,11 +199,15 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   let active = true
   let disposeGate: (() => void) | undefined
   let disposeAccount: (() => void) | undefined
+  let disposeModeling: (() => void) | undefined
+  let modelingKey: string | undefined
   const embedded = window.parent !== window
   const parentOrigin = resolveParentOrigin()
+  const modeling = embedded && new URLSearchParams(window.location.search).get('ontologyEmbed') === '1'
 
   const resetIdentityView = (): void => {
-    if (active) ctx.uiWorkspace.clearSelection()
+    // Token rotation preserves an open modeling Session; a new identity or Project prepares its own selection.
+    if (active && (!modeling || modelingKey === undefined)) ctx.uiWorkspace.clearSelection()
   }
 
   const hideGate = (): void => {
@@ -187,6 +218,27 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   const hideAccount = (): void => {
     disposeAccount?.()
     disposeAccount = undefined
+  }
+
+  const hideModeling = (): void => {
+    disposeModeling?.()
+    disposeModeling = undefined
+    modelingKey = undefined
+  }
+
+  const showModeling = (
+    status: Extract<OntologyAuthStatus, { readonly authenticated: true }>,
+    context: OntologyModelingContext,
+    origin: string,
+  ): void => {
+    const key = `${status.user.userId}\0${context.projectId}`
+    if (modelingKey === key) return
+    hideModeling()
+    ctx.uiWorkspace.clearSelection()
+    modelingKey = key
+    const fiber = ctx.inject(['sessions', 'workspaces'], modelingCtx =>
+      installModelingConversation(modelingCtx, context, origin))
+    disposeModeling = () => { void fiber.dispose() }
   }
 
   const showAccount = (status: Extract<OntologyAuthStatus, { readonly authenticated: true }>): void => {
@@ -212,10 +264,24 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   const applyStatus = (status: OntologyAuthStatus): void => {
     if (!active) return
     if (status.authenticated) {
+      if (modeling && (parentOrigin === undefined || status.context === undefined)) {
+        hideAccount()
+        hideModeling()
+        showGate()
+        return
+      }
       hideGate()
-      showAccount(status)
+      if (modeling && parentOrigin !== undefined && status.context !== undefined) {
+        hideAccount()
+        showModeling(status, status.context, parentOrigin)
+      } else {
+        hideModeling()
+        showAccount(status)
+      }
       return
     }
+    hideModeling()
+    if (modeling) ctx.uiWorkspace.clearSelection()
     hideAccount()
     showGate()
   }
@@ -275,6 +341,7 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
       offRecord()
       hideGate()
       hideAccount()
+      hideModeling()
     }
   }, 'ui-ontology-login: authentication gate')
   ctx.effect(

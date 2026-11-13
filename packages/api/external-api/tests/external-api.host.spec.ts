@@ -147,19 +147,24 @@ describe('external API authentication', () => {
     })
   })
 
-  it('maps tenant and administrator refusals without exposing an internal failure', async () => {
-    const tenant = context({
+  it('maps project and administrator refusals without exposing an internal failure', async () => {
+    const project = context({
+      provider: 'ontology',
       authenticate: () => Promise.reject(new RemoteError(
-        'jdcloud/external-tenant-forbidden',
-        'wrong tenant',
-        { tenantId: 'tenant-a' },
+        'ontology/external-project-forbidden',
+        'wrong project',
+        { projectId: 'project-a' },
       )),
     })
-    const tenantResponse = await fetchExternalApi(tenant, request('/api/external/v1/skills'))
-    expect(tenantResponse.status).toBe(403)
-    await expect(tenantResponse.json()).resolves.toMatchObject({
+    const projectResponse = await fetchExternalApi(project, request('/api/external/v1/skills', {}, {
+      'x-tenant-id': '',
+      'x-project-id': 'project-a',
+      'x-jdcloud-base-url': '',
+    }))
+    expect(projectResponse.status).toBe(403)
+    await expect(projectResponse.json()).resolves.toMatchObject({
       code: 403,
-      errorCode: 'jdcloud/external-tenant-forbidden',
+      errorCode: 'ontology/external-project-forbidden',
     })
 
     const member = context({

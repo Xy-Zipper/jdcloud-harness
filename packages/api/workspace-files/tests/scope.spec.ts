@@ -40,6 +40,7 @@ describe('Workspace Files Session scope lookup', () => {
     const ctx = new Context()
     ctx.provide('fs', {} as never)
     ctx.provide('sandboxPolicy', { workspaceRoot: fallbackRoot } as never)
+    ctx.provide('workspaceRegistry', { get: () => undefined } as never)
     ctx.provide('sessionPersistence', { stat } as never)
     const sessions = await ctx.plugin(SessionStore)
     const typert = await ctx.plugin(TypertRegistry)

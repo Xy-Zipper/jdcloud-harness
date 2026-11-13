@@ -204,6 +204,72 @@
       }
     },
     {
+      "name": "ontology_add_draft_resources",
+      "description": "Add Object Types, Properties, Links, and Actions to one Project draft without publishing or changing business records. Read ontology_get_draft first and use its exact updatedAt. Existing identical definitions are no-ops; conflicts fail atomically. Use ontology-modeler for resource field instructions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Exact Project id from the current page and ontology_get_draft."
+          },
+          "expected_updated_at": {
+            "type": "string",
+            "description": "Exact project.updatedAt returned by the most recent ontology_get_draft. Reread the draft after a revision conflict."
+          },
+          "object_types": {
+            "type": "array",
+            "description": "New Object Type definitions using the camelCase fields in draft.objectTypes: id, label, description, dataSourceId, resourceKind, resourceRef, primaryKey, versionProperty, properties. Reuse only existing dataSourceId values.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "properties": {
+            "type": "array",
+            "description": "Properties to append to existing or new Objects: {objectTypeId, property:{id,label,description,type,sourceField,required}}.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "objectTypeId": {
+                  "type": "string"
+                },
+                "property": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": [
+                "objectTypeId",
+                "property"
+              ]
+            }
+          },
+          "link_types": {
+            "type": "array",
+            "description": "New Links using draft.linkTypes fields: id,label,description,sourceType,targetType,cardinality,sourceProperty,targetProperty. References must exist in the resulting draft.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "action_types": {
+            "type": "array",
+            "description": "New Actions using draft.actionTypes camelCase fields. Object Actions reference a targetType; Function Actions use only executorRef keys returned by ontology_get_draft. Never invent executor URLs, credentials, or formulas.",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "required": [
+          "project_id",
+          "expected_updated_at"
+        ]
+      }
+    },
+    {
       "name": "ontology_describe_action",
       "description": "Read one authorized published Action with exact required and optional parameters and its confirmation requirement.",
       "parameters": {
@@ -262,6 +328,22 @@
       }
     },
     {
+      "name": "ontology_get_draft",
+      "description": "Read one Project draft, its updatedAt revision, existing data sources, and trusted Function executors for modeling. Administrator access is required; unpublished Projects are supported.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Exact Project id supplied by the current management page or authorized discovery."
+          }
+        },
+        "required": [
+          "project_id"
+        ]
+      }
+    },
+    {
       "name": "ontology_get_object",
       "description": "Get one published Object record by the Object Type primary key.",
       "parameters": {
@@ -283,6 +365,31 @@
           "project_id",
           "object_type_id",
           "primary_key"
+        ]
+      }
+    },
+    {
+      "name": "ontology_inspect_data_source",
+      "description": "Discover real table or collection names in a draft data source, or inspect actual fields for one returned resource_ref. Administrator access is required. Use this before mapping business Property ids to physical source fields; no credentials or business records are returned.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Current modeling Project id."
+          },
+          "data_source_id": {
+            "type": "string",
+            "description": "Exact draft.dataSources id returned by ontology_get_draft, not a connection reference."
+          },
+          "resource_ref": {
+            "type": "string",
+            "description": "Exact ref returned by discovery; omit to list resources."
+          }
+        },
+        "required": [
+          "project_id",
+          "data_source_id"
         ]
       }
     },
@@ -423,6 +530,109 @@
           "link_type_id",
           "direction",
           "source_primary_key"
+        ]
+      }
+    },
+    {
+      "name": "ontology_update_draft_bindings",
+      "description": "Correct resourceRef, primaryKey and Property sourceField bindings on existing draft Objects while preserving ids, relationships and releases. Read the latest draft revision and inspect the real source first. This does not delete, publish, or write business records.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Current modeling Project id."
+          },
+          "expected_updated_at": {
+            "type": "string",
+            "description": "Latest project.updatedAt from ontology_get_draft."
+          },
+          "bindings": {
+            "type": "array",
+            "description": "Each binding addresses an existing Object and existing Properties using their business ids. primaryKey and sourceField contain real physical field names, which may differ from Property ids.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "objectTypeId": {
+                  "type": "string"
+                },
+                "resourceRef": {
+                  "type": "string"
+                },
+                "primaryKey": {
+                  "type": "string"
+                },
+                "properties": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "propertyId": {
+                        "type": "string"
+                      },
+                      "sourceField": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "Correct the business label when the discovered field is a code or name rather than an id."
+                      },
+                      "type": {
+                        "type": "string",
+                        "description": "Correct the Property type for discovered arrays or nested objects.",
+                        "enum": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "date",
+                          "datetime",
+                          "user",
+                          "object"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "propertyId",
+                      "sourceField"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "objectTypeId"
+              ]
+            }
+          },
+          "link_bindings": {
+            "type": "array",
+            "description": "Correct existing relation endpoints when physical joins use business codes instead of document primary keys; preserve the Link id and Object endpoints.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "linkTypeId": {
+                  "type": "string"
+                },
+                "sourceProperty": {
+                  "type": "string"
+                },
+                "targetProperty": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "linkTypeId",
+                "sourceProperty",
+                "targetProperty"
+              ]
+            }
+          }
+        },
+        "required": [
+          "project_id",
+          "expected_updated_at"
         ]
       }
     },

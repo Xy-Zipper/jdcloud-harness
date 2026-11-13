@@ -5,6 +5,9 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionFailure, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { type ApprovalOutcome, type ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as ontologyTool from '../src/index.ts'
 
@@ -21,6 +24,7 @@ interface FixtureOptions {
   readonly approvalOutcome?: ApprovalOutcome
   readonly executeError?: Error
   readonly actionResponse?: unknown
+  readonly modelingProjectId?: string
 }
 
 /** Mount the real tool and approval services with a Host-only Runtime request recorder. */
@@ -115,7 +119,11 @@ async function fixture(options: FixtureOptions = {}) {
     }
     throw new Error(`unexpected Runtime path: ${request.path}`)
   })
-  ctx.provide('ontologyAuthController', { requestAuthenticated } as never)
+  ctx.provide('ontologyAuthController', {
+    requestAuthenticated,
+    currentModelingContext: async () => options.modelingProjectId === undefined
+      ? undefined : { projectId: options.modelingProjectId, projectName: '销售', mode: 'modeling' },
+  } as never)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(ApprovalService)
@@ -149,7 +157,7 @@ function failure(result: ToolExecutionResult): ToolExecutionFailure {
 }
 
 describe('Ontology tools', () => {
-  it('registers the nine stable tools and removes them with the plugin fiber', async () => {
+  it('registers the published and draft tools and removes them with the plugin fiber', async () => {
     const { ctx, fiber } = await fixture()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'ontology_list_projects',
@@ -161,6 +169,10 @@ describe('Ontology tools', () => {
       'ontology_traverse_link',
       'ontology_prepare_action',
       'ontology_execute_action',
+      'ontology_get_draft',
+      'ontology_add_draft_resources',
+      'ontology_inspect_data_source',
+      'ontology_update_draft_bindings',
     ])
     await fiber.dispose()
     expect(ctx.tools.schemas()).toEqual([])
@@ -378,4 +390,190 @@ describe('Ontology tools', () => {
     expect(result.isError).toBe(true)
     expect(JSON.stringify(result.content)).toContain('Ontology Project id is invalid')
   })
+
+  it('reads unpublished draft metadata while omitting connection references and executor internals', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+    requestAuthenticated.mockResolvedValueOnce(draftResponse())
+
+    const result = value(await execute('ontology_get_draft', { project_id: 'project-sales' }))
+
+    expect(result).toMatchObject({
+      project: { id: 'project-sales', updatedAt: '2026-11-12T10:00:00Z', publishedVersion: 0 },
+      draft: { dataSources: [{ id: 'source-1' }], objectTypes: [{ id: 'object-order' }] },
+      executors: [{ key: 'sales.order.check' }],
+    })
+    expect(JSON.stringify(result)).not.toContain('connectionRef')
+    expect(JSON.stringify(result)).not.toContain('private-token')
+    expect(requestAuthenticated).toHaveBeenCalledWith({
+      method: 'GET', path: '/api/runtime/projects/project-sales/draft',
+    }, expect.any(AbortSignal))
+  })
+
+  it('adds all four resource categories with the exact draft revision in one request', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+    const response = draftResponse()
+    requestAuthenticated.mockResolvedValueOnce({
+      ...response, added: { objectTypes: 1, properties: 1, linkTypes: 1, actionTypes: 1 },
+    })
+    const resources = {
+      object_types: [response.draft.objectTypes[0]],
+      properties: [{ objectTypeId: 'object-order', property: response.draft.objectTypes[0]!.properties[0] }],
+      link_types: [response.draft.linkTypes[0]],
+      action_types: [response.draft.actionTypes[0]],
+    }
+
+    expect(value(await execute('ontology_add_draft_resources', {
+      project_id: 'project-sales',
+      expected_updated_at: response.project.updatedAt,
+      ...resources,
+    }))).toMatchObject({ added: { objectTypes: 1, properties: 1, linkTypes: 1, actionTypes: 1 } })
+    expect(requestAuthenticated).toHaveBeenCalledWith({
+      method: 'POST',
+      path: '/api/runtime/projects/project-sales/draft',
+      body: {
+        expectedUpdatedAt: response.project.updatedAt,
+        objectTypes: resources.object_types,
+        properties: resources.properties,
+        linkTypes: resources.link_types,
+        actionTypes: resources.action_types,
+      },
+    }, expect.any(AbortSignal))
+  })
+
+  it('passes revision conflicts back as tool failures without retrying a write', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+    requestAuthenticated.mockRejectedValueOnce(new Error('runtime_draft_conflict: draft changed'))
+    const result = await execute('ontology_add_draft_resources', {
+      project_id: 'project-sales', expected_updated_at: '2026-11-12T10:00:00Z',
+      object_types: [{ id: 'object-new', label: '新增对象' }],
+    })
+
+    expect(failure(result).error.info?.code).toBe('ONTOLOGY_RUNTIME_REQUEST_FAILED')
+    expect(JSON.stringify(result.content)).toContain('runtime_draft_conflict')
+    expect(requestAuthenticated).toHaveBeenCalledOnce()
+  })
+
+  it('rejects an empty addition or another embedded Project before contacting Runtime', async () => {
+    const { execute, requestAuthenticated } = await fixture({ modelingProjectId: 'project-sales' })
+    expect(failure(await execute('ontology_add_draft_resources', {
+      project_id: 'project-sales', expected_updated_at: '2026-11-12T10:00:00Z',
+    })).error.info?.code).toBe('ONTOLOGY_TOOL_INVALID_ARGUMENT')
+    expect(failure(await execute('ontology_get_draft', {
+      project_id: 'project-other',
+    })).error.info?.code).toBe('ONTOLOGY_TOOL_INVALID_ARGUMENT')
+    expect(requestAuthenticated).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['Project id', { project: { ...draftResponse().project, id: 'other-project' } }],
+    ['revision', { project: { ...draftResponse().project, updatedAt: 'bad' } }],
+    ['objectTypes', { draft: { ...draftResponse().draft, objectTypes: null } }],
+    ['enabled', { draft: { ...draftResponse().draft, dataSources: [{ ...draftResponse().draft.dataSources[0], enabled: 'yes' }] } }],
+  ])('rejects malformed draft %s', async (_field, changes) => {
+    const { execute, requestAuthenticated } = await fixture()
+    requestAuthenticated.mockResolvedValueOnce({ ...draftResponse(), ...changes })
+    expect(failure(await execute('ontology_get_draft', {
+      project_id: 'project-sales',
+    })).error.info?.code).toBe('ONTOLOGY_RUNTIME_INVALID_RESPONSE')
+  })
+
+  it('discovers physical resources and fields without returning unrequested credentials', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+    requestAuthenticated.mockResolvedValueOnce({
+      dataSourceId: 'source-1', resources: [{ ref: 'form123', label: '产品表', kind: 'collection' }],
+      token: 'private-token',
+    })
+    expect(value(await execute('ontology_inspect_data_source', {
+      project_id: 'project-sales', data_source_id: 'source-1',
+    }))).toEqual({ dataSourceId: 'source-1', resources: [{ ref: 'form123', label: '产品表', kind: 'collection' }] })
+    requestAuthenticated.mockResolvedValueOnce({
+      dataSourceId: 'source-1', resource: { ref: 'form123', label: '产品表', kind: 'collection' },
+      fields: [{ name: '_id', label: '主键', type: 'string', required: true }],
+    })
+    expect(value(await execute('ontology_inspect_data_source', {
+      project_id: 'project-sales', data_source_id: 'source-1', resource_ref: 'form123',
+    }))).toMatchObject({ fields: [{ name: '_id' }] })
+    expect(requestAuthenticated).toHaveBeenLastCalledWith({
+      method: 'POST', path: '/api/runtime/projects/project-sales/data-sources/inspect',
+      body: { dataSourceId: 'source-1', resourceRef: 'form123' },
+    }, expect.any(AbortSignal))
+  })
+
+  it('updates existing bindings using the latest revision and preserves the confirmed update counts', async () => {
+    const { execute, requestAuthenticated } = await fixture()
+    const response = draftResponse()
+    const bindings = [{
+      objectTypeId: 'object-order', resourceRef: 'orders', primaryKey: '_id',
+      properties: [{ propertyId: 'property-id', sourceField: '_id' }],
+    }]
+    requestAuthenticated.mockResolvedValueOnce({ ...response, updated: { objectTypes: 1, properties: 1, linkTypes: 0 } })
+    expect(value(await execute('ontology_update_draft_bindings', {
+      project_id: 'project-sales', expected_updated_at: response.project.updatedAt, bindings,
+    }))).toMatchObject({ updated: { objectTypes: 1, properties: 1 } })
+    expect(requestAuthenticated).toHaveBeenCalledWith({
+      method: 'POST', path: '/api/runtime/projects/project-sales/draft',
+      body: { expectedUpdatedAt: response.project.updatedAt, bindings },
+    }, expect.any(AbortSignal))
+  })
+
+  it('rejects empty binding writes and discovery responses for a different resource', async () => {
+    const { execute, requestAuthenticated } = await fixture({ modelingProjectId: 'project-sales' })
+    expect(failure(await execute('ontology_update_draft_bindings', {
+      project_id: 'project-sales', expected_updated_at: '2026-11-12T10:00:00Z', bindings: [],
+    })).error.info?.code).toBe('ONTOLOGY_TOOL_INVALID_ARGUMENT')
+    expect(requestAuthenticated).not.toHaveBeenCalled()
+    requestAuthenticated.mockResolvedValueOnce({ dataSourceId: 'other-source', resources: [] })
+    expect(failure(await execute('ontology_inspect_data_source', {
+      project_id: 'project-sales', data_source_id: 'source-1',
+    })).error.info?.code).toBe('ONTOLOGY_RUNTIME_INVALID_RESPONSE')
+  })
+
+  it('registers the packaged modeling Skill and removes it with its owning plugin', async () => {
+    const { ctx, fiber } = await fixture()
+    await ctx.plugin(SkillRegistry)
+    const skill = await ctx.skills.get('ontology-modeler')
+    const raw = await readFile(fileURLToPath(new URL('../assets/ontology-modeler/SKILL.md', import.meta.url)), 'utf8')
+    expect(skill).toMatchObject({
+      name: 'ontology-modeler', provider: 'ontology-modeler-bundled', source: 'bundled',
+      invocation: { modelInvocable: true, userInvocable: true },
+    })
+    expect(skill?.content).toBe(raw.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, '').trim())
+    await fiber.dispose()
+    expect(await ctx.skills.get('ontology-modeler')).toBeUndefined()
+  })
 })
+
+function draftResponse() {
+  return {
+    project: {
+      id: 'project-sales', name: '销售', description: '销售草稿', status: 'active',
+      updatedAt: '2026-11-12T10:00:00Z', publishedVersion: 0,
+    },
+    draft: {
+      dataSources: [{
+        id: 'source-1', label: '测试数据源', description: '', kind: 'mock',
+        connectionRef: 'private-token', enabled: true, readOnly: false,
+      }],
+      objectTypes: [{
+        id: 'object-order', label: '订单', description: '销售订单', dataSourceId: '',
+        resourceKind: 'table', resourceRef: '', primaryKey: '', versionProperty: '',
+        properties: [{ id: 'property-id', label: '订单 ID', description: '', type: 'string', sourceField: '', required: true }],
+      }],
+      linkTypes: [{
+        id: 'link-orders', label: '订单关联', description: '', sourceType: 'object-order',
+        targetType: 'object-order', sourceProperty: 'property-id', targetProperty: 'property-id',
+        cardinality: 'one-to-many',
+      }],
+      actionTypes: [{
+        id: 'action-check', label: '检查订单', description: '', kind: 'function', operation: 'invoke',
+        effect: 'read', targetType: 'object-order', executorRef: 'sales.order.check',
+        mappings: [{ targetProperty: 'property-id', source: 'parameter', inputName: 'orderId', required: true }],
+        requiresConfirmation: false,
+      }],
+    },
+    executors: [{
+      key: 'sales.order.check', label: '检查订单', description: '', kind: 'builtin', effect: 'read',
+      privateToken: 'private-token',
+    }],
+  }
+}

@@ -304,6 +304,8 @@ export interface WebScaffold {
 
 /** Options for {@link launchWebScaffold}. */
 export interface LaunchOptions {
+  /** Match a deployment overlay whose independent browser identity uses Bearer transport. */
+  browserSessionTransport?: 'bearer'
   /** Override the developer-tools preference; omitted uses the shipped default. */
   developerTools?: boolean
   /** Enable the real Open In rows with deterministic launch-environment facts. */
@@ -704,6 +706,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
   let baseUrl = ''
   let authenticatedUrl = ''
   let cookieHeader = ''
+  let browserBearer: string | undefined
   let publicProxy: PrefixProxy | undefined
   let replayHandle: ReplayHandle | undefined
   try {
@@ -888,17 +891,28 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // posts the exchange to loopback, the authority the Host fence always trusts.
     const loginUrl = new URL(authenticatedUrl)
     if (publicPrefix !== undefined) loginUrl.hostname = '127.0.0.1'
-    const login = await fetch(loginUrl, { redirect: 'manual' })
-    const setCookie = login.headers.get('set-cookie')
-    // Launch-token authentication redirects relative to the mounted app, while
-    // BrowserSession-only profiles redirect to the root that issued the cookie.
-    const loginLocation = login.headers.get('location')
-    if (login.status !== 303 || (loginLocation !== './' && loginLocation !== '/') || setCookie === null) {
-      throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
-    }
-    cookieHeader = setCookie.split(';', 1)[0] ?? ''
-    if (cookieHeader.length === 0) {
-      throw new Error('web e2e scaffold: browser token exchange returned an empty session cookie')
+    if (options.browserSessionTransport === 'bearer') {
+      const bootstrapUrl = new URL('api/browser-session', loginUrl)
+      const bootstrap = await fetch(bootstrapUrl, { method: 'POST', headers: { origin: bootstrapUrl.origin } })
+      const value: unknown = await bootstrap.json()
+      if (!bootstrap.ok || typeof value !== 'object' || value === null
+        || typeof Reflect.get(value, 'token') !== 'string') {
+        throw new Error('web e2e scaffold: browser Bearer bootstrap did not return its session token')
+      }
+      browserBearer = Reflect.get(value, 'token') as string
+    } else {
+      const login = await fetch(loginUrl, { redirect: 'manual' })
+      const setCookie = login.headers.get('set-cookie')
+      // Launch-token authentication redirects relative to the mounted app, while
+      // BrowserSession-only profiles redirect to the root that issued the cookie.
+      const loginLocation = login.headers.get('location')
+      if (login.status !== 303 || (loginLocation !== './' && loginLocation !== '/') || setCookie === null) {
+        throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
+      }
+      cookieHeader = setCookie.split(';', 1)[0] ?? ''
+      if (cookieHeader.length === 0) {
+        throw new Error('web e2e scaffold: browser token exchange returned an empty session cookie')
+      }
     }
   } catch (error) {
     if (process.cwd() !== originalCwd) process.chdir(originalCwd)
@@ -926,7 +940,8 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     persistenceRoot,
     hostFetch(path: string, init: RequestInit = {}): Promise<Response> {
       const headers = new Headers(init.headers)
-      headers.set('cookie', cookieHeader)
+      if (browserBearer === undefined) headers.set('cookie', cookieHeader)
+      else headers.set('authorization', `Bearer ${browserBearer}`)
       return fetch(new URL(path, baseUrl), { ...init, headers })
     },
     // Barrier stack: the in-process turn/end identifies the session, its

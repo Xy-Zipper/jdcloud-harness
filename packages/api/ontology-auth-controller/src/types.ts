@@ -30,6 +30,13 @@ export interface OntologyLoginRequest {
   readonly password: string
 }
 
+/** Project selected by an authenticated management page for draft modeling. */
+export interface OntologyModelingContext {
+  readonly projectId: string
+  readonly projectName: string
+  readonly mode: 'modeling'
+}
+
 /** Runtime tokens transferred from an authenticated Ontology management page. */
 export interface OntologyRuntimeSessionTransfer {
   readonly accessToken: string
@@ -37,6 +44,7 @@ export interface OntologyRuntimeSessionTransfer {
   readonly refreshToken: string
   readonly refreshTokenExpiresAt: string
   readonly user: OntologyRuntimeIdentity
+  readonly context?: OntologyModelingContext
 }
 
 /** Host-only request to one fixed Ontology Runtime endpoint. */
@@ -56,4 +64,5 @@ export type OntologyAuthStatus =
     readonly authenticated: true
     readonly baseUrl: string
     readonly user: OntologyRuntimeIdentity
+    readonly context?: OntologyModelingContext
   }

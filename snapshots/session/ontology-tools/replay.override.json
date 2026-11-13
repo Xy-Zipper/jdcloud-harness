@@ -2,31 +2,277 @@
   {
     "kind": "chunks",
     "chunks": [
-      { "type": "block-start", "index": 0, "blockType": "tool-call" },
-      { "type": "tool-call-delta", "index": 0, "id": "call_ontology_action", "name": "ontology_execute_action", "argumentsDelta": "{\"invocation_id\":\"invocation-snapshot\"}" },
-      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_ontology_action", "name": "ontology_execute_action", "arguments": "{\"invocation_id\":\"invocation-snapshot\"}" } },
-      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
-      { "type": "finish", "reason": { "kind": "tool-calls" } }
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_action",
+        "name": "ontology_execute_action",
+        "argumentsDelta": "{\"invocation_id\":\"invocation-snapshot\"}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_action",
+          "name": "ontology_execute_action",
+          "arguments": "{\"invocation_id\":\"invocation-snapshot\"}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
     ]
   },
   {
     "kind": "chunks",
     "chunks": [
-      { "type": "block-start", "index": 0, "blockType": "tool-call" },
-      { "type": "tool-call-delta", "index": 0, "id": "call_ontology_projects", "name": "ontology_list_projects", "argumentsDelta": "{}" },
-      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_ontology_projects", "name": "ontology_list_projects", "arguments": "{}" } },
-      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
-      { "type": "finish", "reason": { "kind": "tool-calls" } }
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_projects",
+        "name": "ontology_list_projects",
+        "argumentsDelta": "{}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_projects",
+          "name": "ontology_list_projects",
+          "arguments": "{}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
     ]
   },
   {
     "kind": "chunks",
     "chunks": [
-      { "type": "block-start", "index": 0, "blockType": "text" },
-      { "type": "text-delta", "index": 0, "text": "ONTOLOGY_ACTION_GATED" },
-      { "type": "block-end", "index": 0, "block": { "type": "text", "text": "ONTOLOGY_ACTION_GATED" } },
-      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 2 } },
-      { "type": "finish", "reason": { "kind": "stop" } }
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_draft",
+        "name": "ontology_get_draft",
+        "argumentsDelta": "{\"project_id\":\"project-sales\"}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_draft",
+          "name": "ontology_get_draft",
+          "arguments": "{\"project_id\":\"project-sales\"}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_add",
+        "name": "ontology_add_draft_resources",
+        "argumentsDelta": "{\"project_id\":\"project-sales\",\"expected_updated_at\":\"2026-11-12T10:00:00Z\",\"object_types\":[{\"id\":\"object-order\",\"label\":\"Order\",\"description\":\"Sales order\",\"dataSourceId\":\"source-orders\",\"resourceKind\":\"table\",\"resourceRef\":\"\",\"primaryKey\":\"\",\"versionProperty\":\"\",\"properties\":[{\"id\":\"orderId\",\"label\":\"Order id\",\"description\":\"\",\"type\":\"string\",\"sourceField\":\"\",\"required\":true}]}]}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_add",
+          "name": "ontology_add_draft_resources",
+          "arguments": "{\"project_id\":\"project-sales\",\"expected_updated_at\":\"2026-11-12T10:00:00Z\",\"object_types\":[{\"id\":\"object-order\",\"label\":\"Order\",\"description\":\"Sales order\",\"dataSourceId\":\"source-orders\",\"resourceKind\":\"table\",\"resourceRef\":\"\",\"primaryKey\":\"\",\"versionProperty\":\"\",\"properties\":[{\"id\":\"orderId\",\"label\":\"Order id\",\"description\":\"\",\"type\":\"string\",\"sourceField\":\"\",\"required\":true}]}]}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_inspect",
+        "name": "ontology_inspect_data_source",
+        "argumentsDelta": "{\"project_id\":\"project-sales\",\"data_source_id\":\"source-orders\"}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_inspect",
+          "name": "ontology_inspect_data_source",
+          "arguments": "{\"project_id\":\"project-sales\",\"data_source_id\":\"source-orders\"}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "tool-call"
+      },
+      {
+        "type": "tool-call-delta",
+        "index": 0,
+        "id": "call_ontology_bind",
+        "name": "ontology_update_draft_bindings",
+        "argumentsDelta": "{\"project_id\":\"project-sales\",\"expected_updated_at\":\"2026-11-12T10:01:00Z\",\"bindings\":[{\"objectTypeId\":\"object-order\",\"resourceRef\":\"orders\",\"primaryKey\":\"_id\",\"properties\":[{\"propertyId\":\"orderId\",\"sourceField\":\"_id\"}]}]}"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "tool-call",
+          "id": "call_ontology_bind",
+          "name": "ontology_update_draft_bindings",
+          "arguments": "{\"project_id\":\"project-sales\",\"expected_updated_at\":\"2026-11-12T10:01:00Z\",\"bindings\":[{\"objectTypeId\":\"object-order\",\"resourceRef\":\"orders\",\"primaryKey\":\"_id\",\"properties\":[{\"propertyId\":\"orderId\",\"sourceField\":\"_id\"}]}]}"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 5
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "tool-calls"
+        }
+      }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      {
+        "type": "block-start",
+        "index": 0,
+        "blockType": "text"
+      },
+      {
+        "type": "text-delta",
+        "index": 0,
+        "text": "ONTOLOGY_ACTION_GATED"
+      },
+      {
+        "type": "block-end",
+        "index": 0,
+        "block": {
+          "type": "text",
+          "text": "ONTOLOGY_ACTION_GATED"
+        }
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 2
+        }
+      },
+      {
+        "type": "finish",
+        "reason": {
+          "kind": "stop"
+        }
+      }
     ]
   }
 ]

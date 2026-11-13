@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
 import { credentialKey } from '../../../credentials/credentials/src/index.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
@@ -106,6 +107,10 @@ function runtimeServer() {
     }
     if (url.pathname.endsWith('/api/runtime/projects')) {
       return Response.json({ projects: [{ id: 'project-sales', name: 'Sales' }] })
+    }
+    if (url.pathname === '/api/runtime/projects/project-unpublished/draft'
+      || url.pathname === '/api/runtime/projects/project-sales/draft') {
+      return Response.json({ project: { id: url.pathname.split('/')[4] }, draft: {} })
     }
     return error(404, 'runtime_not_found', '不存在')
   })
@@ -287,6 +292,81 @@ describe('Ontology authentication controller', () => {
     }, AbortSignal.timeout(1_000)))).rejects.toMatchObject({ code: 'ontology/session-import-failed' })
     await expect(browserSession.run(request, () => ctx.ontologyAuthController.status()))
       .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
+  })
+
+  it('imports an unpublished modeling Project, isolates its owner scope, and preserves it after refresh', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const selectedRequest = browserRequest(browserCookie(browserSession))
+    const otherRequest = browserRequest(browserCookie(browserSession))
+    const selected = server.transferFor('alice')
+    const context = { projectId: 'project-unpublished', projectName: '未发布项目', mode: 'modeling' as const }
+    const status = await browserSession.run(selectedRequest, () => ctx.ontologyAuthController.importSession({
+      ...selected, context,
+    }, AbortSignal.timeout(1_000)))
+    expect(status).toMatchObject({ authenticated: true, context })
+    expect(status).not.toHaveProperty('accessToken')
+    await browserSession.run(selectedRequest, () => ctx.ontologyAuthController.claimOwned('session', 'modeling-session'))
+    await browserSession.run(otherRequest, () => ctx.ontologyAuthController.importSession({
+      ...server.transferFor('alice'),
+      context: { ...context, projectId: 'project-sales' },
+    }, AbortSignal.timeout(1_000)))
+    await expect(browserSession.run(otherRequest, () =>
+      ctx.ontologyAuthController.owns('session', 'modeling-session'))).resolves.toBe(false)
+    server.expireAccessToken(selected.accessToken)
+    await expect(browserSession.run(selectedRequest, () =>
+      ctx.ontologyAuthController.status())).resolves.toMatchObject({ authenticated: true, context })
+    await expect(browserSession.run(selectedRequest, () =>
+      ctx.ontologyAuthController.currentModelingContext())).resolves.toEqual(context)
+    await expect(browserSession.run(selectedRequest, () =>
+      ctx.ontologyAuthController.currentScopeKey())).resolves.toBe(createHash('sha256')
+      .update('https://ontology.example.com').update('\0')
+      .update(context.projectId).update('\0').update('user-alice').digest('hex'))
+  })
+
+  it('rejects a modeling Project denied by the draft endpoint before replacing a browser login', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+      ...server.transferFor('alice'),
+      context: { projectId: 'project-private', projectName: 'Private', mode: 'modeling' },
+    }, AbortSignal.timeout(1_000)))).rejects.toMatchObject({ code: 'ontology/session-import-failed' })
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.status()))
+      .resolves.toMatchObject({ authenticated: false })
+  })
+
+  it('injects the selected Project and loaded modeling Skill through the native message path on admission', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    const inject = vi.fn((_message: UserMessage) => {})
+    const agent = { inject, session: { header: { cwd: '/private/project' } } }
+    ctx.provide('agents', { get: () => agent } as never)
+    const getSkill = vi.fn(() => Promise.resolve({
+      name: 'ontology-modeler', provider: 'bundled', content: 'Read the draft before adding resources.',
+      invocation: { userInvocable: true, modelInvocable: true },
+    }))
+    ctx.provide('skills', { get: getSkill } as never)
+    const context = { projectId: 'project-unpublished', projectName: '未发布项目', mode: 'modeling' as const }
+    await browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+      ...server.transferFor('alice'), context,
+    }, AbortSignal.timeout(1_000)))
+    await browserSession.run(request, () => ctx.waterfall('api-session/prompt-admission', {
+      sessionId: 'modeling-session' as never, signal: AbortSignal.timeout(1_000),
+    }, () => Promise.resolve()))
+    await browserSession.run(request, () => ctx.waterfall('api-session/prompt-admission', {
+      sessionId: 'modeling-session' as never, signal: AbortSignal.timeout(1_000),
+    }, () => Promise.resolve()))
+    expect(inject).toHaveBeenCalledOnce()
+    expect(getSkill).toHaveBeenCalledWith('ontology-modeler', expect.objectContaining({ cwd: '/private/project' }))
+    expect(inject).toHaveBeenCalledWith(expect.objectContaining({
+      source: { kind: 'skill-invocation', name: 'ontology-modeler', form: 'instructions' },
+    }))
+    expect(inject.mock.calls[0]?.[0].content).toHaveLength(1)
+    const content = inject.mock.calls[0]?.[0].content[0]
+    expect(content?.type === 'text' ? content.text : undefined).toContain(JSON.stringify(context))
+    expect(content?.type === 'text' ? content.text : undefined).toContain('Read the draft before adding resources.')
   })
 
   it('isolates different browsers and deletes only the browser that logs out', async () => {

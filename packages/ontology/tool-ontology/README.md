@@ -1,5 +1,5 @@
 ---
-description: "Model-facing Ontology Runtime tools for authorized Project discovery, bounded Object queries, Link traversal, and prepared Action execution."
+description: "Model-facing Ontology Runtime tools for Project draft modeling, authorized discovery, bounded Object queries, Link traversal, and prepared Action execution."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `dsh-tool-ontology` when an agent must inspect and change business data through published Ontology definitions. Nine stable tools discover authorized ids, describe Objects and Actions, perform bounded record reads and Link traversal, and prepare then execute Actions. Every call uses the current browser login and asks Runtime to enforce current Project and Action authorization; the package stores no token, capability cache, data-source secret, or business record.
+Use `dsh-tool-ontology` to add Object, Property, Link, and Action definitions to Project drafts, or inspect and change business data through published definitions. The modeling skill reads business requirements and attachments, reuses existing definitions, and summarizes saved additions. Runtime enforces administrator access, draft revisions, and references before saving additions atomically. Published-data operations retain their discovery and prepared-Action workflow; no tool publishes a draft or exposes credentials.
 
 ## Table of Contents
 
@@ -43,6 +43,14 @@ The package has no configuration fields. Runtime address, HTTPS policy, deadline
 
 Query and traversal pages default to 20 records and reject a `page_size` above 100. Equality filters use Property ids from Object detail, never source-column names. The Host generates the preparation idempotency key; execution accepts no replacement parameters. A rejected approval performs no execution request, and a sequential retry rereads the Invocation instead of reusing the earlier preview.
 
+### Draft modeling
+
+Call `ontology_get_draft` with the current management Project id, including for an unpublished Project. Reuse its existing definitions, data-source ids, and trusted executor keys. Send additions through `ontology_add_draft_resources` with that exact `project.updatedAt` as `expected_updated_at`; nested definitions use the draft's camelCase fields. The Runtime rejects stale revisions and conflicting definitions without saving part of the batch. Read the draft again before retrying a conflict. Embedded modeling calls must match the Project transferred by the management page.
+
+Use `ontology_inspect_data_source` to discover actual resource names and field metadata through the Project gateway. Correct existing `resourceRef`, `primaryKey`, and Property `sourceField` values with `ontology_update_draft_bindings` and the latest draft revision. Business Property ids remain stable; they do not have to match physical field names. Runtime validates the addressed resources and mapped fields before atomically saving the batch, preserving relationships and releases.
+
+When a Skill registry is present, the plugin contributes the packaged [`ontology-modeler`](assets/ontology-modeler/SKILL.md) skill for both user and model invocation. It guides attachment analysis, additive modeling, incomplete data-source mappings, and summaries of saved additions. Definitions remain drafts until the user validates and publishes them through the management application.
+
 ### Failures and recovery
 
 The package validates every Runtime JSON response before returning it to the model. Invalid arguments fail before a request; authentication, authorization, transport, stale Invocation, and response-validation failures become tool errors and do not produce a partial business result. Runtime rechecks authorization during execution, so a permission change while confirmation is pending is shown as the execution error. Discover ids again after a Project publication or permission change instead of reusing an earlier result.
@@ -59,8 +67,10 @@ Each registration builds one fixed `/api/runtime/` request and delegates its Bea
 
 | Source | Responsibility |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Prompt guidance, nine tool schemas, fixed Runtime requests, Action approval gating, pagination, and idempotency keys. |
+| [`src/index.ts`](src/index.ts) | Published and draft tools, fixed Runtime requests, current-Project enforcement, and Action approval. |
 | [`src/runtime.ts`](src/runtime.ts) | Runtime response validation, Invocation status checks, and bounded result projection. |
+| [`src/draft.ts`](src/draft.ts) | Draft response validation and credential-free modeling results. |
+| [`src/modeling-skill.ts`](src/modeling-skill.ts) | Reversible registration of the packaged modeling instructions. |
 | [`src/types.ts`](src/types.ts) | Branded published ids and model-result types. |
 
 </details>
@@ -104,11 +114,11 @@ Prefix-stable while the plugin, tool visibility, and guidance text are unchanged
 
 #### What the model sees
 
-The model sees the generated [`ontology_list_projects`, `ontology_list_objects`, `ontology_describe_object`, `ontology_describe_action`, `ontology_query_objects`, `ontology_get_object`, `ontology_traverse_link`, `ontology_prepare_action`, and `ontology_execute_action` schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ontology). Stable ids and bounded pagination are explicit; Runtime tokens, data-source credentials, table names, and raw write expressions are absent.
+The model sees the generated [published-data and draft-modeling schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ontology). Stable ids, bounded record pagination, and the required draft revision are explicit; Runtime tokens and data-source credentials are absent.
 
 #### Token effect
 
-Nine fixed schemas are sent on each request while visible.
+Thirteen fixed schemas are sent on each request while visible. The optional Skill registry advertises one modeling skill and loads its instruction body only when invoked.
 
 #### KV Cache effect
 
@@ -118,7 +128,7 @@ Prefix-stable while the tool definitions and visibility are unchanged.
 
 #### What the model sees
 
-Every successful call returns bounded JSON. Discovery returns published ids and labels; Action detail returns exact parameters with the business `label`, technical `inputName`, and `required` status first; reads return validated records keyed by Property id; preparation returns an invocation id, expiry, confirmation requirement, summary, and affected Objects. Before a confirmed execution, the user sees Runtime's summary, Action and Project ids, and a bounded affected-Object list; rejection returns a tool error without executing. Execution returns only a succeeded invocation and its Runtime result. Tool failures return an error instead of unvalidated Runtime fields.
+Every successful call returns bounded JSON. Discovery returns published ids and labels; Action detail returns exact parameters with the business `label`, technical `inputName`, and `required` status first; reads return validated records keyed by Property id; preparation returns an invocation id, expiry, confirmation requirement, summary, and affected Objects. Before a confirmed execution, the user sees Runtime's summary, Action and Project ids, and a bounded affected-Object list; rejection returns a tool error without executing. Execution returns only a succeeded invocation and its Runtime result. Tool failures return an error instead of unvalidated Runtime fields. Draft results contain Project metadata, the current revision, definition arrays, and safe executor metadata; additions also return counts for each resource category. Data-source connection references and executor implementation fields are omitted.
 
 #### Token effect
 
@@ -135,6 +145,7 @@ Append-only call and result content follows the reusable request prefix.
 - **Web request identity** — calls require a browser request carrying an active Ontology login; background execution without that request-local identity is rejected.
 - **Equality-only filters** — Object queries currently expose Property-id equality filters, not arbitrary expressions, sorting, aggregation, or joins.
 - **Explicit Project selection** — every Project-scoped call requires `project_id`; the package does not maintain a mutable current Project.
+- **Draft additions and binding corrections** — modeling requires administrator access and cannot delete, publish, or execute definitions. Field discovery uses the gateway's schema metadata; a sampled MongoDB schema can omit fields absent from its sample or fail for an empty collection.
 - **Runtime-owned writes** — supported Action operations depend on the published Ontology Runtime and its data-source providers; the Harness cannot bypass a read-only source or unsupported provider operation.
 - **Approval policy** — a session whose shared approval policy is `never` rejects confirmation-required Actions instead of bypassing the Runtime requirement.
 

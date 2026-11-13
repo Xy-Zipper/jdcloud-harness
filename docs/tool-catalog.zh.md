@@ -38,7 +38,7 @@
 | `@deepseek-ai/dsh-tool-goal` | `create_goal`、`get_goal`、`update_goal` | `ctx.tools`、`ctx.agents`、`ctx.goals`、`ctx.systemPrompt`、`a calling Agent in an authorized open turn` | `tool/call`、`goal/change for mutations`、`tool/result` | - | create、edit、pause 和 resume 要求直接来自人类的根权限；complete 和 blocked 也接受确切的当前 Goal Round。blocked 的默认下限是 3 个获准的 Round。 |
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`、`ctx.lsp`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，因此其模型可见 schema 在更换提供方时保持稳定。运行时要求已注册提供方，例如 `@deepseek-ai/dsh-lsp-stdio`；如果没有提供方，查询会返回结构化 `LSP_UNAVAILABLE` 错误，而不会改变 schema。 |
-| `@deepseek-ai/dsh-tool-ontology` | `ontology_describe_action`、`ontology_describe_object`、`ontology_execute_action`、`ontology_get_object`、`ontology_list_objects`、`ontology_list_projects`、`ontology_prepare_action`、`ontology_query_objects`、`ontology_traverse_link` | `ctx.tools`、`ctx.ontologyAuthController`、`ctx.systemPrompt`、`an admitted browser request` | `tool/call`、`tool/result`、`authorized Ontology Action mutations` | - | 九个工具先发现受权 Project、Object 与 Action 详情，再执行有界读取、Link 遍历和预备 Action 执行。每个请求都会重新校验 Runtime 授权；schema 收集挂载惰性鉴权提供方，因为不会执行工具。 |
+| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`、`ctx.ontologyAuthController`、`ctx.systemPrompt`、`an admitted browser request` | `tool/call`、`tool/result`、`authorized Ontology Action mutations`、`administrator draft additions` | - | 已发布数据工具先发现受权 id，再执行有界读取、Link 遍历与预备 Action 执行。草稿建模工具读取当前版本，并经管理员授权后原子添加定义。每个请求都会重新校验 Runtime 授权；schema 收集挂载惰性鉴权提供方，因为不会执行工具。 |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`、`ctx.workflowEngine`、`ctx.subagents`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents every fresh round)` | `tool/call`、`tool/result`、`workflow and child session events during execution` | - | 固定的前台工作流会在每个 Round 启动一个全新的结构化子级；模型只能选择不可变目标和可选的 Round 上限。 |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`、`session_event_search`、`session_event_trace`、`session_search`、`session_trace` | `ctx.tools`、`ctx.systemPrompt`、`ctx.sessionQuery`、`a calling Agent for workspace authority` | `tool/call`、`tool/result` | - | 这 5 个只读工具会隐藏提供方游标，并根据不可变的调用 agent 会话为每个结果授权。该包需要选择启用；需要强制截止时间或限制行内输出的组合还会挂载通用超时或 spill 策略。 |
@@ -1522,9 +1522,80 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ## `@deepseek-ai/dsh-tool-ontology`
 
+### `ontology_add_draft_resources`
+
+Add Object Types, Properties, Links, and Actions to one Project draft without publishing or changing business records. Read ontology_get_draft first and use its exact updatedAt. Existing identical definitions are no-ops; conflicts fail atomically. Use ontology-modeler for resource field instructions.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id from the current page and ontology_get_draft."
+    },
+    "expected_updated_at": {
+      "type": "string",
+      "description": "Exact project.updatedAt returned by the most recent ontology_get_draft. Reread the draft after a revision conflict."
+    },
+    "object_types": {
+      "type": "array",
+      "description": "New Object Type definitions using the camelCase fields in draft.objectTypes: id, label, description, dataSourceId, resourceKind, resourceRef, primaryKey, versionProperty, properties. Reuse only existing dataSourceId values.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "properties": {
+      "type": "array",
+      "description": "Properties to append to existing or new Objects: {objectTypeId, property:{id,label,description,type,sourceField,required}}.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "objectTypeId": {
+            "type": "string"
+          },
+          "property": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "objectTypeId",
+          "property"
+        ]
+      }
+    },
+    "link_types": {
+      "type": "array",
+      "description": "New Links using draft.linkTypes fields: id,label,description,sourceType,targetType,cardinality,sourceProperty,targetProperty. References must exist in the resulting draft.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "action_types": {
+      "type": "array",
+      "description": "New Actions using draft.actionTypes camelCase fields. Object Actions reference a targetType; Function Actions use only executorRef keys returned by ontology_get_draft. Never invent executor URLs, credentials, or formulas.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "expected_updated_at"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
 ### `ontology_describe_action`
 
-读取一个受权已发布 Action 的准确必填、选填参数及确认要求。
+Read one authorized published Action with exact required and optional parameters and its confirmation requirement.
 
 ```json
 {
@@ -1546,11 +1617,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_describe_object`
 
-读取一个已发布 Object Type 及其 Property、Link 和受权关联 Action。
+Read one published Object Type with Properties, Links, and authorized related Actions.
 
 ```json
 {
@@ -1572,11 +1643,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_execute_action`
 
-只使用 invocation id 执行一个已预备 Ontology Action，不接受替换参数。
+Execute one prepared Ontology Action by invocation id without accepting replacement parameters.
 
 ```json
 {
@@ -1593,11 +1664,32 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_get_draft`
+
+Read one Project draft, its updatedAt revision, existing data sources, and trusted Function executors for modeling. Administrator access is required; unpublished Projects are supported.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Exact Project id supplied by the current management page or authorized discovery."
+    }
+  },
+  "required": [
+    "project_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_get_object`
 
-按 Object Type 主键读取一条已发布 Object 记录。
+Get one published Object record by the Object Type primary key.
 
 ```json
 {
@@ -1623,11 +1715,41 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_inspect_data_source`
+
+Discover real table or collection names in a draft data source, or inspect actual fields for one returned resource_ref. Administrator access is required. Use this before mapping business Property ids to physical source fields; no credentials or business records are returned.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Current modeling Project id."
+    },
+    "data_source_id": {
+      "type": "string",
+      "description": "Exact draft.dataSources id returned by ontology_get_draft, not a connection reference."
+    },
+    "resource_ref": {
+      "type": "string",
+      "description": "Exact ref returned by discovery; omit to list resources."
+    }
+  },
+  "required": [
+    "project_id",
+    "data_source_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_list_objects`
 
-列出一个受权 Ontology Project 中已发布的 Object Type。
+List published Object Types in one authorized Ontology Project.
 
 ```json
 {
@@ -1644,11 +1766,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_list_projects`
 
-列出当前已登录用户有权访问的已发布 Ontology Project。
+List published Ontology Projects authorized for the current signed-in user.
 
 ```json
 {
@@ -1657,11 +1779,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_prepare_action`
 
-校验一个受权已发布 Action，并返回不可变预览与 invocation id。
+Validate one authorized published Action and return an immutable preview plus invocation id.
 
 ```json
 {
@@ -1689,11 +1811,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_query_objects`
 
-使用有界分页与 Property id 等值过滤查询一个已发布 Object Type。
+Query one published Object Type with bounded pagination and Property-id equality filters.
 
 ```json
 {
@@ -1741,11 +1863,11 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
 ### `ontology_traverse_link`
 
-从一条源记录沿 outgoing 或 incoming 方向遍历一个已发布 Link。
+Traverse one published Link from a source record in the outgoing or incoming direction.
 
 ```json
 {
@@ -1788,9 +1910,117 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 }
 ```
 
-来源：[`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
 
-九个工具先发现受权 Project、Object 与 Action 详情，再执行有界读取、Link 遍历和预备 Action 执行。每个请求都会重新校验 Runtime 授权；schema 收集挂载惰性鉴权提供方，因为不会执行工具。
+### `ontology_update_draft_bindings`
+
+Correct resourceRef, primaryKey and Property sourceField bindings on existing draft Objects while preserving ids, relationships and releases. Read the latest draft revision and inspect the real source first. This does not delete, publish, or write business records.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Current modeling Project id."
+    },
+    "expected_updated_at": {
+      "type": "string",
+      "description": "Latest project.updatedAt from ontology_get_draft."
+    },
+    "bindings": {
+      "type": "array",
+      "description": "Each binding addresses an existing Object and existing Properties using their business ids. primaryKey and sourceField contain real physical field names, which may differ from Property ids.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "objectTypeId": {
+            "type": "string"
+          },
+          "resourceRef": {
+            "type": "string"
+          },
+          "primaryKey": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "propertyId": {
+                  "type": "string"
+                },
+                "sourceField": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Correct the business label when the discovered field is a code or name rather than an id."
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Correct the Property type for discovered arrays or nested objects.",
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "date",
+                    "datetime",
+                    "user",
+                    "object"
+                  ]
+                }
+              },
+              "required": [
+                "propertyId",
+                "sourceField"
+              ]
+            }
+          }
+        },
+        "required": [
+          "objectTypeId"
+        ]
+      }
+    },
+    "link_bindings": {
+      "type": "array",
+      "description": "Correct existing relation endpoints when physical joins use business codes instead of document primary keys; preserve the Link id and Object endpoints.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "linkTypeId": {
+            "type": "string"
+          },
+          "sourceProperty": {
+            "type": "string"
+          },
+          "targetProperty": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "linkTypeId",
+          "sourceProperty",
+          "targetProperty"
+        ]
+      }
+    }
+  },
+  "required": [
+    "project_id",
+    "expected_updated_at"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.
 
 <a id="deepseek-aidsh-tool-ralph"></a>
 

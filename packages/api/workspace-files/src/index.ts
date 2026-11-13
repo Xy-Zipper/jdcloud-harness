@@ -28,7 +28,7 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { Remote, RemoteError, TypertRemoteService, type TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceChangeFeed } from './changes.ts'
 import type {
@@ -335,7 +335,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (owner !== undefined && !(await owner.owns('workspace', workspaceId))) {
       throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
     }
-    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
+    const workspace = this.ctx.workspaceRegistry.get(workspaceId as WorkspaceId)
     if (workspace === undefined) {
       throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
     }

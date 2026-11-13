@@ -7,6 +7,7 @@ import { LoginPage, type OntologyLoginInjected } from '../src/client/LoginPage.t
 import { AccountSeat, type OntologyAccountInjected } from '../src/client/AccountSeat.tsx'
 import { EmbeddedSessionPage } from '../src/client/EmbeddedSessionPage.tsx'
 import { installOntologyLoginUi, uiInject } from '../src/client/mount.ts'
+import { ModelingConversation } from '../src/client/ModelingConversation.tsx'
 
 /** Assemble real slots around a controllable Ontology Remote double. */
 async function bench(authenticated = false) {
@@ -31,9 +32,14 @@ async function bench(authenticated = false) {
       accountType: 'admin' as const, authorizationVersion: '1',
     },
   }
+  let importedContext: {
+    readonly projectId: string
+    readonly projectName: string
+    readonly mode: 'modeling'
+  } | undefined
   const status = vi.fn(() => Promise.resolve({
     ok: true as const,
-    value: loggedIn ? authenticatedValue : {
+    value: loggedIn ? { ...authenticatedValue, ...(importedContext === undefined ? {} : { context: importedContext }) } : {
       authenticated: false as const, baseUrl: 'https://ontology.example.com',
     },
   }))
@@ -41,9 +47,17 @@ async function bench(authenticated = false) {
     loggedIn = true
     return Promise.resolve({ ok: true as const, value: authenticatedValue })
   })
-  const importSession = vi.fn(() => {
+  const importSession = vi.fn((request?: { readonly context?: {
+    readonly projectId: string
+    readonly projectName: string
+    readonly mode: 'modeling'
+  } }) => {
     loggedIn = true
-    return Promise.resolve({ ok: true as const, value: authenticatedValue })
+    importedContext = request?.context
+    return Promise.resolve({
+      ok: true as const,
+      value: { ...authenticatedValue, ...(request?.context === undefined ? {} : { context: request.context }) },
+    })
   })
   const logout = vi.fn(() => {
     loggedIn = false
@@ -148,6 +162,70 @@ describe('Ontology login browser plugin', () => {
     } finally {
       if (originalParent !== undefined) Object.defineProperty(window, 'parent', originalParent)
       Reflect.deleteProperty(document, 'referrer')
+    }
+  })
+
+  it('acknowledges project-scoped modeling and mounts the native compact conversation', async () => {
+    const originalParent = Object.getOwnPropertyDescriptor(window, 'parent')
+    const parent = { postMessage: vi.fn() }
+    Object.defineProperty(window, 'parent', { configurable: true, value: parent })
+    Object.defineProperty(document, 'referrer', { configurable: true, value: 'https://admin.example.com/' })
+    window.history.replaceState({}, '', '/?ontologyEmbed=1')
+    try {
+      const b = await bench()
+      const workspace = { workspaceId: 'workspace-modeling', path: '/private/project', sessionIds: ['session-modeling'] }
+      const sessionList = {
+        ids: ['session-modeling'], byId: { 'session-modeling': { retainedBy: { mainView: 1 } } },
+      }
+      const createSession = vi.fn(() => Promise.resolve('session-modeling'))
+      b.ctx.provide('sessions', {
+        list: { getSnapshot: () => sessionList, subscribe: () => () => {} },
+        refresh: () => Promise.resolve(), create: createSession, binding: () => undefined,
+      } as never)
+      b.ctx.provide('workspaces', {
+        create: () => Promise.resolve(workspace),
+        list: { getSnapshot: () => ({ items: [workspace], archivedSessionIds: [] }) },
+      } as never)
+      const openSession = vi.fn()
+      Object.assign(b.ctx.get('uiWorkspace')!, {
+        listDirectory: () => Promise.resolve({ path: '/private/project' }), openSession,
+      })
+      const fiber = b.ctx.plugin({ inject: [...uiInject], apply: installOntologyLoginUi })
+      await fiber.await()
+      const session = {
+        accessToken: 'access-alice', accessTokenExpiresAt: '2026-11-12T12:15:00Z',
+        refreshToken: 'refresh-alice', refreshTokenExpiresAt: '2026-12-12T12:00:00Z',
+        user: {
+          userId: 'user-alice', username: 'alice', displayName: 'Alice',
+          accountType: 'admin' as const, authorizationVersion: '1',
+        },
+      }
+      const context = { projectId: 'project-draft', projectName: '未发布项目', mode: 'modeling' as const }
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { type: 'ontology/runtime-session', version: 1, nonce: 'modeling-nonce', session, context },
+        origin: 'https://admin.example.com', source: parent as never,
+      }))
+      await vi.waitFor(() => {
+        expect(b.importSession).toHaveBeenCalledWith({ ...session, context })
+        expect(openSession).toHaveBeenCalledWith('session-modeling')
+      })
+      expect(createSession).not.toHaveBeenCalled()
+      expect(b.slots.entries('root').some(entry => entry.component === ModelingConversation)).toBe(true)
+      expect(parent.postMessage).toHaveBeenCalledWith({
+        type: 'ontology/runtime-session-result', version: 1, nonce: 'modeling-nonce',
+        ok: true, projectId: 'project-draft', mode: 'modeling',
+      }, 'https://admin.example.com')
+      const cleared = b.clearSelection.mock.calls.length
+      b.emitRecord('ontology-auth-controller/login-refreshed')
+      await vi.waitFor(() => { expect(b.status).toHaveBeenCalled() })
+      expect(b.clearSelection).toHaveBeenCalledTimes(cleared)
+      expect(openSession).toHaveBeenCalledOnce()
+      await fiber.dispose()
+      expect(b.slots.entries('root').some(entry => entry.component === ModelingConversation)).toBe(false)
+    } finally {
+      window.history.replaceState({}, '', '/')
+      if (originalParent !== undefined) Object.defineProperty(window, 'parent', originalParent)
+      Object.defineProperty(document, 'referrer', { configurable: true, value: '' })
     }
   })
 

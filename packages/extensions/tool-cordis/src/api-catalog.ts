@@ -1124,6 +1124,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the outcome, including the version the write produced.',
       },
       {
+        signature: 'abstract writeBytes( target: FsTarget, content: Uint8Array, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsByteWriteOutcome>',
+        description: 'Atomically create or replace raw bytes. `expected` guards intent and staleness; omission allows unconditional overwrite.',
+        parameters: [{ name: 'target', description: 'the resolved target to write.' }, { name: 'content', description: 'the complete new file content.' }, { name: 'expected', description: 'the write intent guarding the write; omit for unconditional.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this write runs under; a sandboxing backend fences the write by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
+        returns: 'the operation and version produced by the write.',
+      },
+      {
         signature: 'abstract editText( target: FsTarget, edit: FsEditRequest, expected?: { version: FsVersion }, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsEditOutcome>',
         description: 'Atomically edit literal text. When supplied, the version guard is checked before matching so stale content reports `FS_STALE_VERSION`; omission edits the current content without a freshness precondition.',
         parameters: [{ name: 'target', description: 'the resolved target to edit.' }, { name: 'edit', description: 'the literal search/replace request.' }, { name: 'expected', description: 'the version guard; omit for an unconditional edit.' }, { name: 'signal', description: 'aborts before atomic publication takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this edit runs under; a sandboxing backend fences the edit by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
@@ -1571,16 +1577,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Redacted unauthenticated state.',
       },
       {
-        signature: 'async currentScopeKey(): Promise<string | undefined>',
-        description: 'Return the stable user owner key for the current browser login.',
+        signature: 'externalScopeHeader(): \'x-project-id\'',
+        description: 'Select the request header that identifies the external Ontology Project scope.',
         parameters: [],
-        returns: 'SHA-256 of service address and stable Ontology user id, or undefined while logged out.',
+        returns: 'The required external Project header.',
+      },
+      {
+        signature: 'async runExternalRequest<Value>( token: string, projectId: string, _serviceBaseUrl: string | undefined, signal: AbortSignal, operation: () => Value, ): Promise<Awaited<Value>>',
+        description: 'Validate one Runtime Access Token and run an external API operation in one visible Project.',
+        parameters: [{ name: 'token', description: 'Go Runtime Access Token supplied by the external caller.' }, { name: 'projectId', description: 'Project that the caller must be authorized to access.' }, { name: '_serviceBaseUrl', description: 'Unused because Ontology rejects JDCloud service-address headers.' }, { name: 'signal', description: 'Caller cancellation for Runtime validation requests.' }, { name: 'operation', description: 'Request-local operation that consumes the Project and user scope.' }],
+        returns: 'The operation result.',
+      },
+      {
+        signature: 'async currentScopeKey(): Promise<string | undefined>',
+        description: 'Return the stable owner key for the current browser login or external Project request.',
+        parameters: [],
+        returns: 'SHA-256 of the active deployment, optional Project, and stable Ontology user id.',
+      },
+      {
+        signature: 'async currentModelingContext(): Promise<OntologyModelingContext | undefined>',
+        description: 'Read the management page\'s authenticated draft-modeling selection.',
+        parameters: [],
+        returns: 'Current browser Project context, or absence in standalone and external requests.',
       },
       {
         signature: 'async workspaceRoot(): Promise<string | undefined>',
-        description: 'Create and return the current Ontology user\'s persistent directory.',
+        description: 'Create and return the current browser-user or external Project-user persistent directory.',
         parameters: [],
-        returns: 'Canonical user directory, or undefined when the deployment has no private workspace root.',
+        returns: 'Canonical scope directory under the configured or default account-workspace parent.',
       },
       {
         signature: 'async assertWorkspacePath(path: string): Promise<void>',
@@ -1594,8 +1618,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'Whether the authenticated account is an Ontology administrator.',
       },
       {
+        signature: 'async currentSkillAccess(): Promise<{ readonly userId: string readonly administrator: boolean readonly workspaceRoot: string readonly personalSkillDirectory: string readonly managedSkillDirectory: string } | undefined>',
+        description: 'Resolve the authenticated scope\'s personal Skill directory and the shared administrator-managed directory.',
+        parameters: [],
+        returns: 'Browser-user or external Project-user Skill access, or undefined without authentication.',
+      },
+      {
         signature: 'async claimOwned(kind: \'session\' | \'workspace\', id: string): Promise<void>',
-        description: 'Claim a newly created Session or Workspace for the current Ontology user.',
+        description: 'Claim a newly created Session or Workspace for the current Ontology account scope.',
         parameters: [{ name: 'kind', description: 'Durable resource kind.' }, { name: 'id', description: 'Durable resource identifier.' }],
       },
       {
@@ -2381,6 +2411,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Host service backing `ctx.remote.skills` without activating a cold Agent.',
     methods: [
       {
+        signature: 'async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>',
+        description: 'List the current account\'s personal Skills and every shared built-in Skill without requiring a Session.',
+        parameters: [{ name: 'signal', description: 'Caller cancellation for directory reads.' }],
+        returns: 'Account Skill metadata and the scopes this account may mutate.',
+      },
+      {
+        signature: 'async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>',
+        description: 'Install one personal or shared built-in Skill for an authenticated account without requiring a Session.',
+        parameters: [{ name: 'request', description: 'Managed scope and bounded Skill folder files.' }, { name: 'signal', description: 'Caller cancellation checked before each file publication.' }],
+        returns: 'Installed Skill metadata.',
+      },
+      {
+        signature: 'async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>',
+        description: 'Delete one personal or administrator-managed built-in Skill without requiring a Session.',
+        parameters: [{ name: 'request', description: 'Managed scope and Skill name.' }, { name: 'signal', description: 'Caller cancellation checked before removal.' }],
+        returns: 'Deletion confirmation.',
+      },
+      {
         signature: '@Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>',
         description: 'List the user-invocable skills visible to one Session composition.',
         parameters: [{ name: 'request', description: 'Session identity whose cwd and preset select the catalog view.' }, { name: 'signal', description: 'caller lifetime carried by the Remote transport; admitted catalog reads retain their existing completion semantics.' }],
@@ -2389,10 +2437,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>',
-        description: 'Install one user-invocable SKILL.md in the Session project\'s `.dsh/skills` directory.',
-        parameters: [{ name: 'request', description: 'Session identity and complete UTF-8 Markdown document.' }, { name: 'signal', description: 'caller lifetime carried by the Remote transport.' }],
+        description: 'Install one complete user-invocable Skill folder in the Session project\'s `.dsh/skills` directory.',
+        parameters: [{ name: 'request', description: 'Session identity and bounded folder files.' }, { name: 'signal', description: 'caller lifetime carried by the Remote transport.' }],
         returns: 'installed metadata for optimistic catalog display.',
         throws: ['RemoteError when validation, ownership, containment, or the guarded create fails.'],
+      },
+      {
+        signature: '@Remote(\'delete\') async delete(request: SkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>',
+        description: 'Delete one personal Skill, or one shared Skill when the current user is an administrator.',
+        parameters: [{ name: 'request', description: 'Session owner, account scope, and validated Skill name.' }, { name: 'signal', description: 'caller cancellation checked before the irreversible removal.' }],
+        returns: 'deletion confirmation after the complete Skill folder is absent.',
+        throws: ['RemoteError when authentication, authorization, ownership, or the target folder check fails.'],
       },
     ],
   },
@@ -3521,6 +3576,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the Workspace and whether this call created it.',
       },
       {
+        signature: 'async listVisible(): Promise<readonly WorkspaceView[]>',
+        description: 'Read the Workspaces owned by the current authenticated account scope.',
+        parameters: [],
+        returns: 'Detached Workspace projections in durable registry order.',
+      },
+      {
         signature: '@Remote(\'initializeDefault\') async initializeDefault(request: WorkspaceInitializeDefaultRequest, signal: AbortSignal): Promise<WorkspaceValue | undefined>',
         description: 'Initialize or reuse the default Workspace during first-use startup.',
         parameters: [{ name: 'request', description: 'initial directory name and title; never rename an existing default.' }, { name: 'signal', description: 'caller lifetime; cancels native directory lookup.' }],
@@ -3610,6 +3671,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List the direct children of one directory inside the Session\'s workspace.',
         parameters: [{ name: 'workspaceFileScope', description: 'header-derived workspace root for the Session identity on the wire.' }, { name: 'path', description: 'workspace path, absolute or relative to the workspace root.' }, { name: 'signal', description: 'caller cancellation.' }],
         returns: 'the directory\'s children in the backend\'s stable name order, bounded by the entry cap.',
+      },
+      {
+        signature: 'async listWorkspace(workspaceId: string, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing>',
+        description: 'List one directory through an authenticated Workspace identity without requiring a Session.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace registration owned by the current account scope.' }, { name: 'path', description: 'Workspace-relative directory path; an empty path selects the root.' }, { name: 'signal', description: 'Caller cancellation for filesystem reads.' }],
+        returns: 'Bounded direct children of the requested Workspace directory.',
       },
       {
         signature: '@Remote({ mode: \'stream\' }) changes(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame>',
@@ -4352,6 +4419,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AccountProfile {\n    readonly id: AccountUserId | null;\n    readonly name: string | null;\n    readonly contact: string | null;\n    readonly avatarUrl?: string | null;\n}',
   },
   {
+    name: 'AccountSkillDeleteRequest',
+    declaration: 'export interface AccountSkillDeleteRequest {\n    readonly scope: SkillManagedScope;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'AccountSkillInstallRequest',
+    declaration: 'export interface AccountSkillInstallRequest {\n    readonly scope: SkillManagedScope;\n    readonly files: readonly SkillInstallFile[];\n}',
+  },
+  {
+    name: 'AccountSkillListValue',
+    declaration: 'export interface AccountSkillListValue {\n    readonly skills: readonly SkillManagedEntry[];\n    readonly installScopes: readonly SkillManagedScope[];\n}',
+  },
+  {
     name: 'AccountUserId',
     declaration: 'export type AccountUserId = Branded<\'AccountUserId\'>;',
   },
@@ -5080,6 +5159,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface FinishReasonMap {\n    \'stop\': {\n        kind: \'stop\';\n    };\n    \'tool-calls\': {\n        kind: \'tool-calls\';\n    };\n    \'max-tokens\': {\n        kind: \'max-tokens\';\n    };\n    \'aborted\': {\n        kind: \'aborted\';\n        failure: LlmFailure;\n    };\n    \'error\': {\n        kind: \'error\';\n        failure: LlmFailure;\n    };\n}',
   },
   {
+    name: 'FsByteWriteOutcome',
+    declaration: 'export interface FsByteWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n}',
+  },
+  {
     name: 'FsDirEntry',
     declaration: 'export interface FsDirEntry {\n    name: string;\n    type: \'file\' | \'directory\' | \'other\';\n    target: FsTarget;\n    version?: FsVersion;\n    size?: number;\n}',
   },
@@ -5717,11 +5800,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OntologyAuthStatus',
-    declaration: 'export type OntologyAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly user: OntologyRuntimeIdentity;\n};',
+    declaration: 'export type OntologyAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyModelingContext;\n};',
   },
   {
     name: 'OntologyLoginRequest',
     declaration: 'export interface OntologyLoginRequest {\n    readonly username: string;\n    readonly password: string;\n}',
+  },
+  {
+    name: 'OntologyModelingContext',
+    declaration: 'export interface OntologyModelingContext {\n    readonly projectId: string;\n    readonly projectName: string;\n    readonly mode: \'modeling\';\n}',
   },
   {
     name: 'OntologyRuntimeIdentity',
@@ -5729,7 +5816,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OntologyRuntimeSessionTransfer',
-    declaration: 'export interface OntologyRuntimeSessionTransfer {\n    readonly accessToken: string;\n    readonly accessTokenExpiresAt: string;\n    readonly refreshToken: string;\n    readonly refreshTokenExpiresAt: string;\n    readonly user: OntologyRuntimeIdentity;\n}',
+    declaration: 'export interface OntologyRuntimeSessionTransfer {\n    readonly accessToken: string;\n    readonly accessTokenExpiresAt: string;\n    readonly refreshToken: string;\n    readonly refreshTokenExpiresAt: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyModelingContext;\n}',
   },
   {
     name: 'OptionalSessionSeq',
@@ -6804,12 +6891,28 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SkillDefinition extends SkillSummary {\n    readonly content: string;\n    readonly metadata?: Readonly<Record<string, unknown>>;\n}',
   },
   {
+    name: 'SkillDeleteRequest',
+    declaration: 'export interface SkillDeleteRequest {\n    readonly sessionId: SessionId;\n    readonly scope: SkillManagedScope;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'SkillDeleteValue',
+    declaration: 'export interface SkillDeleteValue {\n    readonly deleted: true;\n    readonly scope: SkillManagedScope;\n    readonly name: string;\n}',
+  },
+  {
     name: 'SkillEntry',
     declaration: 'export interface SkillEntry {\n    readonly path?: string;\n    readonly name: string;\n    readonly description: string;\n    readonly whenToUse?: string;\n    readonly modelInvocable: boolean;\n}',
   },
   {
+    name: 'SkillInstallFile',
+    declaration: 'export interface SkillInstallFile {\n    readonly path: string;\n    readonly contentBase64: string;\n}',
+  },
+  {
     name: 'SkillInstallRequest',
-    declaration: 'export interface SkillInstallRequest {\n    readonly sessionId: SessionId;\n    readonly content: string;\n}',
+    declaration: 'export interface SkillInstallRequest {\n    readonly sessionId: SessionId;\n    readonly scope?: SkillInstallScope;\n    readonly files: readonly SkillInstallFile[];\n}',
+  },
+  {
+    name: 'SkillInstallScope',
+    declaration: 'export type SkillInstallScope = \'project\' | \'personal\' | \'built-in\';',
   },
   {
     name: 'SkillInstallValue',
@@ -6825,11 +6928,19 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SkillListValue',
-    declaration: 'export interface SkillListValue {\n    readonly skills: readonly SkillEntry[];\n}',
+    declaration: 'export interface SkillListValue {\n    readonly skills: readonly SkillEntry[];\n    readonly installScopes: readonly SkillInstallScope[];\n    readonly managedSkills: readonly SkillManagedEntry[];\n}',
   },
   {
     name: 'SkillLookupOptions',
     declaration: 'export interface SkillLookupOptions {\n    readonly cwd?: string | undefined;\n    readonly signal?: AbortSignal | undefined;\n}',
+  },
+  {
+    name: 'SkillManagedEntry',
+    declaration: 'export interface SkillManagedEntry extends SkillEntry {\n    readonly scope: SkillManagedScope;\n}',
+  },
+  {
+    name: 'SkillManagedScope',
+    declaration: 'export type SkillManagedScope = Exclude<SkillInstallScope, \'project\'>;',
   },
   {
     name: 'SkillProvider',

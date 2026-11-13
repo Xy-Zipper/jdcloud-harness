@@ -339,6 +339,12 @@ Host service backing the generated `ctx.remote.workspace` namespace.
 @Remote('create') create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue>
 
 /**
+ * Read the Workspaces owned by the current authenticated account scope.
+ * @returns Detached Workspace projections in durable registry order.
+ */
+async listVisible(): Promise<readonly WorkspaceView[]>
+
+/**
  * Initialize or reuse the default Workspace during first-use startup.
  * @param request - initial directory name and title; never rename an existing default.
  * @param signal - caller lifetime; cancels native directory lookup.
@@ -456,6 +462,15 @@ Host Remote file reads and workspace directory observations over the composed fi
  * @returns the directory's children in the backend's stable name order, bounded by the entry cap.
  */
 @Remote async list(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing>
+
+/**
+ * List one directory through an authenticated Workspace identity without requiring a Session.
+ * @param workspaceId - Workspace registration owned by the current account scope.
+ * @param path - Workspace-relative directory path; an empty path selects the root.
+ * @param signal - Caller cancellation for filesystem reads.
+ * @returns Bounded direct children of the requested Workspace directory.
+ */
+async listWorkspace(workspaceId: string, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing>
 
 /**
  * Watch one file or a directory's direct entries in the Session's filesystem.

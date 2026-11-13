@@ -103,9 +103,9 @@ describe('Session control Inbox projection', () => {
     } as never)
 
     const iterator = control.control(new AbortController().signal)[Symbol.asyncIterator]()
-    await expect(iterator.next()).resolves.toMatchObject({
-      value: { type: 'baseline', value: { projections: { 'queue-session': expect.anything() } } },
-    })
+    const baseline = await iterator.next()
+    expect(baseline).toMatchObject({ value: { type: 'baseline' } })
+    expect(baseline).toHaveProperty(['value', 'value', 'projections', 'queue-session'], expect.anything())
     expect(scopes).toEqual(['tenant-at-open'])
     await iterator.return?.()
   })

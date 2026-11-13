@@ -252,6 +252,29 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
 
 ```ts cordis-catalog
 /**
+ * List the current account's personal Skills and every shared built-in Skill without requiring a Session.
+ * @param signal - Caller cancellation for directory reads.
+ * @returns Account Skill metadata and the scopes this account may mutate.
+ */
+async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>
+
+/**
+ * Install one personal or shared built-in Skill for an authenticated account without requiring a Session.
+ * @param request - Managed scope and bounded Skill folder files.
+ * @param signal - Caller cancellation checked before each file publication.
+ * @returns Installed Skill metadata.
+ */
+async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
+
+/**
+ * Delete one personal or administrator-managed built-in Skill without requiring a Session.
+ * @param request - Managed scope and Skill name.
+ * @param signal - Caller cancellation checked before removal.
+ * @returns Deletion confirmation.
+ */
+async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
+
+/**
  * List the user-invocable skills visible to one Session composition.
  * @param request - Session identity whose cwd and preset select the catalog view.
  * @param signal - caller lifetime carried by the Remote transport; admitted catalog reads retain their existing completion semantics.
@@ -261,13 +284,22 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
 @Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>
 
 /**
- * Install one user-invocable SKILL.md in the Session project's `.dsh/skills` directory.
- * @param request - Session identity and complete UTF-8 Markdown document.
+ * Install one complete user-invocable Skill folder in the Session project's `.dsh/skills` directory.
+ * @param request - Session identity and bounded folder files.
  * @param signal - caller lifetime carried by the Remote transport.
  * @returns installed metadata for optimistic catalog display.
  * @throws RemoteError when validation, ownership, containment, or the guarded create fails.
  */
 @Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
+
+/**
+ * Delete one personal Skill, or one shared Skill when the current user is an administrator.
+ * @param request - Session owner, account scope, and validated Skill name.
+ * @param signal - caller cancellation checked before the irreversible removal.
+ * @returns deletion confirmation after the complete Skill folder is absent.
+ * @throws RemoteError when authentication, authorization, ownership, or the target folder check fails.
+ */
+@Remote('delete') async delete(request: SkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
 ```
 
 Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)

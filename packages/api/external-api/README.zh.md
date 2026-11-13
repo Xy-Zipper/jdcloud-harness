@@ -52,8 +52,9 @@ kind: "package-reference"
 
 选择、移除或调整 Skill 顺序会改变有日志记录的用户消息与解析出的指令，因此受影响请求不会保留其他条件相同但未选择 Skill 的前缀。
 
-<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续事项
+
+<a id="known-limitations-and-deferred-work"></a>
 
 - 路由不主动添加浏览器 CORS 策略；浏览器项目应使用同源部署或服务端代理。
 - 当前工作区文件接口只提供目录列表，不提供文件内容下载。

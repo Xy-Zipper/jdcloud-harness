@@ -49,6 +49,8 @@ The browser calls `login()` with only an account and password. The Host calls Ru
 
 An authenticated embedding page can call `importSession()` through the Client Remote bridge with a freshly issued Runtime token pair. The Host verifies the Access Token through `/api/runtime/auth/current`, rejects an identity mismatch, and replaces only the current Browser Session's credential record. The method returns redacted status and never returns either token to the caller.
 
+An imported Session may include `context: { projectId, projectName, mode: 'modeling' }`. The Host verifies access through that Project's draft endpoint, which permits authorized unpublished Projects, and retains the context through token refresh. Its owner key includes Project id as well as deployment and user, so conversation history, files, and Workspaces remain Project-scoped. Before the first accepted prompt on each live Agent, admission loads `ontology-modeler` and queues one native injected message containing the selected Project and canonical Skill instructions; the loop records it with the next admitted request.
+
 Host-only consumers call `requestAuthenticated()` with a fixed `/api/runtime/` path, method, and optional JSON body. The controller selects the current browser record, validates or refreshes it, attaches the Access Token, and retries once when that request reports an expired Access Token. The consumer remains responsible for validating the returned untrusted JSON.
 
 External server integrations pass a Go Runtime Access Token and the `X-Project-Id` value to `runExternalRequest()`. The controller validates the token through `/api/runtime/auth/current`, confirms the Project appears in `/api/runtime/projects`, and installs that identity only in request-local asynchronous storage. It neither stores nor refreshes the external token and rejects a Project the user cannot see.
@@ -88,11 +90,19 @@ The controller keeps no process-global user. `BrowserSessionService` supplies on
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as authentication admission rejects logged-out prompts before Session delivery and adds no model-visible content.
+### Embedded modeling context
+
+#### What the model sees
+
+The first prompt on a live embedded modeling Agent includes one logged `skill-invocation` message with Project JSON and the canonical `ontology-modeler` instructions. Standalone authentication adds no model content.
+
+#### Token effect
+
+The Project context and loaded Skill body add one message per live Agent, including after a persisted Session resumes. Original user text and attachment parts remain unchanged.
 
 #### KV Cache effect
 
-Accepted prompts are unchanged; rejected prompts do not reach model request assembly.
+The injected message appends to history when the next request is admitted; earlier reusable history remains unchanged.
 
 ## Known Limitations and Deferred Work
 

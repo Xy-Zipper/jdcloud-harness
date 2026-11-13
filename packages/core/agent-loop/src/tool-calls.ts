@@ -241,7 +241,7 @@ async function runGroup(
       // A settled result that never reached the ordered commit has an unknown
       // outcome, so the next provider request still receives a tool result.
       // oxlint-disable-next-line typescript/no-non-null-assertion -- every started index has a call and sequence
-      appendSchedulerFailureToolCall(session, turn, step, group[index]!.block, schedulerFailure.error, true, callSeqs[index]!)
+      appendSchedulerFailureToolCall(session, turn, step, group[index]!.block, schedulerFailure.error, true, callSeqs[index])
     }
     for (const call of group.slice(started)) {
       appendSchedulerFailureToolCall(session, turn, step, call.block, schedulerFailure.error, false)

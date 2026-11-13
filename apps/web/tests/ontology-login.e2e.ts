@@ -1,5 +1,6 @@
 // Keyless assembled-browser coverage for the optional Ontology login surface.
 import { once } from 'node:events'
+import { mkdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
@@ -19,6 +20,7 @@ import { saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/ontology-login', import.meta.url))
 const LOGIN_EXPECTED = join(SNAPSHOT_DIR, 'login.expected.md')
+const MODELING_EXPECTED = join(SNAPSHOT_DIR, 'modeling.expected.md')
 const ONTOLOGY_BUNDLE_PATCH = fileURLToPath(
   new URL('../../../packages/bundle/ontology-login/cordis.patch.yml', import.meta.url),
 )
@@ -45,6 +47,37 @@ async function startOntologyServer(): Promise<OntologyServer> {
       displayName: 'Alice',
       accountType: 'admin',
       authorizationVersion: '1',
+    }
+    if (request.method === 'GET' && url.pathname === '/embed') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      response.end(`<!doctype html><html lang="zh"><body><iframe title="建模助手" style="width:520px;height:720px;border:0"></iframe><script>
+        const frame = document.querySelector('iframe');
+        const harness = new URL(${JSON.stringify(url.searchParams.get('harness'))});
+        harness.searchParams.set('ontologyEmbed', '1');
+        window.handoff = null;
+        window.addEventListener('message', event => {
+          if (event.source !== frame.contentWindow || event.origin !== harness.origin) return;
+          if (event.data.type === 'ontology/runtime-session-ready') {
+            frame.contentWindow.postMessage({
+              type: 'ontology/runtime-session', version: 1, nonce: 'modeling-e2e',
+              context: { projectId: 'project-unpublished', projectName: '未发布项目', mode: 'modeling' },
+              session: {
+                accessToken: 'access-alice', accessTokenExpiresAt: '2026-11-12T12:15:00Z',
+                refreshToken: 'refresh-alice', refreshTokenExpiresAt: '2026-12-12T12:00:00Z',
+                user: ${JSON.stringify(identity)}
+              }
+            }, harness.origin);
+          }
+          if (event.data.type === 'ontology/runtime-session-result') window.handoff = event.data;
+        });
+        frame.src = harness.href;
+      </script></body></html>`)
+      return
+    }
+    if (request.method === 'GET' && url.pathname === '/api/runtime/projects/project-unpublished/draft') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ project: { id: 'project-unpublished', name: '未发布项目' }, draft: {} }))
+      return
     }
     if (request.method === 'POST' && url.pathname === '/api/runtime/auth/login') {
       response.writeHead(200, { 'content-type': 'application/json' })
@@ -100,6 +133,7 @@ describe('web e2e: Ontology login', () => {
       scaffold = await launchWebScaffold({
         extraOverlayPath: ONTOLOGY_BUNDLE_PATCH,
         extraInstallAnchors: [ONTOLOGY_BUNDLE_MANIFEST],
+        browserSessionTransport: 'bearer',
       })
       browser = await chromium.launch()
       page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
@@ -158,7 +192,61 @@ describe('web e2e: Ontology login', () => {
     expect(ontology.requests).toContain('POST /api/runtime/auth/logout')
   }, 60_000)
 
+  it('opens a compact native project conversation with image and document attachments', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-ontology-modeling'))
+    await page.goto(`${ontology.baseUrl}/embed?harness=${encodeURIComponent(scaffold.authenticatedUrl)}`)
+    const frame = page.frameLocator('iframe[title="建模助手"]')
+    const chat = frame.getByRole('main', { name: '本体建模助手', exact: true })
+    await chat.waitFor({ timeout: 30_000 })
+    await frame.getByRole('textbox').waitFor({ timeout: 30_000 })
+    await expect.poll(() => page.evaluate(() => {
+      const handoff: unknown = Reflect.get(window, 'handoff')
+      return handoff
+    })).toMatchObject({
+      type: 'ontology/runtime-session-result', version: 1, nonce: 'modeling-e2e',
+      ok: true, projectId: 'project-unpublished', mode: 'modeling',
+    })
+    const snapshot = await chat.ariaSnapshot()
+    await compareOrRefreshGolden(MODELING_EXPECTED, snapshot, MODE)
+    const originalSessionIds = scaffold.ctx.sessions.list().map(session => session.id)
+    const createConversation = frame.getByRole('button', { name: '新建会话', exact: true })
+    await createConversation.click()
+    await createConversation.click()
+    await expect.poll(() => createConversation.isEnabled()).toBe(true)
+    expect(scaffold.ctx.sessions.list().map(session => session.id)).toEqual(originalSessionIds)
+    expect(await frame.getByRole('combobox', { name: '历史会话' }).locator('option').allTextContents())
+      .toEqual(['历史会话'])
+    expect(await frame.getByRole('button', { name: '当前账号 Alice', exact: true }).count()).toBe(0)
+    await frame.locator('input[type="file"]').setInputFiles([
+      { name: 'requirements.txt', mimeType: 'text/plain', buffer: Buffer.from('创建产品对象及产品名称属性') },
+      {
+        name: 'reference.png', mimeType: 'image/png',
+        buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=', 'base64'),
+      },
+    ])
+    await frame.getByRole('button', { name: '移除文件 requirements.txt', exact: true }).waitFor({ timeout: 15_000 })
+    await frame.getByRole('button', { name: '移除图片 reference.png', exact: true }).waitFor({ timeout: 15_000 })
+    const artifacts = fileURLToPath(new URL('../../../.artifacts', import.meta.url))
+    await mkdir(artifacts, { recursive: true })
+    await chat.screenshot({ path: join(artifacts, 'ontology-modeling-compact.png') })
+    const historyStartVisible = await frame.locator('[data-conversation-scroll]').evaluate((element) => {
+      // Overflowing history must remain reachable at scrollTop=0 while short chats keep the composer docked.
+      const history = document.createElement('div')
+      history.style.height = '1600px'
+      history.style.flex = 'none'
+      history.textContent = 'Earlier conversation'
+      element.prepend(history)
+      element.scrollTop = 0
+      const reachable = history.getBoundingClientRect().top >= element.getBoundingClientRect().top
+      history.remove()
+      return reachable
+    })
+    expect(historyStartVisible).toBe(true)
+    expect(ontology.requests).toContain('GET /api/runtime/projects/project-unpublished/draft')
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {
-    await assertFixtureInventory(SNAPSHOT_DIR, ['login.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['login.expected.md', 'modeling.expected.md'])
   })
 })

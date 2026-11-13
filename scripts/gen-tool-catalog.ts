@@ -487,7 +487,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     dir: 'tool-ontology',
     source: 'packages/ontology/tool-ontology/src/index.ts',
     requires: ['ctx.tools', 'ctx.ontologyAuthController', 'ctx.systemPrompt', 'an admitted browser request'],
-    writes: ['tool/call', 'tool/result', 'authorized Ontology Action mutations'],
+    writes: ['tool/call', 'tool/result', 'authorized Ontology Action mutations', 'administrator draft additions'],
     async mount(ctx) {
       ctx.provide('ontologyAuthController', {
         requestAuthenticated: () => Promise.reject(new Error('tool-catalog never executes Ontology requests')),
@@ -495,7 +495,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolOntology)
     },
     note:
-      'The nine tools discover authorized Project, Object, and Action details before bounded reads, Link traversal, and prepared Action execution. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.',
+      'Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-ralph',

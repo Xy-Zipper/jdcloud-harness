@@ -59,6 +59,10 @@ PlatformSession 是 getPlatformSession 返回的仅限 Host 快照：origin 指�
 
 AccountDetails.balance 将充值钱包投影为 value、赠送钱包投影为 bonusWallets，分别保留币种和十进制余额字符串。查询失败不包含钱包数组。
 
+## Ontology 建模选择
+
+`OntologyModelingContext` 携带已鉴权管理页面传递的 `projectId`、`projectName` 与 `mode: 'modeling'`。Ontology 控制器在将此上下文与浏览器 Runtime 登录一起存储前，校验管理员草稿访问权限。Project 与用户共同决定 Workspace 和 Session 的归属；脱敏鉴权状态包含此上下文，草稿工具会在它生效时拒绝其他 Project。[鉴权控制器](../../packages/api/ontology-auth-controller/README.zh.md) 负责导入、提示词准入与 Token 轮换。
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -365,14 +369,37 @@ Authenticate each browser independently and validate every submitted prompt.
 @Remote async logout(): Promise<OntologyAuthStatus>
 
 /**
- * Return the stable user owner key for the current browser login.
- * @returns SHA-256 of service address and stable Ontology user id, or undefined while logged out.
+ * Select the request header that identifies the external Ontology Project scope.
+ * @returns The required external Project header.
+ */
+externalScopeHeader(): 'x-project-id'
+
+/**
+ * Validate one Runtime Access Token and run an external API operation in one visible Project.
+ * @param token - Go Runtime Access Token supplied by the external caller.
+ * @param projectId - Project that the caller must be authorized to access.
+ * @param _serviceBaseUrl - Unused because Ontology rejects JDCloud service-address headers.
+ * @param signal - Caller cancellation for Runtime validation requests.
+ * @param operation - Request-local operation that consumes the Project and user scope.
+ * @returns The operation result.
+ */
+async runExternalRequest<Value>( token: string, projectId: string, _serviceBaseUrl: string | undefined, signal: AbortSignal, operation: () => Value, ): Promise<Awaited<Value>>
+
+/**
+ * Return the stable owner key for the current browser login or external Project request.
+ * @returns SHA-256 of the active deployment, optional Project, and stable Ontology user id.
  */
 async currentScopeKey(): Promise<string | undefined>
 
 /**
- * Create and return the current Ontology user's persistent directory.
- * @returns Canonical user directory, or undefined when the deployment has no private workspace root.
+ * Read the management page's authenticated draft-modeling selection.
+ * @returns Current browser Project context, or absence in standalone and external requests.
+ */
+async currentModelingContext(): Promise<OntologyModelingContext | undefined>
+
+/**
+ * Create and return the current browser-user or external Project-user persistent directory.
+ * @returns Canonical scope directory under the configured or default account-workspace parent.
  */
 async workspaceRoot(): Promise<string | undefined>
 
@@ -389,7 +416,13 @@ async assertWorkspacePath(path: string): Promise<void>
 async isCurrentAdministrator(): Promise<boolean>
 
 /**
- * Claim a newly created Session or Workspace for the current Ontology user.
+ * Resolve the authenticated scope's personal Skill directory and the shared administrator-managed directory.
+ * @returns Browser-user or external Project-user Skill access, or undefined without authentication.
+ */
+async currentSkillAccess(): Promise<{ readonly userId: string readonly administrator: boolean readonly workspaceRoot: string readonly personalSkillDirectory: string readonly managedSkillDirectory: string } | undefined>
+
+/**
+ * Claim a newly created Session or Workspace for the current Ontology account scope.
  * @param kind - Durable resource kind.
  * @param id - Durable resource identifier.
  */

@@ -236,7 +236,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/api/ontology-auth-controller/src/index.ts:50`](../packages/api/ontology-auth-controller/src/index.ts)
+来源：[`packages/api/ontology-auth-controller/src/index.ts:62`](../packages/api/ontology-auth-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-session-controller"></a>
 
@@ -329,13 +329,13 @@ export interface Config {
 }
 ```
 
-源码：[`packages/api/workspace-controller/src/index.ts:34`](../packages/api/workspace-controller/src/index.ts)
+源码：[`packages/api/workspace-controller/src/index.ts:35`](../packages/api/workspace-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-workspace-files"></a>
 
 ## `@deepseek-ai/dsh-api-workspace-files`
 
-需要： `fs` · `sandboxPolicy` · `sessions` · `typert`
+需要： `fs` · `sandboxPolicy` · `sessions` · `typert` · `workspaceRegistry`
 
 ```ts config-catalog
 /** Deployment caps on one page or one listing. */
@@ -357,7 +357,7 @@ export interface Config {
 }
 ```
 
-来源： [`packages/api/workspace-files/src/index.ts:74`](../packages/api/workspace-files/src/index.ts)
+来源： [`packages/api/workspace-files/src/index.ts:75`](../packages/api/workspace-files/src/index.ts)
 
 <a id="deepseek-aidsh-attachment-local"></a>
 
@@ -502,7 +502,7 @@ export type BrowserSessionCookieSameSite = 'strict' | 'none'
 export type BrowserSessionTransport = 'cookie' | 'bearer'
 ```
 
-来源： [`packages/client/connection/src/index.ts:103`](../packages/client/connection/src/index.ts)
+来源： [`packages/client/connection/src/index.ts:104`](../packages/client/connection/src/index.ts)
 
 <a id="deepseek-aidsh-client-hmr"></a>
 
@@ -4148,6 +4148,7 @@ export interface Config {
 - `@deepseek-ai/dsh-acp-app` — 需要 `cmdlineArgs`（[`packages/bundle/acp-app/src/index.ts`](../packages/bundle/acp-app/src/index.ts)）
 - `@deepseek-ai/dsh-agent`（[`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts)）
 - `@deepseek-ai/dsh-api-account-controller` — 需要 `deepseekAccount` ([`packages/api/account-controller/src/index.ts`](../packages/api/account-controller/src/index.ts))
+- `@deepseek-ai/dsh-api-external` — 需要 `sessionController` · `sessionSkillCatalog` · `webServer` · `workspaceController` · `workspaceFiles` ([`packages/api/external-api/src/index.ts`](../packages/api/external-api/src/index.ts))
 - `@deepseek-ai/dsh-api-remotes` — 需要 `typertGateway`（[`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts)）
 - `@deepseek-ai/dsh-authorization` — 需要 `credentials`（[`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts)）
 - `@deepseek-ai/dsh-browser-use`（[`packages/browser-use/browser-use/src/index.ts`](../packages/browser-use/browser-use/src/index.ts)）

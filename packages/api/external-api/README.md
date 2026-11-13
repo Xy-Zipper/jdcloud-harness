@@ -52,8 +52,9 @@ Each selected Skill adds its invocation text and the Skill runtime's resolved in
 
 Selecting, removing, or reordering Skills changes the logged user message and resolved instructions, so the affected request does not retain the otherwise identical unskilled prefix.
 
-<a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work
+
+<a id="known-limitations-and-deferred-work"></a>
 
 - Routes do not add browser CORS policy; browser applications should use a same-origin deployment or a server-side proxy.
 - Workspace file access currently lists directories and does not download file contents.

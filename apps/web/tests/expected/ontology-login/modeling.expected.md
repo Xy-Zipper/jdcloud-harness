@@ -1,0 +1,12 @@
+- main "本体建模助手":
+  - strong: 本体建模助手
+  - text: 未发布项目
+  - combobox "历史会话":
+    - option "历史会话" [disabled] [selected]
+  - button "新建会话"
+  - textbox "发消息或创建任务, / 调用指令, @ 文件或对话"
+  - button "添加文件或调用指令"
+  - button "访问模式，当前：完全权限": 完全权限
+  - button "选择技能"
+  - button "选择模型，当前 DeepSeek-V4-Flash": DeepSeek-V4-Flash
+  - button "发送消息" [disabled]

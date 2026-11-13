@@ -27,6 +27,7 @@
   },
   "files": [
     "lib/index.js",
+    "assets",
     "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],
@@ -36,6 +37,7 @@
     "@deepseek-ai/dsh-api-ontology-auth-controller": "workspace:*",
     "@deepseek-ai/dsh-brand": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-skill": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-util-values": "workspace:*"
@@ -47,9 +49,13 @@
     "@deepseek-ai/dsh-brand": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/dsh-skill": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-user-approval": "workspace:*",
     "@deepseek-ai/dsh-util-values": "workspace:*"
+  },
+  "dependencies": {
+    "yaml": "^2.4.2"
   }
 }

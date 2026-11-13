@@ -87,7 +87,10 @@ export class SandboxedFileSystem extends LocalFileSystem {
     return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal)
   }
 
-  /** Fence a raw-byte write by the same per-call policy as text writes. */
+  /**
+   * Fence a raw-byte write by the same per-call policy as text writes.
+   * @param sandboxPolicy - the per-call mode and workspace root; omit to use the deployment fallback.
+   */
   override async writeBytes(
     target: FsTarget,
     content: Uint8Array,
