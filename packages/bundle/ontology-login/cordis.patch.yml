@@ -2,6 +2,13 @@
 - id: authentication-token
   disabled: true
 
+# Ontology owns account controls; keep the sidebar's direct Settings button.
+- id: ui-settings-account
+  disabled: true
+
+- id: ui-account-notifications
+  disabled: true
+
 - id: directory-picker
   disabled: true
 

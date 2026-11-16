@@ -36,6 +36,8 @@ pnpm dsh plugin --profile web add ./packages/bundle/ontology-login
 pnpm dsh plugin --profile web remove @deepseek-ai/dsh-ontology-login
 ```
 
+To switch the Web profile from JDCloud to Ontology, run `pnpm run plugins:ontology`. The script skips JDCloud plugins that are not installed, so it can be run repeatedly.
+
 Set the required Runtime address before launching the profile:
 
 ```dotenv
@@ -48,6 +50,8 @@ Local development may explicitly set `ONTOLOGY_BASE_URL=http://127.0.0.1:8080` t
 User workspaces and account-managed Skills default to `$DSH_HOME/account-workspaces`. A server only needs to persist `$DSH_HOME`; set `ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users` when those account files must use a separate persistent volume.
 
 ### What you get
+
+The sidebar uses Ontology account controls at the top and a direct Settings button at the bottom. The bundle disables the official account UI and its notifications.
 
 The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-connection/browser-session` as the Connection authentication provider. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
 

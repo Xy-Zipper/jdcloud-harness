@@ -177,6 +177,12 @@ describe('web e2e: Ontology login', () => {
 
     const account = page.getByRole('button', { name: '当前账号 Alice', exact: true })
     await account.waitFor({ timeout: 30_000 })
+    const settings = page.getByRole('button', { name: '设置', exact: true })
+    await settings.waitFor({ timeout: 10_000 })
+    expect(await page.getByRole('button', { name: '账号菜单', exact: true }).count()).toBe(0)
+    await settings.click()
+    await page.getByRole('dialog', { name: '设置', exact: true }).waitFor({ timeout: 10_000 })
+    await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '关闭', exact: true }).click()
     await account.click()
     await page.getByText(ontology.baseUrl, { exact: true }).waitFor({ timeout: 10_000 })
     expect(await page.getByText('管理员', { exact: true }).count()).toBe(1)

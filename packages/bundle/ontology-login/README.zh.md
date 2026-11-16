@@ -36,6 +36,8 @@ pnpm dsh plugin --profile web add ./packages/bundle/ontology-login
 pnpm dsh plugin --profile web remove @deepseek-ai/dsh-ontology-login
 ```
 
+要将 Web profile 从 JDCloud 切换到 Ontology，运行 `pnpm run plugins:ontology`。脚本会跳过未安装的 JDCloud 插件，因此可以重复执行。
+
 启动 profile 前设置必填 Runtime 地址：
 
 ```dotenv
@@ -48,6 +50,8 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 用户 Workspace 与账号管理的 skill 默认保存在 `$DSH_HOME/account-workspaces`。服务器只需持久化 `$DSH_HOME`；只有需要把账号文件放入独立持久卷时，才设置 `ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users`。
 
 ### 获得的能力
+
+侧栏顶部使用 Ontology 账号控件，底部直接显示设置按钮。该 bundle 会禁用官方账号界面及其通知。
 
 该 layer 禁用 `authentication-token`，并把 `@deepseek-ai/dsh-client-connection/browser-session` 安装为 Connection 认证 Provider。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会用应用内目录浏览器替换自适应操作系统选择器；选择器打开后位于已登录用户的 Workspace 根目录，只列出 Host 校验通过的后代目录，并允许在其中创建子文件夹。它还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。
 

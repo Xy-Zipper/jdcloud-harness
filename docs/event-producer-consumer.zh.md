@@ -98,7 +98,7 @@
 | `user-questions/request` | `waterfall` | [`packages/interaction/user-questions/src/types.ts:174`](../packages/interaction/user-questions/src/types.ts) | [`user-questions`](../packages/interaction/user-questions) (`waterfall`) | [`cua-mcp`](../packages/experimental/cua-mcp), `remotes`, `server` |
 | `web/providers-changed` | `emit` | [`packages/web/web/src/types.ts:21`](../packages/web/web/src/types.ts) | [`web`](../packages/web/web) (`events.dispatch`) | `remotes` |
 | `webserver/authorize` | `bail` | [`packages/host/webserver/src/index.ts:60`](../packages/host/webserver/src/index.ts) | `webserver` (`bail`) | `connection` |
-| `webserver/entry-url` | `emit` | [`packages/host/webserver/src/index.ts:53`](../packages/host/webserver/src/index.ts) | [`web-app`](../packages/bundle/web-app) (`emit`) | `authentication-token` |
+| `webserver/entry-url` | `emit` | [`packages/host/webserver/src/index.ts:53`](../packages/host/webserver/src/index.ts) | [`web-app`](../packages/bundle/web-app) (`emit`) | `authentication-token`, `connection` |
 | `webserver/index-inject` | `emit` | [`packages/host/webserver/src/index.ts:90`](../packages/host/webserver/src/index.ts) | `webserver` (`emit`) | `connection`, `inspector`, `modules`, `remote-access`, `shortcuts`, `ui-sidebar-documentpreview`, `ui-theme` |
 | `webserver/request` | `waterfall` | [`packages/host/webserver/src/index.ts:68`](../packages/host/webserver/src/index.ts) | `webserver` (`waterfall`) | `authentication-token`, [`deepseek-account`](../packages/credentials/deepseek-account) |
 | `webserver/upgrade` | `waterfall` | [`packages/host/webserver/src/index.ts:78`](../packages/host/webserver/src/index.ts) | `webserver` (`waterfall`) | `authentication-token` |

@@ -13,7 +13,7 @@ export const inject = ['connection', 'connection.authentication', 'credentials',
 export const Config = z.object({ cookieMaxAgeDays: z.natural().min(1).default(30) })
 
 /**
- * Register signed browser identities, bootstrap, and one-use WebSocket tickets.
+ * Register signed browser identities, the login entry URL, bootstrap, and one-use WebSocket tickets.
  * @param ctx - Host context containing Connection, credentials, and WebServer.
  * @param config - Validated lifetime of signed browser identities.
  */
@@ -29,6 +29,9 @@ export async function apply(ctx: Context, config: { cookieMaxAgeDays: number }):
     },
   })
   ctx.on('connection/request', (request, _response, next) => sessions.run(request, next))
+  ctx.on('webserver/entry-url', (baseUrl, entries) => {
+    entries.push({ label: 'dsh web', url: baseUrl, open: true })
+  })
   ctx.on('webserver/index-inject', (table) => {
     table.push({ kind: 'global', name: '__DSH_BROWSER_SESSION_TRANSPORT__', value: 'bearer' })
   })

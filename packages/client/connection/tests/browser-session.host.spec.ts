@@ -2,12 +2,33 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import { BrowserSessionService } from '../src/browser-session.ts'
+import * as BrowserSession from '../src/browser-session-plugin.ts'
+import * as Connection from '../src/index.ts'
+import WebServer, { type WebEntryUrl } from '@deepseek-ai/dsh-host-webserver'
 
 const contexts: Context[] = []
 
 afterEach(async () => {
   vi.useRealTimers()
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+})
+
+it('publishes the browser login entry until its provider is unloaded', async () => {
+  const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(MemoryCredentials)
+  await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+  await ctx.plugin(Connection)
+  const provider = ctx.plugin(BrowserSession, { cookieMaxAgeDays: 30 })
+  await provider.await()
+  const entries: WebEntryUrl[] = []
+  ctx.emit(ctx.webServer, 'webserver/entry-url', 'https://public.test/ui/', entries)
+  expect(entries).toEqual([{ label: 'dsh web', url: 'https://public.test/ui/', open: true }])
+
+  await provider.dispose()
+  const after: WebEntryUrl[] = []
+  ctx.emit(ctx.webServer, 'webserver/entry-url', 'https://public.test/ui/', after)
+  expect(after).toEqual([])
 })
 
 function response() {

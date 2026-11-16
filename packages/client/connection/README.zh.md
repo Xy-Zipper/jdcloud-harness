@@ -42,7 +42,7 @@ kind: "package-reference"
 
 Host Connection 插件将同包的 `ConnectionAuthentication` 挂载为独立嵌套服务 `connection.authentication`。插件注入 `connection.authentication`，通过 `ctx.connection.authentication.register(provider)` 注册 `AuthenticationProvider` 对象。验证器同步返回已有且存活的 `PeerScope` 或 `undefined`。`connection.authentication.authenticate(request)` 返回 `PeerAdmission`，按注册顺序采用首个成功结果；此方法只验证凭据，不处理 HTTP 响应或来源策略。异常仍允许后续 Provider 成功；全部失败时，有异常返回503，普通拒绝返回401。注册归调用插件，Peer 归创建者。请求不含页面/API purpose；Token v2 Cookie 可认证两者，principal 与 RemoteAccess 决定操作权限。
 
-可选的 `@deepseek-ai/dsh-client-connection/browser-session` Provider 提供 Ontology bundle 使用的标签页独立身份。它在账号登录前提供登录页面，签发绑定 authority 的 Bearer 身份，并提供单次使用的 WebSocket ticket；`cookieMaxAgeDays` 控制身份有效期，默认 30 天。Client 把身份保存在 `sessionStorage` 中，为同源 Fetch 请求与后台上传提供同一个认证 header。Connection 仍然执行 Host 与 Origin 信任检查。选择此 Provider 时应禁用默认 Token Provider；Ontology bundle 负责该组合。
+可选的 `@deepseek-ai/dsh-client-connection/browser-session` Provider 提供 Ontology bundle 使用的标签页独立身份。它在账号登录前提供登录页面，贡献公开入口 URL 供 WebApp 打印和打开，签发绑定 authority 的 Bearer 身份，并提供单次使用的 WebSocket ticket；`cookieMaxAgeDays` 控制身份有效期，默认 30 天。Client 把身份保存在 `sessionStorage` 中，为同源 Fetch 请求与后台上传提供同一个认证 header。Connection 仍然执行 Host 与 Origin 信任检查。选择此 Provider 时应禁用默认 Token Provider；Ontology bundle 负责该组合。
 
 Token 插件拥有既有 `client-connection/browser-session` 凭据记录、Cookie 签名、authority 绑定、有效期与 TLS 属性。它的 `cookieMaxAgeDays` 配置默认为30，在激活时加载签名密钥。Provider 注册表归 ConnectionAuthentication，Token 与 Cookie 算法保留在各自 Provider 内部。凭据协议与撤销规则由各注册实现负责，参见[默认 Token 实现](../../host/authentication-token/README.zh.md)。
 

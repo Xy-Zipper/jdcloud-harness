@@ -13,15 +13,26 @@ const pluginsToInstall = [
 ]
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-for (const [command, plugins] of [
-  ['remove', pluginsToRemove],
-  ['add', pluginsToInstall],
-]) {
-  if (plugins.length === 0) continue
+function runPlugin(args, capture = false) {
   const result = spawnSync(process.execPath, [
     '--import', 'tsx/esm', 'apps/cli/src/bin.ts',
-    'plugin', '--profile', 'web', command, ...plugins,
-  ], { cwd: root, stdio: 'inherit' })
+    'plugin', '--profile', 'web', ...args,
+  ], { cwd: root, encoding: 'utf8', stdio: capture ? ['inherit', 'pipe', 'inherit'] : 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) process.exit(result.status ?? 1)
+  return result.stdout
+}
+
+// 只卸载 profile 中已声明的依赖，允许首次切换和重复运行。
+const [profile] = JSON.parse(runPlugin(['list', '--depth', '0', '--json'], true))
+const installedToRemove = pluginsToRemove.filter(plugin => {
+  if (Object.hasOwn(profile.dependencies ?? {}, plugin)) return true
+  console.log(`跳过未安装的插件：${plugin}`)
+  return false
+})
+for (const [command, plugins] of [
+  ['remove', installedToRemove],
+  ['add', pluginsToInstall],
+]) {
+  if (plugins.length > 0) runPlugin([command, ...plugins])
 }
