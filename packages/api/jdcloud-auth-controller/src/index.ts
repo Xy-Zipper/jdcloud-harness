@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { inspect } from 'node:util'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
@@ -722,7 +723,8 @@ function jdcloudRequestErrorMessage(error: unknown): string {
   const message = error.message || error.name
   const cause = error.cause
   if (cause === undefined || cause === null) return message
-  const causeMessage = cause instanceof Error ? cause.message || cause.name : String(cause)
+  const causeMessage = cause instanceof Error ? cause.message || cause.name
+    : typeof cause === 'string' ? cause : inspect(cause)
   return causeMessage && causeMessage !== message ? `${message}: ${causeMessage}` : message
 }
 

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import SessionStore, { SESSION_FORMAT_VERSION, type SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { createSessionTestController } from './test-remote.ts'
 
@@ -26,10 +27,10 @@ async function harness() {
   await ctx.plugin(JsonlPersistence, { root, compression: 'none' })
   const forgetSession = vi.fn(async () => {})
   ctx.provide('workspaceRegistry', { forgetSession } as never)
-  const controller = createSessionTestController(ctx, {
+  const controller = await createSessionTestController(ctx, {
     cwd: root, defaultModelSelection: () => ({ provider: 'mock', model: 'mock' }),
   })
-  const id = SessionId('target')
+  const id = brandString<SessionId>('target')
   const handle = await ctx.sessionPersistence.create({
     id, version: SESSION_FORMAT_VERSION, createdAt: 1, isSeeded: false,
   })

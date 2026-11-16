@@ -1,6 +1,28 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for workspace.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/workspace.md
-workspace.md: ab94bdd8f32fb36e0e764bdebf2314c64fb1a3fb
-workspace.zh.md: b5c4b858a0f8c2fa70bd60a86505fcd34649dcca
+/workspaces:
+  en: 183fd2f466e3279c
+  zh: 6e79009b7294c240
+/workspaces/identity:
+  en: 6f325323044635eb
+  zh: d952831ec2e8b9b1
+/workspaces/the-workspace-entity:
+  en: 697698bc46adc477
+  zh: 73d073933ed68c53
+/workspaces/the-registry-ctx-workspaceregistry:
+  en: e3078ee3d99c120d
+  zh: ecfe8e3407353b2f
+/workspaces/default-workspace-initialization:
+  en: 9446b81370c5492f
+  zh: 92852f2999d766f2
+/workspaces/session-pinning:
+  en: 3f5ab940adbfab1e
+  zh: f759cd34e3b06ca1
+/workspaces/archive-admission:
+  en: f4ae8ce5eb2ef329
+  zh: 333106e86263be40
+/workspaces/consumers:
+  en: 6b592294ff18b4d3
+  zh: a48bec961b8182a9

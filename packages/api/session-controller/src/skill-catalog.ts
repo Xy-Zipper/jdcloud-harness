@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
 import { FsError, type FileSystem } from '@deepseek-ai/dsh-fs'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
 import { isSkillName, isUserInvocable } from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-working-directory'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { parse as parseYaml } from 'yaml'
@@ -69,7 +70,7 @@ interface PreparedInstallFile {
 
 /** Host service backing `ctx.remote.skills` without activating a cold Agent. */
 export class SessionSkillCatalog extends TypertRemoteService {
-  static inject = ['agents', 'fs', 'sessionQuery', 'typert']
+  static inject = ['agents', 'fs', 'sessionQuery', 'typert', 'workingDirectory']
 
   /** @param ctx - Host context carrying Session reads and optional skill/preset services. */
   constructor(ctx: Context) {
@@ -150,7 +151,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
       if (observation.projections === undefined) {
         throw new Error('skill catalog requires a projected Session observation')
       }
-      cwd = observation.header.cwd
+      cwd = observation.projections.values.workingDirectory ?? observation.header.cwd ?? this.ctx.workingDirectory.defaultDirectory
       agentPreset = observation.projections.values.agentPreset ?? undefined
     } catch (error: unknown) {
       this.throwIfCancelled(signal, 'listing')
@@ -164,10 +165,6 @@ export class SessionSkillCatalog extends TypertRemoteService {
         {},
       )
     }
-    if (cwd === undefined) {
-      throw new RemoteError('gateway/internal', `session "${sessionId}" has no project cwd`, {})
-    }
-
     const live = this.ctx.agents.get(sessionId)
     const presets = this.ctx.get('agentPresets')
     const scoped = live === undefined ? undefined : presets?.serviceFor(live, 'skills')

@@ -1,3 +1,5 @@
+import { unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 /** JDCloud bundle rows must activate through the real Cordis Loader. */
 
 import { readFileSync } from 'node:fs'
@@ -7,11 +9,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
+import Include, { applyEntryPatches, parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import * as ExternalApi from '@deepseek-ai/dsh-api-external'
 import * as Media from '@deepseek-ai/dsh-creation-studio-media'
-import * as yaml from 'js-yaml'
 import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
 import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
 import { createAssistantMessage, createUserMessage } from '../../../llm/llm/src/index.ts'
@@ -90,6 +91,7 @@ async function bootComposition(fetcher?: typeof fetch, externalApi = false, medi
     '  config:',
     "    persona: ''",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'",
     '  config:',
@@ -137,6 +139,7 @@ async function bootComposition(fetcher?: typeof fetch, externalApi = false, medi
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-api-jdcloud-auth-controller', JdcloudAuthController],
     ['@deepseek-ai/dsh-api-external', ExternalApi],
@@ -168,6 +171,7 @@ function runningAgent(context: Context): Agent {
   return {
     id,
     options: {},
+    model: unsupportedModel(),
     session,
     inbox: createInboxStub(),
     status: 'running',
@@ -184,28 +188,19 @@ function runningAgent(context: Context): Agent {
 
 describe('JDCloud login through a real Loader composition', () => {
   it('preserves JDCloud deployment settings through the Docker overlay', () => {
-    const web = yaml.load(
-      readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8'),
-      { schema: entryListSchema },
-    ) as PatchOptions[]
-    const jdcloud = yaml.load(
-      readFileSync(join(import.meta.dirname, '../cordis.patch.yml'), 'utf8'),
-      { schema: entryListSchema },
-    ) as PatchOptions[]
-    const docker = yaml.load(
-      readFileSync(join(import.meta.dirname, '../../../../docker.no-browser-auth.patch.yml'), 'utf8'),
-      { schema: entryListSchema },
-    ) as PatchOptions[]
+    const web = parseEntryYaml(readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8')) as PatchOptions[]
+    const jdcloud = parseEntryYaml(readFileSync(join(import.meta.dirname, '../cordis.patch.yml'), 'utf8')) as PatchOptions[]
+    const docker = parseEntryYaml(readFileSync(join(import.meta.dirname, '../../../../docker.no-browser-auth.patch.yml'), 'utf8')) as PatchOptions[]
     const rows = applyEntryPatches([], [...web, ...jdcloud, ...docker], () => {})
     expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-settings-models',
       config: { welcomeNotice: false, credentialOnboarding: false },
     })
-    expect(rows.find(row => row.id === 'connection')).toMatchObject({
-      config: {
-        browserSessionTransport: 'bearer',
-      },
-    })
+    expect(rows.find(row => row.id === 'authentication-token')).toMatchObject({ disabled: true })
+    expect(rows.find(row => row.id === 'browser-session')?.name)
+      .toBe('@deepseek-ai/dsh-client-connection/browser-session')
+    expect(rows.find(row => row.id === 'ui-settings-account')).toMatchObject({ disabled: true })
+    expect(rows.find(row => row.id === 'ui-account-notifications')).toMatchObject({ disabled: true })
     expect(rows.find(row => row.id === 'directory-picker')).toMatchObject({ disabled: true })
     expect(rows.find(row => row.id === 'directory-picker-browse')?.name)
       .toBe('@deepseek-ai/dsh-host-directory-picker-browse')
@@ -310,7 +305,7 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
       code: 200,
-      data: { image: { model: 'gpt-image-2.5' }, video: { model: 'doubao-seedance-2-5-260628' } },
+      data: { image: { model: 'doubao-seedream-5-0-pro-260628' }, video: { model: 'doubao-seedance-2-5-260628' } },
     })
     const batch = await localFetch(address.replace(/config$/u, 'images/refresh'), {
       method: 'POST', headers, body: JSON.stringify({ taskIds: [] }),
@@ -321,7 +316,7 @@ describe('JDCloud login through a real Loader composition', () => {
       method: 'POST', headers, body: JSON.stringify({ spaceId: 'c'.repeat(24) }),
     })
     expect(usage.status).toBe(200)
-    expect(await usage.json()).toMatchObject({ code: 200, data: { mode: 'shadow', rows: [] } })
+    expect(await usage.json()).toMatchObject({ code: 200, data: { mode: 'metered', rows: [] } })
     const agent = runningAgent(context)
     const direct = createUserMessage({
       source: { kind: 'user' },
@@ -332,7 +327,7 @@ describe('JDCloud login through a real Loader composition', () => {
     await context.jdcloudAuthController.runExternalRequest('media-token', tenantId, 'https://kindoucloud.com', new AbortController().signal, async () => {
       await context.jdcloudAuthController.claimOwned('session', agent.session.id)
       await agentEvents(context, agent).waterfall('agent/pre-step', {
-        messages: [direct], turn: 1, step: 1, signal: new AbortController().signal,
+        messages: [direct], turn: 1, step: 1, modelSelection: { provider: 'fixture', model: 'fixture' }, signal: new AbortController().signal,
       }, () => Promise.resolve({ kind: 'enter' as const, messages: [direct] }))
     })
     await context.jdcloudAuthController.runExternalRequest('media-token', tenantId, 'https://kindoucloud.com', new AbortController().signal, async () => {
@@ -353,7 +348,7 @@ describe('JDCloud login through a real Loader composition', () => {
     ] } })
     expect(usageRows).toHaveLength(1)
     expect(usageRows[0]).toMatchObject({ initiatedByUserId: 'media-user', spaceId: 'c'.repeat(24),
-      scenario: 'agent', customerChargeMicros: '720', chargeStatus: 'ready', billingMode: 'shadow' })
+      scenario: 'agent', chargeStatus: 'settled', billingMode: 'metered' })
     const entry = [...context.loader.entries()].find(row => row.options.name === '@deepseek-ai/dsh-creation-studio-media')
     expect(entry?.fiber).toBeDefined()
     await entry!.fiber!.dispose()
@@ -543,7 +538,7 @@ describe('JDCloud login through a real Loader composition', () => {
     })
     const decision = await agentEvents(context, agent).waterfall(
       'agent/pre-step',
-      { messages: [prompt], turn: 1, step: 1, signal },
+      { messages: [prompt], turn: 1, step: 1, modelSelection: { provider: 'fixture', model: 'fixture' }, signal },
       () => Promise.resolve({ kind: 'enter' as const, messages: [prompt] }),
     )
 

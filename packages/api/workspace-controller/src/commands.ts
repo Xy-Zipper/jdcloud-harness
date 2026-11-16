@@ -1,11 +1,13 @@
 /** Workspace command implementation and stable Remote failure mapping. */
 
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { Context } from '@deepseek-ai/cordis'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import {
   WorkspaceActiveSessionError,
   WorkspaceArchivedSessionPinError,
-  WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
   WorkspaceUnknownSessionError,
@@ -44,7 +46,7 @@ export class WorkspaceCommands {
   constructor(private readonly ctx: Context) {}
 
   /**
-   * Create or resolve one Workspace over an existing directory in the current owner scope.
+   * Create or resolve one Workspace over an existing directory.
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
    */
@@ -93,7 +95,7 @@ export class WorkspaceCommands {
       return Promise.reject(new RemoteError('gateway/bad-request', 'Workspace rename requires a non-blank title', {}))
     }
     return this.enqueue(async () => {
-      const workspace = await this.requireWorkspace(request.workspaceId)
+      const workspace = this.requireWorkspace(request.workspaceId)
       if (title !== workspace.title) {
         if (this.ctx.workspaceRegistry.list().some(candidate =>
           candidate.id !== workspace.id && candidate.title === title)) {
@@ -118,14 +120,17 @@ export class WorkspaceCommands {
    */
   delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
     return this.enqueue(async () => {
-      const workspace = await this.requireWorkspace(request.workspaceId)
+      const workspace = this.requireWorkspace(request.workspaceId)
       if (request.deleteSessions === true) {
         const sessions = this.ctx.get('sessionController')
         if (sessions === undefined) throw new RemoteError('gateway/internal', 'Session deletion is unavailable', {})
         const sessionIds = [...workspace.sessionIds]
         // Authorize every target before the first destructive operation.
         for (const sessionId of sessionIds) {
-          await this.assertSessionOwned(sessionId)
+          const owner = this.owner()
+          if (owner !== undefined && !await owner.owns('session', sessionId)) {
+            throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
+          }
           if (!this.ctx.remoteAccess.allows({ kind: 'session', id: sessionId })) {
             throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
           }
@@ -134,7 +139,7 @@ export class WorkspaceCommands {
           await sessions.delete({ sessionId })
         }
       }
-      if (!await this.ctx.workspaceRegistry.delete(WorkspaceId(request.workspaceId))) {
+      if (!await this.ctx.workspaceRegistry.delete(brandString<WorkspaceId>(request.workspaceId))) {
         throw workspaceNotFound(request.workspaceId)
       }
       return { deleted: true }
@@ -148,13 +153,11 @@ export class WorkspaceCommands {
    */
   async insertBefore(request: WorkspaceInsertBeforeRequest): Promise<WorkspaceOrderValue> {
     try {
-      await this.assertOwned(request.workspaceId)
-      if (request.beforeWorkspaceId !== undefined) await this.assertOwned(request.beforeWorkspaceId)
       const workspaceIds = await this.ctx.workspaceRegistry.insertBefore(
-        WorkspaceId(request.workspaceId),
+        brandString<WorkspaceId>(request.workspaceId),
         request.beforeWorkspaceId === undefined
           ? undefined
-          : WorkspaceId(request.beforeWorkspaceId),
+          : brandString<WorkspaceId>(request.beforeWorkspaceId),
       )
       return { workspaceIds: [...workspaceIds] }
     } catch (error) {
@@ -169,7 +172,7 @@ export class WorkspaceCommands {
    * @returns the updated Workspace projection.
    */
   async insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue> {
-    const workspace = await this.requireWorkspace(request.workspaceId)
+    const workspace = this.requireWorkspace(request.workspaceId)
     try {
       await workspace.insertSessionBefore(request.sessionId, request.beforeSessionId)
     } catch (error) {
@@ -200,7 +203,6 @@ export class WorkspaceCommands {
    */
   async archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
     try {
-      await this.assertSessionOwned(request.sessionId)
       await this.ctx.workspaceRegistry.archiveSession(
         request.sessionId,
         request.stopActivity === true ? { stopActivity: true } : {},
@@ -230,7 +232,6 @@ export class WorkspaceCommands {
    * @returns the complete resulting archive set.
    */
   async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
-    await this.assertSessionOwned(request.sessionId)
     await this.ctx.workspaceRegistry.unarchiveSession(request.sessionId)
     return { archivedSessionIds: [...this.ctx.workspaceRegistry.archivedSessionIds] }
   }
@@ -242,7 +243,6 @@ export class WorkspaceCommands {
    */
   async pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue> {
     try {
-      await this.assertSessionOwned(request.sessionId)
       await this.ctx.workspaceRegistry.pinSession(request.sessionId)
     } catch (error) {
       if (error instanceof WorkspaceUnknownSessionError) {
@@ -264,29 +264,14 @@ export class WorkspaceCommands {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   async unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
-    await this.assertSessionOwned(request.sessionId)
     await this.ctx.workspaceRegistry.unpinSession(request.sessionId)
     return { pinnedSessionIds: [...this.ctx.workspaceRegistry.pinnedSessionIds] }
   }
 
-  private async requireWorkspace(workspaceId: WorkspaceId): Promise<Workspace> {
-    await this.assertOwned(workspaceId)
-    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
+  private requireWorkspace(workspaceId: WorkspaceId): Workspace {
+    const workspace = this.ctx.workspaceRegistry.get(brandString<WorkspaceId>(workspaceId))
     if (workspace === undefined) throw workspaceNotFound(workspaceId)
     return workspace
-  }
-
-  private async assertOwned(workspaceId: WorkspaceId): Promise<void> {
-    const owner = this.owner()
-    if (owner !== undefined && !(await owner.owns('workspace', String(workspaceId)))) throw workspaceNotFound(workspaceId)
-  }
-
-  /** Refuse a Session id outside the current JDCloud owner when mutating global navigation. */
-  private async assertSessionOwned(sessionId: WorkspaceArchiveSessionRequest['sessionId']): Promise<void> {
-    const owner = this.owner()
-    if (owner !== undefined && !(await owner.owns('session', sessionId))) {
-      throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
-    }
   }
 
   private owner(): ScopeOwner | undefined {

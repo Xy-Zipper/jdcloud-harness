@@ -1,17 +1,11 @@
-# Exercise the JDCloud browser initializer against a Host whose new Sessions
-# would otherwise start with full access.
-- insert:
-    - id: jdcloud-auth-controller
-      name: '@deepseek-ai/dsh-api-jdcloud-auth-controller'
-      config:
-        defaultBaseUrl: !!js process.env.JDCLOUD_DEFAULT_BASE_URL
-        requestTimeoutMs: 15000
-    - id: tool-jdcloud-lowcode
-      name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
-    - id: ui-jdcloud-login
-      name: '@deepseek-ai/dsh-client-ui-jdcloud-login'
-    - id: ui-jdcloud-lowcode-actions
-      name: '@deepseek-ai/dsh-client-ui-jdcloud-lowcode-actions'
+# JDCloud sessions retain the deployment's permission default while tenant controls stay restricted.
+- id: jdcloud-auth-controller
+  config:
+    userWorkspaceDirectory: !!js process.getBuiltinModule('node:path').join(process.cwd(), '.jdcloud-users')
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    scopedUserWorkspaceDir: !!js process.getBuiltinModule('node:path').join(process.cwd(), '.jdcloud-users')
 - id: sandbox-policy
   config:
     mode: danger-full-access

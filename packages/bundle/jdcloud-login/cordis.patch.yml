@@ -1,12 +1,13 @@
 # Optional Web-profile layer for JDCloud low-code authentication.
-- id: connection
-  config:
-    # JDCloud owns application login, so each browser gets its own opaque
-    # Host session instead of sharing Harness authentication state.
-    browserAuthentication: false
-    browserSession: true
-    browserSessionTransport: bearer
-    trustedHosts: !!js ctx.webStartup.trustedHosts
+- id: authentication-token
+  disabled: true
+
+# JDCloud owns account controls; keep the sidebar's direct Settings button.
+- id: ui-settings-account
+  disabled: true
+
+- id: ui-account-notifications
+  disabled: true
 
 # JDCloud workspaces stay inside the authenticated user's private directory.
 # The in-app browser starts at that directory and cannot navigate above it.
@@ -22,6 +23,12 @@
     scopedUserWorkspaceDir: !!js process.env.JDCLOUD_USER_WORKSPACE_DIR ?? process.getBuiltinModule('node:path').join(process.env.DSH_HOME ?? process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.dsh'), 'account-workspaces')
 
 - insert:
+    - id: browser-session
+      name: '@deepseek-ai/dsh-client-connection/browser-session'
+      inject: [webStartup]
+      config:
+        trustedHosts: !!js ctx.webStartup.trustedHosts
+
     - id: directory-picker-browse
       name: '@deepseek-ai/dsh-host-directory-picker-browse'
 

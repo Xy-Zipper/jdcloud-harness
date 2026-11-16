@@ -15,12 +15,14 @@ import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_SETTINGS_NAMESPACE, WELCOME_NOTICE_VERSION,
 } from '../src/onboarding-copy.ts'
 import { ModelsSection } from '../src/client/ModelsSection.tsx'
-import { ModelsSettingsStore } from '../src/client/store.ts'
 import { DeepSeekOnboardingDialog } from '../src/client/DeepSeekOnboardingDialog.tsx'
 import { WelcomeNotice } from '../src/client/WelcomeNotice.tsx'
-import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
+import type { IndexInjection, WebServer } from '@deepseek-ai/dsh-host-webserver'
 import * as hostPlugin from '../src/index.ts'
 import { ONBOARDING_CONFIG_GLOBAL } from '../src/onboarding-config.ts'
+
+/** The Peer an index render speaks for; this listener reads no field of it. */
+const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['renderIndex']>[1]
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -48,10 +50,7 @@ async function bench(mock = RemoteMock.create().load(remoteDefaultResponses), se
       ...services,
     },
     settings: mock.remote.settings,
-    session: {
-      initializeDefaultModel: vi.fn(async () => ({ ok: true, value: undefined })),
-      modelCatalog: mock.remote.session.modelCatalog,
-    },
+    session: { initializeDefaultModel: vi.fn(async () => ({ ok: true, value: undefined })) },
   })
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry, locale, remote }
@@ -78,8 +77,8 @@ describe('ui-settings-models apply', () => {
       const host = ctx.plugin(hostPlugin, { credentialOnboarding: false })
       await host.await()
       const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
-      expect(rows).toEqual([{ kind: 'global', name: ONBOARDING_CONFIG_GLOBAL, value: { credentialOnboarding: false, welcomeNotice: true } }])
+      ctx.emit('webserver/index-inject', rows, PAGE_PEER)
+      expect(rows).toEqual([{ kind: 'global', name: ONBOARDING_CONFIG_GLOBAL, value: { credentialOnboarding: false } }])
       for (const row of rows) if (row.kind === 'global') vi.stubGlobal(row.name, row.value)
       const plugin = ctx.plugin({ inject: [...inject], apply })
       await plugin.await()
@@ -91,7 +90,7 @@ describe('ui-settings-models apply', () => {
       expect(slots.entries('settings.onboarding')).toEqual([])
       await host.dispose()
       const after: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', after)
+      ctx.emit('webserver/index-inject', after, PAGE_PEER)
       expect(after).toEqual([])
     } finally {
       await ctx.fiber.dispose()
@@ -99,45 +98,12 @@ describe('ui-settings-models apply', () => {
   })
 
   it('defaults to browser onboarding and rejects malformed bootstrap options', async () => {
-    expect(hostPlugin.Config({})).toEqual({ credentialOnboarding: true, welcomeNotice: true })
+    expect(hostPlugin.Config({})).toEqual({ credentialOnboarding: true })
     expect(hostPlugin.Config['~standard'].validate({ credentialOnboarding: 'false' })).toHaveProperty('issues')
-    expect(hostPlugin.Config['~standard'].validate({ welcomeNotice: 'false' })).toHaveProperty('issues')
     const { ctx } = await bench()
     try {
       vi.stubGlobal(ONBOARDING_CONFIG_GLOBAL, { credentialOnboarding: 'false' })
       expect(() => { apply(ctx) }).toThrow()
-    } finally {
-      await ctx.fiber.dispose()
-    }
-  })
-
-  it('skips the welcome notice when the composition disables it while keeping Models and manual credentials', async () => {
-    const { ctx, slots } = await bench()
-    declare(slots)
-    try {
-      const host = ctx.plugin(hostPlugin, { credentialOnboarding: false, welcomeNotice: false })
-      await host.await()
-      const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
-      expect(rows).toEqual([{
-        kind: 'global',
-        name: ONBOARDING_CONFIG_GLOBAL,
-        value: { credentialOnboarding: false, welcomeNotice: false },
-      }])
-      for (const row of rows) if (row.kind === 'global') vi.stubGlobal(row.name, row.value)
-      const plugin = ctx.plugin({ inject: [...inject], apply })
-      await plugin.await()
-      expect(slots.entries('settings.section').map(entry => entry.options.id)).toEqual(['models'])
-      const onboarding = slots.entries('settings.onboarding')
-      expect(onboarding.map(entry => entry.options.id)).toEqual(['deepseek-official'])
-      const injected = (
-        onboarding[0]!.inject as unknown as
-        () => import('../src/client/DeepSeekOnboardingDialog.tsx').DeepSeekOnboardingInjected
-      )()
-      expect(injected.automatic).toBe(false)
-      await plugin.dispose()
-      expect(slots.entries('settings.onboarding')).toEqual([])
-      await host.dispose()
     } finally {
       await ctx.fiber.dispose()
     }
@@ -148,30 +114,6 @@ describe('ui-settings-models apply', () => {
       'slots', 'locale', 'remote', 'remote.credentials', 'remote.llm', 'remote.settings', 'remote.session',
       'configForms', 'settingsSchema',
     ])
-  })
-
-  it('loads provider settings when an account route needs the model catalog', async () => {
-    const mock = RemoteMock.create().load(remoteDefaultResponses)
-    mock.remote.session.modelCatalog.mockResolvedValue(ok({
-      default: { provider: 'deepseek-account', model: 'deepseek-v4-flash' },
-      routableProviders: [], groups: [], failures: [],
-    }))
-    const b = await bench(mock, {
-      listProviders: async () => ({ ok: true, value: [{ id: 'deepseek-account', name: 'DeepSeek' }] }),
-    })
-    try {
-      declare(b.slots)
-      await b.ctx.plugin({ inject: [...inject], apply }).await()
-      const entry = b.slots.entries('settings.section')[0]!
-      const controller = entry.inject!().controller
-      expect(controller).toBeInstanceOf(ModelsSettingsStore)
-      if (!(controller instanceof ModelsSettingsStore)) throw new Error('Models section has no settings store')
-      await controller.load()
-      expect(controller.store.getSnapshot().status).toBe('ready')
-      expect(mock.remote.session.modelCatalog).toHaveBeenCalledOnce()
-    } finally {
-      await b.ctx.fiber.dispose()
-    }
   })
 
   it('registers the models nav entry for declarations before or after apply', async () => {

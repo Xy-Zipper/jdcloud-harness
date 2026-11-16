@@ -1,7 +1,9 @@
+import { unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
-import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import {
   AttachmentId,
@@ -92,6 +94,7 @@ function makeAgent(ctx: Context, rawId = 'coverage-agent', status: Agent['status
   return {
     id,
     options: {},
+    model: unsupportedModel(),
     session,
     inbox: createInboxStub(),
     status,
@@ -125,9 +128,9 @@ async function services(options: {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  if (options.turnBoundary !== false) ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeExecutor)
   await ctx.plugin(AgentRegistry)
   ctx.provide('attachments', {
     readImage: vi.fn(),
@@ -205,7 +208,7 @@ async function toolHarness(options: {
     snapshots,
     call(name, args, callOptions = {}) {
       const subject = Object.hasOwn(callOptions, 'agent') ? callOptions.agent : agent
-      const execute = () => mounted.ctx.tools.execute({
+      const execute = () => executeToolFixture(mounted.ctx, {
         name,
         arguments: args,
         callId: ToolCallId(`coverage-call-${String(++calls)}`),
@@ -229,7 +232,7 @@ async function preStep(
 ) {
   return await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages, turn: 1, step: 1, signal },
+    { messages, turn: 1, step: 1, modelSelection: { provider: 'fixture', model: 'fixture' }, signal },
     next,
   )
 }
@@ -382,7 +385,7 @@ describe('plugin configuration and prompt branches', () => {
     agent.session.append('turn/start', { turn: 1 })
     const enter = () => Promise.resolve({ kind: 'enter' as const, messages: [browserMessage()] })
     let calls = 0
-    const findRole = () => mounted.ctx.agents.withInitiator(agent, () => mounted.ctx.tools.execute({
+    const findRole = () => mounted.ctx.agents.withInitiator(agent, () => executeToolFixture(mounted.ctx, {
       name: 'jdcloud_lowcode_find_role',
       arguments: { query: 'Approver' },
       callId: ToolCallId(`role-cache-call-${String(++calls)}`),
@@ -444,7 +447,7 @@ describe('plugin configuration and prompt branches', () => {
       return []
     })
 
-    const result = await mounted.ctx.agents.withInitiator(agent, () => mounted.ctx.tools.execute({
+    const result = await mounted.ctx.agents.withInitiator(agent, () => executeToolFixture(mounted.ctx, {
       name: 'jdcloud_lowcode_find_role',
       arguments: { query: 'Approver' },
       callId: ToolCallId('role-scope-change-call'),
@@ -1427,11 +1430,7 @@ describe('live Agent, snapshot, menu, and tenant enforcement', () => {
     ))).toBe('JDCLOUD_LOWCODE_DRIVER_REQUIRED')
   })
 
-  it('requires a registered turn fold, an open turn, a snapshot, and a matching turn number', async () => {
-    const noFold = await toolHarness({ turnBoundary: false })
-    expect(errorCode(await noFold.call('jdcloud_lowcode_query', { menu_id: 'form-1' })))
-      .toBe('JDCLOUD_LOWCODE_SNAPSHOT_REQUIRED')
-
+  it('requires an open turn, a snapshot, and a matching turn number', async () => {
     const closed = await toolHarness({ openTurn: false })
     expect(errorCode(await closed.call('jdcloud_lowcode_query', { menu_id: 'form-1' })))
       .toBe('JDCLOUD_LOWCODE_SNAPSHOT_REQUIRED')

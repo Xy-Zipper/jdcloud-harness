@@ -1,6 +1,9 @@
 // Keyless assembled-browser coverage for the optional JDCloud login bundle:
 // an ordinary tenant uses the Host model default and receives no administrator controls.
+import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { once } from 'node:events'
+import { readdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
@@ -30,16 +33,21 @@ const JDCLOUD_PERMISSION_OVERLAY = fileURLToPath(
 const JDCLOUD_BUNDLE_MANIFEST = fileURLToPath(
   new URL('../../../packages/bundle/jdcloud-login/package.json', import.meta.url),
 )
+const JDCLOUD_BUNDLE_PATCH = fileURLToPath(
+  new URL('../../../packages/bundle/jdcloud-login/cordis.patch.yml', import.meta.url),
+)
 const MODE = webSnapshotMode()
 
 interface JdcloudServer {
   readonly server: Server
   readonly baseUrl: string
+  setAdministrator(value: boolean): void
   readonly requests: string[]
 }
 
 /** Start the deterministic JDCloud endpoints used by the login controller. */
 async function startJdcloudServer(): Promise<JdcloudServer> {
+  let administrator = false
   const requests: string[] = []
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://jdcloud.test')
@@ -68,7 +76,7 @@ async function startJdcloudServer(): Promise<JdcloudServer> {
     if (request.method === 'GET' && url.pathname === '/api/oauth/currentUser') {
       reply({
         userInfo: { id: 'ordinary-user-id', userName: 'ordinary-user', corpId: 'corp-ordinary' },
-        userPermission: { systemAdministrator: false },
+        userPermission: { systemAdministrator: administrator },
         menuList: [
           { id: 'folder-hr', parentId: '-1', fullName: '人事管理', type: 1 },
           {
@@ -105,7 +113,7 @@ async function startJdcloudServer(): Promise<JdcloudServer> {
   await once(server, 'listening')
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('JDCloud fixture server has no TCP address')
-  return { server, baseUrl: `http://127.0.0.1:${address.port}`, requests }
+  return { setAdministrator(value) { administrator = value }, server, baseUrl: `http://127.0.0.1:${address.port}`, requests }
 }
 
 describe('web e2e: JDCloud ordinary-user controls', () => {
@@ -118,7 +126,7 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
   beforeAll(async () => {
     jdcloud = await startJdcloudServer()
     scaffold = await launchWebScaffold({
-      extraOverlayPath: JDCLOUD_PERMISSION_OVERLAY,
+      extraOverlayPath: [JDCLOUD_BUNDLE_PATCH, JDCLOUD_PERMISSION_OVERLAY],
       extraInstallAnchors: [JDCLOUD_BUNDLE_MANIFEST],
     })
     expect(scaffold.ctx.clientModules.graph().entries.map(entry => entry.id)).toContain(
@@ -185,7 +193,14 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     await compareOrRefreshGolden(ORDINARY_USER_EXPECTED, snapshot, MODE)
 
     const serverDefault = scaffold.ctx.agentDefaultModel.currentSelection()
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd)
+    // Opening the picker lazily creates the authenticated account's private root.
+    await page.getByRole('button', { name: '添加工作区', exact: true }).click()
+    await page.getByRole('dialog', { name: '选择工作区目录' }).waitFor()
+    await page.keyboard.press('Escape')
+    const accountDirectories = await readdir(join(scaffold.workspaceCwd, '.jdcloud-users'), { withFileTypes: true })
+    const accountDirectory = accountDirectories.find(entry => entry.isDirectory() && entry.name !== '.dsh')
+    if (accountDirectory === undefined) throw new Error('JDCloud account workspace directory was not created')
+    await connectFreshWorkspaceZh(page, join(scaffold.workspaceCwd, '.jdcloud-users', accountDirectory.name))
     expect(await page.getByRole('button', { name: /^选择模型/ }).count()).toBe(0)
     expect(await page.locator('button[aria-label^="访问模式"]').count()).toBe(0)
     const sessionControls = await captureStableAria(page, '[data-composer-card]', scaffold.workspaceCwd)
@@ -255,21 +270,28 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     const agent = scaffold.ctx.agents.list()[0]
     if (agent === undefined) throw new Error('connected JDCloud workspace did not create an Agent')
     expect(scaffold.ctx.sessionProjections.snapshot(agent.session).values.permissions)
-      .toMatchObject({ currentValue: 'workspace-write' })
+      .toMatchObject({ currentValue: 'danger-full-access' })
     const events = agent.session.snapshotEvents()
     expect(events.some(event => event.type === 'permission/preset' && event.data.preset === 'danger-full-access')).toBe(true)
-    expect(events.some(event => event.type === 'permission/preset' && event.data.preset === 'workspace-write')).toBe(true)
-    expect(events.some(event => event.type === 'command/run' && event.data.name === 'permission')).toBe(true)
+    expect(events.some(event => event.type === 'permission/preset' && event.data.preset === 'workspace-write')).toBe(false)
+    expect(events.some(event => event.type === 'command/run' && event.data.name === 'permission')).toBe(false)
     expect(agent.session.snapshotEvents().some(event => event.type === 'model/selection')).toBe(false)
     expect(
       scaffold.ctx.sessionProjections.snapshot(agent.session).values.modelSelection?.next
         ?? scaffold.ctx.agentDefaultModel.currentSelection(),
     ).toEqual(serverDefault)
-    await expect(scaffold.ctx.sessionController.selectModel({
+    const selection = await page.evaluate(async (args) => {
+      const response = await fetch('api/session/selectModel', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: 'jdcloud-model-denied', method: 'session/selectModel', payload: { args: { request: args } } }),
+      })
+      return response.json() as Promise<unknown>
+    }, {
       sessionId: agent.id,
       provider: serverDefault.provider,
       model: serverDefault.model,
-    })).rejects.toMatchObject({ code: 'jdcloud/administrator-required' })
+    })
+    expect(selection).toMatchObject({ result: { ok: false, error: { code: 'jdcloud/administrator-required' } } })
     expect(tripwire.pageErrors).toEqual([])
     expect(jdcloud.requests).toEqual([
       'POST /api/oauth/login',
@@ -278,6 +300,33 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
       'GET /api/oauth/currentUser',
       'GET /api/oauth/currentUser',
     ])
+  }, 60_000)
+
+
+  it('keeps Settings as a single bottom button for administrators', async () => {
+    jdcloud.setAdministrator(true)
+    const adminPage = await browser.newPage({ viewport: { width: 1440, height: 900 }, locale: ZH_BROWSER_LOCALE })
+    try {
+      await adminPage.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+      await adminPage.getByLabel('服务地址').fill(jdcloud.baseUrl)
+      await adminPage.getByLabel('账号').fill('administrator')
+      await adminPage.getByLabel('密码').fill('secret')
+      await adminPage.getByRole('button', { name: '登录', exact: true }).click()
+      const settings = adminPage.getByRole('button', { name: '设置', exact: true })
+      await settings.waitFor({ timeout: 30_000 })
+      expect(await settings.count()).toBe(1)
+      const position = await settings.boundingBox()
+      expect(position?.y).toBeGreaterThan(800)
+      expect(await adminPage.getByRole('button', { name: /账户与设置/ }).count()).toBe(0)
+      await settings.click()
+      await adminPage.getByRole('dialog').waitFor()
+      await adminPage.screenshot({ path: '.artifacts/jdcloud-settings-button.png' })
+      await adminPage.keyboard.press('Escape')
+      await adminPage.getByRole('dialog').waitFor({ state: 'hidden' })
+    } finally {
+      await adminPage.close()
+      jdcloud.setAdministrator(false)
+    }
   }, 60_000)
 
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {

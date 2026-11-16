@@ -1,3 +1,5 @@
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 /** Project creation goes through the actual tool pipeline even without a frontend. */
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -21,6 +23,7 @@ async function setup(points: unknown = '20') {
   roots.push(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeExecutor)
   const write = vi.fn(async () => 'created')
   ctx.tools.register(defineTool({
     name: 'jdcloud_lowcode_create',
@@ -59,7 +62,7 @@ async function setup(points: unknown = '20') {
     changeScope() { scopeKey = 'another-user' },
     membership(value: string) { ownerUserId = 'other-owner'; role = value },
     run(menuId = projectMenuId, data: Record<string, string> = { spaceId }) {
-      return ctx.tools.execute({
+      return executeToolFixture(ctx, {
         callId: ToolCallId('create'),
         name: 'jdcloud_lowcode_create',
         arguments: { menu_id: menuId, data },

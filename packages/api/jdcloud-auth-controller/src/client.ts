@@ -535,7 +535,7 @@ function readCurrentUserIdentity(value: unknown): JdcloudCurrentUserIdentity {
   if (typeof corpId !== 'string' || corpId.trim() === '') {
     throw new Error('JDCloud current-user response has no current tenant')
   }
-  const userId = Reflect.get(userInfo, 'id')
+  const userId: unknown = Reflect.get(userInfo, 'id')
   if (typeof userId !== 'string' && typeof userId !== 'number' || String(userId).trim() === '') {
     throw new Error('JDCloud current-user response has no stable user id')
   }

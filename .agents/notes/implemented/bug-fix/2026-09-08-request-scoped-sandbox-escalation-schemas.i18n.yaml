@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-08-request-scoped-sandbox-escalation-schemas.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-08-request-scoped-sandbox-escalation-schemas.md
-2026-09-08-request-scoped-sandbox-escalation-schemas.md: 46db81f4cc45521044c8cfdd4e2f5c5e8e1cc1bf
-2026-09-08-request-scoped-sandbox-escalation-schemas.zh.md: 6c3ea3748ce556921988945f9ef6d94e0f125645
+/agent-note-request-scoped-sandbox-escalation-schemas:
+  en: 3c965c85cbdac748
+  zh: 2a539169cf0c58cc
+/agent-note-request-scoped-sandbox-escalation-schemas/problem:
+  en: 789a6adf2fe16caa
+  zh: c53a39089e346877
+/agent-note-request-scoped-sandbox-escalation-schemas/decision:
+  en: 447315e4818163e6
+  zh: 95157cf1694c5d58
+/agent-note-request-scoped-sandbox-escalation-schemas/alternatives-considered:
+  en: 7a2aa6ae8ca43bba
+  zh: a1537b451e4202b2
+/agent-note-request-scoped-sandbox-escalation-schemas/consequences:
+  en: a1b38ce8c664607d
+  zh: 43f482ed90ff515a

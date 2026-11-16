@@ -16,8 +16,11 @@ const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
 /** Non-public selector used by build orchestration to request a named client profile. */
 export const CLIENT_BUILD_PROFILE_SELECTOR = 'DSH_BUILD_CLIENT_PROFILE'
 
-/** Default browser title embedded by a deployment build. */
-const DEFAULT_CLIENT_TITLE = 'LSY-Agent'
+/** Public client environment required by official DSH artifacts. */
+const OFFICIAL_CLIENT_BUILD_ENVIRONMENT = {
+  DSH_CLIENT_BUILD_PROFILE: 'official',
+  DSH_CLIENT_TITLE: 'DeepSeek Harness',
+} as const
 
 /** Public variable carrying the source commit embedded in client artifacts. */
 const CLIENT_COMMIT_HASH_VARIABLE = 'DSH_CLIENT_COMMIT_HASH'
@@ -35,6 +38,7 @@ const CLIENT_ARTIFACT_PATTERNS = [
   'packages/*/*/lib/client.js.map',
   'packages/*/*/lib/client.*.js',
   'packages/*/*/lib/client.*.js.map',
+  'packages/*/*/lib/assets/**/*',
 ] as const
 
 /** Public values embedded in one set of client artifacts. */
@@ -96,6 +100,7 @@ export function repositoryGitDirty(root: string): boolean | undefined {
   const status = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=normal'], {
     cwd: root,
     encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   if (status.error !== undefined) throw status.error
@@ -107,7 +112,7 @@ export function repositoryGitDirty(root: string): boolean | undefined {
 
 /**
  * Resolve the public environment for a complete default build from one checkout.
- * Repository-owned metadata and the default title replace inherited build metadata; other public values pass through.
+ * Repository-owned metadata replaces inherited values; other public values pass through.
  * @param root - repository root supplying version and Git metadata.
  * @param environment - caller environment supplying optional commit and public extensions.
  * @returns complete public client environment for the default build.
@@ -125,7 +130,7 @@ export function repositoryClientBuildEnvironment(
     ...inherited,
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     ...(dirty === true ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
-    DSH_CLIENT_TITLE: inherited.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
+    DSH_CLIENT_TITLE: inherited.DSH_CLIENT_TITLE ?? 'LSY-Agent',
     DSH_CLIENT_VERSION: repositoryVersion(root),
   }
 }
@@ -143,8 +148,7 @@ export function officialClientBuildEnvironment(
   return {
     DSH_CLIENT_COMMIT_HASH: repositoryCommitHash(root, environment),
     DSH_CLIENT_VERSION: repositoryVersion(root),
-    DSH_CLIENT_BUILD_PROFILE: 'official',
-    DSH_CLIENT_TITLE: environment.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
+    ...OFFICIAL_CLIENT_BUILD_ENVIRONMENT,
   }
 }
 
@@ -179,6 +183,8 @@ function clientBuildEnvironment(environment: NodeJS.ProcessEnv): ClientBuildEnvi
 
 /**
  * Resolve the exact public environment selected for a complete client build.
+ * Named profiles discard inherited public overrides. Local builds retain the supplied
+ * commit, version, and true dirty marker; repositoryClientBuildEnvironment supplies that metadata.
  * @param environment - parent process environment.
  * @param profile - explicit profile, or the non-public selector when omitted.
  * @returns the inherited public values when no profile is selected, otherwise the named profile.
@@ -188,23 +194,25 @@ export function resolveClientBuildEnvironment(
   profile: string | undefined = environment[CLIENT_BUILD_PROFILE_SELECTOR],
 ): ClientBuildEnvironment {
   if (profile === undefined) return clientBuildEnvironment(environment)
-  if (profile === 'official') {
+  if (profile === 'official' || profile === 'local') {
     const commitHash = environment[CLIENT_COMMIT_HASH_VARIABLE]
     const version = environment[CLIENT_VERSION_VARIABLE]
     if (commitHash === undefined) {
-      throw new Error(`${CLIENT_COMMIT_HASH_VARIABLE} is required for the official client build profile`)
+      throw new Error(`${CLIENT_COMMIT_HASH_VARIABLE} is required for the ${profile} client build profile`)
     }
     if (version === undefined) {
-      throw new Error(`${CLIENT_VERSION_VARIABLE} is required for the official client build profile`)
+      throw new Error(`${CLIENT_VERSION_VARIABLE} is required for the ${profile} client build profile`)
     }
     return {
       DSH_CLIENT_COMMIT_HASH: commitHash,
       DSH_CLIENT_VERSION: version,
-      DSH_CLIENT_BUILD_PROFILE: 'official',
-      DSH_CLIENT_TITLE: environment.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE,
+      ...(profile === 'official' ? OFFICIAL_CLIENT_BUILD_ENVIRONMENT : {
+        DSH_CLIENT_BUILD_PROFILE: 'local',
+        ...(environment.DSH_CLIENT_GIT_DIRTY === 'true' ? { DSH_CLIENT_GIT_DIRTY: 'true' } : {}),
+      }),
     }
   }
-  throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official"`)
+  throw new Error(`unknown client build profile ${JSON.stringify(profile)}; expected "official" or "local"`)
 }
 
 /**

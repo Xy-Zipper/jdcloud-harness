@@ -1,15 +1,14 @@
 /**
  * Workspace file service: read-only file previews, workspace directory
- * listings, and the filesystem-observation change feed, exposed as
- * `workspaceFiles`.
+ * listings, workspace-wide name and path search, and the
+ * filesystem-observation change feed, exposed as `workspaceFiles`.
  *
- * File reads use the selected Session header as the base for relative paths.
- * Deployments without JDCloud ownership checks retain the composed filesystem
- * read policy; an authenticated JDCloud browser is confined to its owned
- * Session and Workspace roots, plus the account directories of its own login
- * (the account root and its Skill directories), which carry account-scoped
- * Skills into Workspace Sessions. Directory listings and change observations
- * remain workspace-scoped. File-kind checks and configured read caps apply to
+ * File reads follow the composed filesystem's read access, including paths
+ * outside the workspace. The selected Session header supplies the base for
+ * relative paths, with the sandbox policy root as its no-cwd fallback, not a
+ * read-containment restriction. Directory listings, searches, and change
+ * observations remain workspace-scoped; a search reports workspace-relative
+ * paths. File-kind checks and configured read caps apply to
  * every preview; this service exposes no mutations.
  *
  * A page is cut from `streamText`, which decodes and rejects non-UTF-8 as it
@@ -30,9 +29,10 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { Remote, RemoteError, TypertRemoteService, type TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceChangeFeed } from './changes.ts'
+import { searchWorkspace, type SearchLimits } from './search.ts'
 import type {
   WorkspaceByteRange,
   WorkspaceByteReadOptions,
@@ -40,6 +40,8 @@ import type {
   WorkspaceDirectoryListing,
   WorkspaceFileBytes,
   WorkspaceFileRange,
+  WorkspaceFileSearchRequest,
+  WorkspaceFileSearchResult,
   WorkspaceFileStat,
   WorkspaceFileText,
   WorkspaceFileWatchFrame,
@@ -62,16 +64,6 @@ export interface WorkspaceFileScope {
   readonly workspaceRoot: string
 }
 
-interface ScopeOwner {
-  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
-  /** The login's own account directories, when the deployment offers account-scoped Skills. */
-  currentSkillAccess?(): Promise<{
-    readonly workspaceRoot: string
-    readonly personalSkillDirectory: string
-    readonly managedSkillDirectory: string
-  } | undefined>
-}
-
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertLookupMap {
     /** Resolve a Session id to its workspace root without loading its event body or activating an Agent. */
@@ -79,7 +71,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   }
 }
 
-/** Deployment caps on one page or one listing. */
+/** Deployment caps on one page, one listing, or one search. */
 export interface Config {
   /**
    * Inclusive byte cap on one page's text and on one byte window.
@@ -95,6 +87,8 @@ export interface Config {
   readonly maxLines: number
   /** Cap on returned directory entries; the rest is dropped and reported cut. */
   readonly maxEntries: number
+  /** Budgets on one search's matches, listed files, deadline and ripgrep process. */
+  readonly search: SearchLimits
 }
 
 /** One page cut from a decoded text stream. */
@@ -192,22 +186,43 @@ function directoryEntry(child: FsDirEntry): WorkspaceDirectoryEntry {
   }
 }
 
+
+interface ScopeOwner {
+  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+  /** The login's own account directories, when the deployment offers account-scoped Skills. */
+  currentSkillAccess?(): Promise<{
+    readonly workspaceRoot: string
+    readonly personalSkillDirectory: string
+    readonly managedSkillDirectory: string
+  } | undefined>
+}
+
+
+
+
 /** Host Remote file reads and workspace directory observations over the composed filesystem. */
 export class WorkspaceFiles extends TypertRemoteService {
-  static inject = ['fs', 'sandboxPolicy', 'sessions', 'typert', 'workspaceRegistry']
+  static inject = ['fs', 'sandboxPolicy', 'sessions', 'typert']
 
   static Config: z<Config> = z.object({
     maxBytes: z.number().step(1).min(1).default(2 * 1024 * 1024),
     maxFileBytes: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER - 1).default(32 * 1024 * 1024),
     maxLines: z.number().step(1).min(1).default(5000),
     maxEntries: z.number().step(1).min(1).default(2000),
+    search: z.object({
+      maxResults: z.number().step(1).min(1).default(512),
+      maxEntries: z.number().step(1).min(1).default(100000),
+      graceMs: z.number().step(1).min(1).max(2147483647).default(3000),
+      timeoutMs: z.number().step(1).min(1).max(2147483647).default(30000),
+      stderrMaxBytes: z.number().step(1).min(1).default(65536),
+    }),
   })
 
   private readonly feed: WorkspaceChangeFeed
 
   /**
    * @param ctx - Host context carrying the filesystem and the sandbox policy.
-   * @param config - deployment caps on one page or one listing.
+   * @param config - deployment caps on one page, one listing, or one search.
    */
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'workspaceFiles')
@@ -238,8 +253,7 @@ export class WorkspaceFiles extends TypertRemoteService {
   /**
    * Read one page of lines from a UTF-8 file readable by the filesystem backend.
    * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; outside files are allowed
-   * without account ownership, and from the login's account directories otherwise.
+   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
    * @param range - the line window; omitted fields take the page defaults.
    * @param signal - caller cancellation.
    * @returns the page, the file's version at the stat before it, and whether it reaches the last line.
@@ -297,8 +311,7 @@ export class WorkspaceFiles extends TypertRemoteService {
   /**
    * Report one regular file's identity, version, and size without its content.
    * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; outside files are allowed
-   * without account ownership, and from the login's account directories otherwise.
+   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
    * @param signal - caller cancellation.
    * @returns the file's absolute path, current version, and byte size.
    */
@@ -344,41 +357,49 @@ export class WorkspaceFiles extends TypertRemoteService {
   }
 
   /**
-   * List one directory through an authenticated Workspace identity without requiring a Session.
-   * @param workspaceId - Workspace registration owned by the current account scope.
-   * @param path - Workspace-relative directory path; an empty path selects the root.
-   * @param signal - Caller cancellation for filesystem reads.
-   * @returns Bounded direct children of the requested Workspace directory.
+   * Search files and their inferred ancestor directories with packaged ripgrep.
+   * Native ignore rules apply unless disabled; VCS metadata, symlinks and empty
+   * directories are absent. Within the bounded set of listed files, matches
+   * sort by depth, then workspace-relative path.
+   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
+   * @param request - the query, literal exclusions, and hidden/ignore switches.
+   * @param signal - caller cancellation, forwarded to the subprocess; rejection preserves its reason.
+   * @returns matches capped by search.maxResults; incomplete marks excess rg files or exit 2.
+   * @throws RemoteError `gateway/bad-request`: the query is blank.
+   * @throws RemoteError `workspace-file/not-found`: the workspace root does not exist.
+   * @throws RemoteError `workspace-file/not-directory`: the workspace root is not a directory.
+   * @throws RemoteError `workspace-file/search-failed`: subprocess is missing, rg cannot launch or execute, or the search times out.
    */
-  async listWorkspace(workspaceId: string, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing> {
-    const owner = scopeOwner(this.ctx)
-    if (owner !== undefined && !(await owner.owns('workspace', workspaceId))) {
-      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+  @Remote
+  async search(
+    workspaceFileScope: WorkspaceFileScope,
+    request: WorkspaceFileSearchRequest,
+    signal: AbortSignal,
+  ): Promise<WorkspaceFileSearchResult> {
+    const query = request.query.trim()
+    if (query.length === 0) throw new RemoteError('gateway/bad-request', 'query must not be blank', {})
+    signal.throwIfAborted()
+    const { workspaceRoot } = workspaceFileScope
+    const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
+    const info = await this.ctx.fs.stat(root, signal)
+    if (info === undefined) {
+      throw new RemoteError('workspace-file/not-found', `no entry at "${workspaceRoot}"`, { path: workspaceRoot })
     }
-    const workspace = this.ctx.workspaceRegistry.get(WorkspaceId(workspaceId))
-    if (workspace === undefined) {
-      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+    if (info.type !== 'directory') {
+      throw new RemoteError('workspace-file/not-directory', `"${workspaceRoot}" is a ${info.type}`, { path: workspaceRoot, kind: info.type })
     }
-    const requestedPath = path === '' ? '.' : path
-    const root = await this.ctx.fs.resolve(workspace.path, { signal })
-    const entry = await this.ctx.fs.lstat(requestedPath, { cwd: workspace.path }, signal)
-    if (entry === undefined) {
-      throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })
+    const subprocess = this.ctx.get('subprocess')
+    if (subprocess === undefined) {
+      throw new RemoteError('workspace-file/search-failed', 'Workspace file search requires a subprocess provider', {})
     }
-    if (entry.type !== 'directory') {
-      throw new RemoteError(
-        'workspace-file/not-directory',
-        `"${path}" is a ${entry.type}`,
-        { path, kind: entry.type },
-      )
-    }
-    const target = await this.confine(root, workspace.path, requestedPath, signal)
-    const children = await this.ctx.fs.listDir(target, signal)
-    return {
-      path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)),
-      entries: children.slice(0, this.config.maxEntries).map(directoryEntry),
-      truncated: children.length > this.config.maxEntries,
-    }
+    return searchWorkspace(subprocess, {
+      cwd: this.ctx.fs.processPath(root),
+      query,
+      excludedPaths: request.excludedPaths,
+      includeHidden: request.includeHidden,
+      respectGitignore: request.respectGitignore,
+      ...this.config.search,
+    }, signal)
   }
 
   /**
@@ -442,9 +463,9 @@ export class WorkspaceFiles extends TypertRemoteService {
     signal: AbortSignal,
   ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
-    const owner = scopeOwner(this.ctx)
-    if (owner !== undefined && !(await owner.owns('session', String(workspaceFileScope.sessionId)))) {
-      throw new RemoteError('workspace-file/not-found', `session "${workspaceFileScope.sessionId}" not found`, { path })
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !await owner.owns('session', String(workspaceFileScope.sessionId))) {
+      throw new RemoteError('workspace-file/not-found', 'Session is not owned by the current JDCloud account', { path })
     }
     const { workspaceRoot } = workspaceFileScope
     const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
@@ -464,6 +485,13 @@ export class WorkspaceFiles extends TypertRemoteService {
     }
     return target
   }
+
+  /**
+   * All gates for a regular file, ending in the one stat that names its version
+   * and size. The stat re-checks what `lstat` saw: the file may have gone or
+   * changed kind in between.
+   */
+
 
   /**
    * Confine a file preview to the Session workspace, or to the authenticated
@@ -492,11 +520,6 @@ export class WorkspaceFiles extends TypertRemoteService {
     throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside the workspace`, { path })
   }
 
-  /**
-   * All gates for a regular file, ending in the one stat that names its version
-   * and size. The stat re-checks what `lstat` saw: the file may have gone or
-   * changed kind in between.
-   */
   private async locateFile(
     workspaceFileScope: WorkspaceFileScope,
     path: string,
@@ -506,7 +529,7 @@ export class WorkspaceFiles extends TypertRemoteService {
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const owner = scopeOwner(this.ctx)
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
     const target = owner === undefined
       ? await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
       : await this.confineOwnedFile(owner, root, workspaceRoot, path, signal)
@@ -539,14 +562,47 @@ export class WorkspaceFiles extends TypertRemoteService {
       throw error
     }
   }
-}
 
-/** Resolve either supported account authentication controller. */
-function scopeOwner(ctx: Context): ScopeOwner | undefined {
-  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
-  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
-  if (candidate === undefined || typeof Reflect.get(candidate, 'owns') !== 'function') return undefined
-  return candidate as ScopeOwner
+
+  /**
+   * List one directory through an authenticated Workspace identity without requiring a Session.
+   * @param workspaceId - Workspace registration owned by the current account scope.
+   * @param path - Workspace-relative directory path; an empty path selects the root.
+   * @param signal - Caller cancellation for filesystem reads.
+   * @returns Bounded direct children of the requested Workspace directory.
+   */
+  async listWorkspace(workspaceId: string, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !(await owner.owns('workspace', workspaceId))) {
+      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+    }
+    const registry = this.ctx.get('workspaceRegistry')
+    if (registry === undefined) throw new Error('Workspace directory reads require the Workspace registry')
+    const workspace = registry.get(workspaceId as WorkspaceId)
+    if (workspace === undefined) {
+      throw new RemoteError('workspace-file/not-found', `workspace "${workspaceId}" not found`, { path })
+    }
+    const requestedPath = path === '' ? '.' : path
+    const root = await this.ctx.fs.resolve(workspace.path, { signal })
+    const entry = await this.ctx.fs.lstat(requestedPath, { cwd: workspace.path }, signal)
+    if (entry === undefined) {
+      throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })
+    }
+    if (entry.type !== 'directory') {
+      throw new RemoteError(
+        'workspace-file/not-directory',
+        `"${path}" is a ${entry.type}`,
+        { path, kind: entry.type },
+      )
+    }
+    const target = await this.confine(root, workspace.path, requestedPath, signal)
+    const children = await this.ctx.fs.listDir(target, signal)
+    return {
+      path: workspacePathOf(this.ctx.fs.fileUrl(root), this.ctx.fs.fileUrl(target)),
+      entries: children.slice(0, this.config.maxEntries).map(directoryEntry),
+      truncated: children.length > this.config.maxEntries,
+    }
+  }
 }
 
 /**

@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-18-jdcloud-browser-user-isolation.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-18-jdcloud-browser-user-isolation.md
-2026-09-18-jdcloud-browser-user-isolation.md: 4db1caccc4fe9d1ece50e6ce7f7d57cd21ef92c2
-2026-09-18-jdcloud-browser-user-isolation.zh.md: 26d131b28bc4058e80bdcef50c550e361359d95c
+/agent-note-jdcloud-browser-and-tenant-user-isolation:
+  en: 6ff58ee1deebf958
+  zh: 12643b1d99a7d59b
+/agent-note-jdcloud-browser-and-tenant-user-isolation/problem:
+  en: ed2a8fb71ecc696e
+  zh: c83f1d01332b38f9
+/agent-note-jdcloud-browser-and-tenant-user-isolation/decision:
+  en: 9367e7629bcacb75
+  zh: e3b878481a2ed5a9
+/agent-note-jdcloud-browser-and-tenant-user-isolation/alternatives-considered:
+  en: 15c1eabcef5ef3b3
+  zh: 427241e0ce8dbb63
+/agent-note-jdcloud-browser-and-tenant-user-isolation/consequences:
+  en: b0122e26ca532883
+  zh: a5b452ce9f4b6b6d

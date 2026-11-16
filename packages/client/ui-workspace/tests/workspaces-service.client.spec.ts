@@ -13,7 +13,7 @@ import type {
 import type { ClientRemote, DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
-import { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -23,8 +23,9 @@ import { DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigati
 import { en, zh } from '../src/client/locales.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
-const sid = (id: string): SessionId => SessionId(id)
+const sid = (id: string): SessionId => brandString<SessionId>(id)
 const wid = (id: string): WorkspaceId => id as WorkspaceId
 
 const contexts: Context[] = []
@@ -327,36 +328,6 @@ function lastOpening(open: MockInstance<UiWorkspaceService['openWorkspace']>): P
 }
 
 describe('UiWorkspaceService', () => {
-  it('prepares a reused blank before navigation and stops preparing after disposal', async () => {
-    const blank = summary('blank', { blank: true, cwd: '/w/a' })
-    const b = bench({
-      workspaces: workspaceState([workspace('a', [blank.id])]),
-      sessions: sessionState([blank], 'pending'),
-    })
-    const initializer = vi.fn(async () => {})
-    const dispose = b.uiWorkspace.registerNewSessionInitializer(initializer)
-
-    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(blank.id)
-    expect(initializer).toHaveBeenCalledExactlyOnceWith(blank.id)
-    expect(b.sessions.retained[0]?.reference.sessionId).toBe(blank.id)
-    expect(b.sessions.retained[0]?.release).toHaveBeenCalledOnce()
-
-    dispose()
-    await b.uiWorkspace.connectWorkspace(wid('a'))
-    expect(initializer).toHaveBeenCalledOnce()
-  })
-
-  it('does not open a Session when its registered preparation fails', async () => {
-    const b = bench({
-      workspaces: workspaceState([workspace('a')]),
-      sessions: sessionState([], 'pending'),
-    })
-    const failure = new Error('preparation failed')
-    b.uiWorkspace.registerNewSessionInitializer(async () => { throw failure })
-    await expect(b.uiWorkspace.openWorkspace(wid('a'))).rejects.toBe(failure)
-    expect(b.sessions.retain).not.toHaveBeenCalledWith(sid('created-a'), { source: 'mainView' })
-    expect(b.sessions.retained[0]?.release).toHaveBeenCalledOnce()
-  })
 
   it('prepares and selects the default Workspace after both startup baselines', async () => {
     const b = bench({ configureWorkspaces: (workspaces) => {
@@ -720,16 +691,34 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retain).not.toHaveBeenCalled()
   })
 
-  it('creates a fresh Agent on explicit New Session instead of reusing a mounted blank', async () => {
+  it('returns New Session to the Workspace blank that holds its unsent draft', async () => {
     const b = bench({
       sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })], 'pending'),
       workspaces: workspaceState([workspace('a', [sid('blank')])]),
     })
     b.uiWorkspace.startSession(wid('a'))
     await vi.waitFor(() => {
-      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') })
+      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank') })
     })
-    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith(sid('created-a'), expect.anything()) })
+    await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith(sid('blank'), expect.anything()) })
+  })
+
+  it('reuses any blank without a requested preset and only a matching blank with one', async () => {
+    const b = bench({
+      sessions: sessionState([
+        summary('creator', { blank: true, cwd: '/w/a', projectionValues: { agentPreset: 'cordis' } }),
+        summary('plain', { blank: true, cwd: '/w/a', projectionValues: { agentPreset: 'standard' } }),
+      ], 'pending'),
+      workspaces: workspaceState([workspace('a', [sid('creator'), sid('plain')])]),
+    })
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('creator'))
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'standard' })).resolves.toBe(sid('plain'))
+    await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })).resolves.toBe(sid('created-a'))
+    expect(b.sessions.create.mock.calls).toEqual([
+      [{ workspaceId: wid('a'), sessionId: sid('creator') }],
+      [{ workspaceId: wid('a'), sessionId: sid('plain'), agentPreset: 'standard' }],
+      [{ workspaceId: wid('a'), agentPreset: 'ptc' }],
+    ])
   })
 
   it('reports a refused explicit Session creation through the Workspace notice', async () => {
@@ -831,6 +820,8 @@ describe('UiWorkspaceService', () => {
       { name: 'plain text', options: { prompt: '草稿 🧭\nsecond line', clearPreviousDraft: true } },
       { name: 'empty text', options: { prompt: '' } },
       { name: 'clear without prompt', options: { clearPreviousDraft: true } },
+      { name: 'replace without prompt', options: { whenDraftExists: 'replace' } },
+      { name: 'appended text', options: { prompt: 'next', whenDraftExists: 'append' } },
       { name: 'reference-like text', options: { prompt: '🧭 @notes.md' } },
     ])('prepares $name on the retained target before replacing the current selection', async ({ options }) => {
       const backing = persistSelection({})
@@ -862,7 +853,9 @@ describe('UiWorkspaceService', () => {
       expect(b.notify).not.toHaveBeenCalled()
     })
 
-    it.each([undefined, {}, { clearPreviousDraft: false }])('does not invoke the draft API for default options %j', async (options) => {
+    it.each<DraftInitializationOptions | undefined>([
+      undefined, {}, { clearPreviousDraft: false }, { whenDraftExists: 'append' }, { clearPreviousDraft: true, whenDraftExists: 'keep' },
+    ])('does not invoke the draft API for options that cannot change text %j', async (options) => {
       const b = bench({ workspaces: workspaceState([workspace('a')]) })
       const opening = vi.spyOn(b.uiWorkspace, 'openWorkspace')
 
@@ -1355,6 +1348,41 @@ describe('UiWorkspaceService', () => {
     await vi.waitFor(() => {
       expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('blank'), { source: 'mainView' })
     })
+  })
+
+  it('keeps an explicit creation failure visible after a failed startup and a catalog update', async () => {
+    const startupFailure = new Error('startup failed')
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const creating = Promise.withResolvers<undefined>()
+    const created = Promise.withResolvers<SessionId>()
+    const b = bench({
+      sessions: sessionState(),
+      workspaces: workspaceState([workspace('a')]),
+      configureSessions: (sessions) => {
+        sessions.create.mockRejectedValueOnce(startupFailure).mockImplementationOnce(() => {
+          creating.resolve(undefined)
+          return created.promise
+        })
+      },
+    })
+    await vi.waitFor(() => {
+      expect(warning).toHaveBeenCalledExactlyOnceWith('initial Session restoration failed:', startupFailure)
+    })
+
+    b.uiWorkspace.startSession(wid('a'))
+    await creating.promise
+    b.sessions.list.set(sessionState([summary('creating', { blank: true, cwd: '/w/a' })]))
+    created.reject(new Error('creation refused'))
+
+    await vi.waitFor(() => {
+      expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'createFailed', message: 'creation refused' })
+    })
+    expect(b.sessions.create).toHaveBeenCalledTimes(2)
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+    expect(warning.mock.calls).toEqual([
+      ['initial Session restoration failed:', startupFailure],
+      ['new session failed:', expect.any(Error)],
+    ])
   })
 
   it('settles empty startup without creating a Session on later catalog updates', () => {

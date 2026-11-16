@@ -1,13 +1,14 @@
 /** Reconnect-safe Workspace baseline and increment producer. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { Deque } from '@deepseek-ai/dsh-deque'
 import type { DomainChanged } from '@deepseek-ai/dsh-storage-domain'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
   workspaceDomainState,
   workspaceRecord,
-  WorkspaceId,
 } from '@deepseek-ai/dsh-workspace'
 import type {
   WorkspaceBaseline,
@@ -15,12 +16,7 @@ import type {
   WorkspaceView,
 } from './types.ts'
 
-interface ScopeOwner {
-  currentScopeKey(): Promise<string | undefined>
-  owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
-}
-
-/** Frames produced by the domain feed; access filtering alone may synthesize `replace`. */
+/** The frames the feed produces: every follow frame except `replace`, which only access filtering sends. */
 type WorkspaceFeedFrame = Exclude<WorkspaceFollowFrame, { readonly type: 'replace' }>
 
 /**
@@ -42,7 +38,7 @@ export function workspaceView(workspace: Workspace): WorkspaceView {
 function changedWorkspaceView(workspaceId: string, value: unknown): WorkspaceView {
   const record: WorkspaceRecord = workspaceRecord.parse(value)
   return {
-    workspaceId: WorkspaceId(workspaceId),
+    workspaceId: brandString<WorkspaceId>(workspaceId),
     path: record.path,
     title: record.title,
     sessionIds: [...record.sessionIds],
@@ -92,41 +88,14 @@ export class WorkspaceFeed {
    */
   async *follow(signal: AbortSignal): AsyncIterable<WorkspaceFeedFrame> {
     signal.throwIfAborted()
-    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
-    const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
-    const follower = new WorkspaceFollower(owner, scopeKey)
+    const follower = new WorkspaceFollower()
     this.followers.add(follower)
     try {
-      yield { type: 'baseline', value: await this.scopedBaseline(owner, scopeKey) }
+      yield { type: 'baseline', value: this.baseline() }
       yield* follower.read(signal)
     } finally {
       this.followers.delete(follower)
       follower.close()
-    }
-  }
-
-  private async scopedBaseline(
-    owner: ScopeOwner | undefined,
-    scopeKey: string | undefined,
-  ): Promise<WorkspaceBaseline> {
-    if (owner === undefined) return this.baseline()
-    if (scopeKey === undefined) return { items: [], archivedSessionIds: [], pinnedSessionIds: [] }
-    const items = []
-    for (const workspace of this.ctx.workspaceRegistry.list()) {
-      if (await owner.owns('workspace', String(workspace.id), scopeKey)) items.push(workspaceView(workspace))
-    }
-    const archivedSessionIds: WorkspaceBaseline['archivedSessionIds'][number][] = []
-    for (const sessionId of this.ctx.workspaceRegistry.archivedSessionIds) {
-      if (await owner.owns('session', String(sessionId), scopeKey)) archivedSessionIds.push(sessionId)
-    }
-    const pinnedSessionIds: WorkspaceBaseline['pinnedSessionIds'][number][] = []
-    for (const sessionId of this.ctx.workspaceRegistry.pinnedSessionIds) {
-      if (await owner.owns('session', String(sessionId), scopeKey)) pinnedSessionIds.push(sessionId)
-    }
-    return {
-      items,
-      archivedSessionIds,
-      pinnedSessionIds,
     }
   }
 
@@ -163,7 +132,7 @@ export class WorkspaceFeed {
     if (change.table !== 'workspaces') return
     if (change.operation === 'deleted') {
       if (!this.knownIds.delete(change.key)) return
-      this.publish({ type: 'remove', workspaceId: WorkspaceId(change.key) })
+      this.publish({ type: 'remove', workspaceId: brandString<WorkspaceId>(change.key) })
       return
     }
     if (!this.knownIds.has(change.key)) return
@@ -174,7 +143,7 @@ export class WorkspaceFeed {
   }
 
   private publish(frame: Exclude<WorkspaceFeedFrame, { readonly type: 'baseline' }>): void {
-    for (const follower of this.followers) void follower.push(frame)
+    for (const follower of this.followers) follower.push(frame)
   }
 }
 
@@ -186,49 +155,12 @@ class WorkspaceFollower {
   private readonly frames = new Deque<WorkspaceFeedFrame>()
   private waiting: (() => void) | undefined
   private closed = false
-  private pending = Promise.resolve()
 
-  constructor(
-    private readonly owner: ScopeOwner | undefined,
-    private readonly scopeKey: string | undefined,
-  ) {}
-
-  async push(frame: WorkspaceFeedFrame): Promise<void> {
+  push(frame: WorkspaceFeedFrame): void {
     /* v8 ignore next -- closed followers are removed before later publication can reach them. */
     if (this.closed) return
-    this.pending = this.pending.then(async () => {
-      if (this.closed) return
-      if (this.owner !== undefined && this.scopeKey !== undefined) {
-        if (frame.type === 'upsert' && !(await this.owner.owns('workspace', String(frame.workspace.workspaceId), this.scopeKey))) return
-        if (frame.type === 'remove' && !(await this.owner.owns('workspace', String(frame.workspaceId), this.scopeKey))) return
-        if (frame.type === 'order') {
-          const workspaceIds = []
-          for (const id of frame.workspaceIds) {
-            if (await this.owner.owns('workspace', String(id), this.scopeKey)) workspaceIds.push(id)
-          }
-          frame = { type: 'order', workspaceIds }
-        }
-        if (frame.type === 'archived') {
-          const archivedSessionIds = []
-          for (const id of frame.archivedSessionIds) {
-            if (await this.owner.owns('session', String(id), this.scopeKey)) archivedSessionIds.push(id)
-          }
-          frame = { type: 'archived', archivedSessionIds }
-        }
-        if (frame.type === 'pinned') {
-          const pinnedSessionIds = []
-          for (const id of frame.pinnedSessionIds) {
-            if (await this.owner.owns('session', String(id), this.scopeKey)) pinnedSessionIds.push(id)
-          }
-          frame = { type: 'pinned', pinnedSessionIds }
-        }
-      }
-      /* oxlint-disable-next-line no-unnecessary-condition -- close() may run while queued ownership checks await. */
-      if (this.closed) return
-      this.frames.pushBack(frame)
-      this.waiting?.()
-    })
-    await this.pending
+    this.frames.pushBack(frame)
+    this.waiting?.()
   }
 
   close(): void {

@@ -1,8 +1,10 @@
 # Keyless replay keeps both JDCloud Host plugins real and replaces only the
 # external model adapter. A headless prompt has no browser rpcId, so it does
 # not trigger the authenticated current-user refresh.
+- id: credentials
+  disabled: false
 - id: llm-deepseek
-  name: '@deepseek-ai/dsh-llm-deepseek'
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
   disabled: true
 
 - insert:
@@ -20,3 +22,7 @@
 
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'
+
+    # Keep the low-code schema fixture portable across Windows and POSIX hosts.
+    - id: jdcloud-portable-context
+      name: '../../../packages/jdcloud/creation-studio-media/tests/fixtures/portable-context.ts'

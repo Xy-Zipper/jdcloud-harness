@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-15-server-managed-models-for-remote-web.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-15-server-managed-models-for-remote-web.md
-2026-09-15-server-managed-models-for-remote-web.md: 5b2156f90275fe14840ab8f4240db3106ea3b4f1
-2026-09-15-server-managed-models-for-remote-web.zh.md: 07b8b59d80951229a771f256eea4af31dcd72c5d
+/agent-note-server-managed-models-for-remote-web-deployments:
+  en: 5988391f505ee3e2
+  zh: 0c72e8d4365bef2f
+/agent-note-server-managed-models-for-remote-web-deployments/problem:
+  en: 0268f8696bd8a405
+  zh: 57ea34dd67a147a8
+/agent-note-server-managed-models-for-remote-web-deployments/decision:
+  en: 80bccb7ed994328b
+  zh: b983c0ed296c69d9
+/agent-note-server-managed-models-for-remote-web-deployments/alternatives-considered:
+  en: 67c273da6c0ff59a
+  zh: d4b0b40fea905806
+/agent-note-server-managed-models-for-remote-web-deployments/consequences:
+  en: e3fd3998a9ced7b4
+  zh: cebd98a19e6d7820

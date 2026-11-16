@@ -1,7 +1,9 @@
+import { unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import AgentRegistry, { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
-import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
 import {
   AttachmentId,
@@ -105,6 +107,7 @@ function createRunningAgent(ctx: Context): Agent {
   const agent: Agent = {
     id,
     options: {},
+    model: unsupportedModel(),
     session,
     inbox: createInboxStub(),
     status: 'running',
@@ -129,9 +132,9 @@ async function mountLowcode(options: {
   const ctx = new Context()
   activeContexts.push(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeExecutor)
   await ctx.plugin(AgentRegistry)
 
   const readImage = vi.fn(async (ref: ImageAttachmentRef) => ({
@@ -199,7 +202,7 @@ async function mountLowcode(options: {
   async function preStep(messages: UserMessage[], turn: number, step: number): Promise<UserMessage[]> {
     const decision = await agentEvents(ctx, agent).waterfall(
       'agent/pre-step',
-      { messages, turn, step, signal: new AbortController().signal },
+      { messages, turn, step, modelSelection: { provider: 'fixture', model: 'fixture' }, signal: new AbortController().signal },
       () => Promise.resolve({ kind: 'enter' as const, messages }),
     )
     if (decision.kind !== 'enter') throw new Error('test pre-step was rejected')
@@ -237,7 +240,7 @@ async function mountLowcode(options: {
       return await preStep([], turn, step)
     },
     call(name, argumentsValue) {
-      return ctx.agents.withInitiator(agent, () => ctx.tools.execute({
+      return ctx.agents.withInitiator(agent, () => executeToolFixture(ctx, {
         name,
         arguments: argumentsValue,
         callId: ToolCallId(`call-${String(++calls)}`),

@@ -22,17 +22,26 @@ export function registerToasts(
   ctx.slots.registerFactory({ name: 'workspace.toast.content', scope: 'root' }, WorkspaceToast)
   ctx.slots.inject('workspace.toast', function* () {
     yield ctx.slots.register({
-      name: 'workspace.toast', key: 'sessionDeleted', locale: 'workspace',
-      inject: (): ToastDisplayInjected<'sessionDeleted'> => ({
-        display: (_notice, t) => ({ text: t('toast.sessionDeleted'), tone: 'success' }),
-      }),
-    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleted'>>)
-    yield ctx.slots.register({
       name: 'workspace.toast', key: 'workspaceDeleted', locale: 'workspace',
       inject: (): ToastDisplayInjected<'workspaceDeleted'> => ({
         display: (_notice, t) => ({ text: t('toast.workspaceDeleted'), tone: 'success' }),
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'workspaceDeleted'>>)
+
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sessionDeleted', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sessionDeleted'> => ({
+        display: (_notice, t) => ({ text: t('toast.sessionDeleted'), tone: 'success' }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleted'>>)
+
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'readingFailed', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'readingFailed'> => ({
+        display: (_notice, t) => ({ text: t('toast.readingFailed'), tone: 'warning' }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'readingFailed'>>)
+
     yield ctx.slots.register({
       name: 'workspace.toast', key: 'sessionIdCopied', locale: 'workspace',
       inject: (): ToastDisplayInjected<'sessionIdCopied'> => ({
@@ -92,25 +101,17 @@ export function registerToasts(
         }),
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'forkRequiresOpen'>>)
-    yield ctx.slots.register({
-      name: 'workspace.toast', key: 'archived', locale: 'workspace', store: viewStore,
-      inject: (): ArchiveToastInjected => ({
-        display: (notice, t, dismiss) => ({
-          text: t('toast.archived'), tone: 'success', holdMs: 6000,
-          actions: [{ label: t('toast.archivedUndo'), onClick: () => { dismiss(); actions.undoArchive(notice.sessionId) } }],
+    for (const key of ['archived', 'stoppedAndArchived'] as const) {
+      yield ctx.slots.register({
+        name: 'workspace.toast', key, locale: 'workspace', store: viewStore,
+        inject: (): ArchiveToastInjected => ({
+          display: (notice, t, dismiss) => ({
+            text: notice.message ?? t(`toast.${notice.kind}`), tone: notice.tone ?? 'success', holdMs: 6000,
+            actions: [{ label: t('toast.archivedUndo'), onClick: () => { dismiss(); actions.undoArchive(notice.sessionId) } }],
+          }),
+          filterAction: archiveFilterAction,
         }),
-        filterAction: archiveFilterAction,
-      }),
-    }, ArchiveToastEntry)
-    yield ctx.slots.register({
-      name: 'workspace.toast', key: 'stoppedAndArchived', locale: 'workspace', store: viewStore,
-      inject: (): ArchiveToastInjected => ({
-        display: (notice, t, dismiss) => ({
-          text: t('toast.stoppedAndArchived'), tone: 'success', holdMs: 6000,
-          actions: [{ label: t('toast.archivedUndo'), onClick: () => { dismiss(); actions.undoArchive(notice.sessionId) } }],
-        }),
-        filterAction: archiveFilterAction,
-      }),
-    }, ArchiveToastEntry)
+      }, ArchiveToastEntry)
+    }
   })
 }

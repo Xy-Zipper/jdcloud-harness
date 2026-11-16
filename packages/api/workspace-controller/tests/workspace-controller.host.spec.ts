@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { type SessionId } from '@deepseek-ai/dsh-session'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { RemoteError, type PeerId, type Principal, type RemoteInvocation } from '@deepseek-ai/dsh-typert-protocol'
@@ -15,6 +15,7 @@ import { DEFAULT_WORKSPACE_DIRECTORY } from '../src/default-workspace.ts'
 import { WorkspaceFeed } from '../src/feed.ts'
 import type { WorkspaceFollowFrame } from '../src/types.ts'
 import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 // The controller relays whatever families the providers report; this suite merges its own.
 declare module '@deepseek-ai/dsh-workspace/types' {
@@ -119,7 +120,7 @@ describe('WorkspaceController commands', () => {
   it('deletes member Sessions before removing a Workspace when explicitly requested', async () => {
     const { controller, ctx, root } = await harness()
     const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'cascade'))
-    const session = ctx.sessions.create(SessionId('cascade-session'), { meta: { cwd: workspace.path } })
+    const session = ctx.sessions.create(brandString<SessionId>('cascade-session'), { meta: { cwd: workspace.path } })
     await workspace.attachSession(session.id)
     const remove = vi.fn(async () => {
       expect(ctx.workspaceRegistry.get(workspace.id)).toBeDefined()
@@ -135,7 +136,7 @@ describe('WorkspaceController commands', () => {
   it('retains the Workspace if a member Session deletion fails', async () => {
     const { controller, ctx, root } = await harness()
     const workspace = await ctx.workspaceRegistry.create(stageDir(root, 'failed-cascade'))
-    const session = ctx.sessions.create(SessionId('failed-session'), { meta: { cwd: workspace.path } })
+    const session = ctx.sessions.create(brandString<SessionId>('failed-session'), { meta: { cwd: workspace.path } })
     await workspace.attachSession(session.id)
     ctx.provide('sessionController', { delete: async () => { throw new Error('storage unavailable') } } as never)
     await expect(controller.delete({ workspaceId: workspace.id, deleteSessions: true })).rejects.toThrow('storage unavailable')
@@ -209,7 +210,7 @@ describe('WorkspaceController commands', () => {
   it('refuses mutations by foreign Workspace and Session ids', async () => {
     const { controller, ctx, root } = await harness()
     const foreignWorkspace = await ctx.workspaceRegistry.create(stageDir(root, 'foreign'))
-    const foreignSession = ctx.sessions.create(SessionId('foreign'), { meta: { cwd: root } })
+    const foreignSession = ctx.sessions.create(brandString<SessionId>('foreign'), { meta: { cwd: root } })
     ctx.provide('jdcloudAuthController', {
       owns: () => Promise.resolve(false),
       claimOwned: () => Promise.resolve(),
@@ -292,27 +293,27 @@ describe('WorkspaceController commands', () => {
     vi.spyOn(workspace, 'insertSessionBefore').mockRejectedValueOnce(moveFailure)
     await expect(controller.insertSessionBefore({
       workspaceId: created.workspace.workspaceId,
-      sessionId: SessionId('session'),
+      sessionId: brandString<SessionId>('session'),
     })).rejects.toBe(moveFailure)
 
     const archiveFailure = new Error('archive storage failed')
     vi.spyOn(ctx.workspaceRegistry, 'archiveSession').mockRejectedValueOnce(archiveFailure)
-    await expect(controller.archiveSession({ sessionId: SessionId('session') }))
+    await expect(controller.archiveSession({ sessionId: brandString<SessionId>('session') }))
       .rejects.toBe(archiveFailure)
 
     const unarchiveFailure = new Error('unarchive storage failed')
     vi.spyOn(ctx.workspaceRegistry, 'unarchiveSession').mockRejectedValueOnce(unarchiveFailure)
-    await expect(controller.unarchiveSession({ sessionId: SessionId('session') }))
+    await expect(controller.unarchiveSession({ sessionId: brandString<SessionId>('session') }))
       .rejects.toBe(unarchiveFailure)
 
     const pinFailure = new Error('pin storage failed')
     vi.spyOn(ctx.workspaceRegistry, 'pinSession').mockRejectedValueOnce(pinFailure)
-    await expect(controller.pinSession({ sessionId: SessionId('session') }))
+    await expect(controller.pinSession({ sessionId: brandString<SessionId>('session') }))
       .rejects.toBe(pinFailure)
 
     const unpinFailure = new Error('unpin storage failed')
     vi.spyOn(ctx.workspaceRegistry, 'unpinSession').mockRejectedValueOnce(unpinFailure)
-    await expect(controller.unpinSession({ sessionId: SessionId('session') }))
+    await expect(controller.unpinSession({ sessionId: brandString<SessionId>('session') }))
       .rejects.toBe(unpinFailure)
   })
 
@@ -353,7 +354,7 @@ describe('WorkspaceController commands', () => {
     await expect(controller.insertBefore({ workspaceId: 'missing' as WorkspaceId }))
       .rejects.toMatchObject({ code: 'workspace/not-found' })
 
-    const session = ctx.sessions.create(SessionId('session-one'), {
+    const session = ctx.sessions.create(brandString<SessionId>('session-one'), {
       meta: { cwd: first.workspace.path },
     })
     const workspace = ctx.workspaceRegistry.get(first.workspace.workspaceId)
@@ -365,12 +366,12 @@ describe('WorkspaceController commands', () => {
     })).resolves.toMatchObject({ workspace: { sessionIds: [session.id] } })
     await expect(controller.insertSessionBefore({
       workspaceId: first.workspace.workspaceId,
-      sessionId: SessionId('missing-session'),
+      sessionId: brandString<SessionId>('missing-session'),
     })).rejects.toMatchObject({ code: 'workspace/move-invalid' })
     await expect(controller.insertSessionBefore({
       workspaceId: first.workspace.workspaceId,
       sessionId: session.id,
-      beforeSessionId: SessionId('missing-anchor'),
+      beforeSessionId: brandString<SessionId>('missing-anchor'),
     })).rejects.toMatchObject({
       code: 'workspace/move-invalid',
       details: { beforeSessionId: 'missing-anchor' },
@@ -404,7 +405,7 @@ describe('WorkspaceController commands', () => {
 
     await expect(controller.archiveSession({ sessionId: session.id }))
       .resolves.toEqual({ archivedSessionIds: [session.id] })
-    await expect(controller.archiveSession({ sessionId: SessionId('unknown') }))
+    await expect(controller.archiveSession({ sessionId: brandString<SessionId>('unknown') }))
       .rejects.toMatchObject({ code: 'session/not-found' })
     await expect(controller.unarchiveSession({ sessionId: session.id }))
       .resolves.toEqual({ archivedSessionIds: [] })
@@ -416,17 +417,17 @@ describe('WorkspaceController commands', () => {
   it('pins only known unarchived Sessions and unpins idempotently', async () => {
     const { controller, ctx, root } = await harness()
     const created = await controller.create({ path: stageDir(root, 'pins') })
-    const session = ctx.sessions.create(SessionId('pin-me'), {
+    const session = ctx.sessions.create(brandString<SessionId>('pin-me'), {
       meta: { cwd: created.workspace.path },
     })
 
     await expect(controller.pinSession({ sessionId: session.id }))
       .resolves.toEqual({ pinnedSessionIds: [session.id] })
-    await expect(controller.pinSession({ sessionId: SessionId('unknown') }))
+    await expect(controller.pinSession({ sessionId: brandString<SessionId>('unknown') }))
       .rejects.toMatchObject({ code: 'session/not-found' })
 
     // Pinning an archived Session is a caller error, not a missing session.
-    const archived = ctx.sessions.create(SessionId('stored'), {
+    const archived = ctx.sessions.create(brandString<SessionId>('stored'), {
       meta: { cwd: created.workspace.path },
     })
     await controller.archiveSession({ sessionId: archived.id })
@@ -442,9 +443,9 @@ describe('WorkspaceController commands', () => {
 })
 describe('WorkspaceController follow', () => {
   it('limits pinned Session baselines and increments to the opening tenant', async () => {
-    const { ctx, root } = await harness()
-    const owned = ctx.sessions.create(SessionId('owned-pin'), { meta: { cwd: root } })
-    const foreign = ctx.sessions.create(SessionId('foreign-pin'), { meta: { cwd: root } })
+    const { ctx, root, controller } = await harness()
+    const owned = ctx.sessions.create(brandString<SessionId>('owned-pin'), { meta: { cwd: root } })
+    const foreign = ctx.sessions.create(brandString<SessionId>('foreign-pin'), { meta: { cwd: root } })
     await ctx.workspaceRegistry.pinSession(owned.id)
     await ctx.workspaceRegistry.pinSession(foreign.id)
     ctx.provide('jdcloudAuthController', {
@@ -453,7 +454,7 @@ describe('WorkspaceController follow', () => {
     } as never)
 
     const abort = new AbortController()
-    const iterator = new WorkspaceFeed(ctx).follow(abort.signal)[Symbol.asyncIterator]()
+    const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
     try {
       await expect(nextFrame(iterator)).resolves.toMatchObject({
         type: 'baseline', value: { pinnedSessionIds: [owned.id] },
@@ -467,7 +468,7 @@ describe('WorkspaceController follow', () => {
   })
 
   it('keeps the opening tenant scope for its baseline', async () => {
-    const { ctx, root } = await harness()
+    const { ctx, root, controller } = await harness()
     await ctx.workspaceRegistry.create(stageDir(root, 'tenant-workspace'))
     const scopes: (string | undefined)[] = []
     ctx.provide('jdcloudAuthController', {
@@ -478,7 +479,7 @@ describe('WorkspaceController follow', () => {
       },
     } as never)
 
-    const iterator = new WorkspaceFeed(ctx).follow(new AbortController().signal)[Symbol.asyncIterator]()
+    const iterator = controller.follow(new AbortController().signal)[Symbol.asyncIterator]()
     await expect(nextFrame(iterator)).resolves.toMatchObject({
       type: 'baseline', value: { items: [{ title: 'tenant-workspace' }] },
     })
@@ -512,7 +513,7 @@ describe('WorkspaceController follow', () => {
 
   it('starts a fresh feed with existing pins and follows their removal', async () => {
     const { controller, ctx, root } = await harness()
-    const session = ctx.sessions.create(SessionId('already-pinned'), { meta: { cwd: root } })
+    const session = ctx.sessions.create(brandString<SessionId>('already-pinned'), { meta: { cwd: root } })
     await controller.pinSession({ sessionId: session.id })
     const feed = new WorkspaceFeed(ctx)
     const abort = new AbortController()
@@ -566,7 +567,7 @@ describe('WorkspaceController follow', () => {
       workspaceIds: [first.workspace.workspaceId, second.workspace.workspaceId],
     })
 
-    const session = ctx.sessions.create(SessionId('archived'), {
+    const session = ctx.sessions.create(brandString<SessionId>('archived'), {
       meta: { cwd: first.workspace.path },
     })
     await controller.archiveSession({ sessionId: session.id })
@@ -607,8 +608,8 @@ describe('WorkspaceController follow', () => {
     const hiddenWorkspace = await controller.create({ path: stageDir(root, 'hidden') })
     const shownId = shown.workspace.workspaceId
     const hiddenId = hiddenWorkspace.workspace.workspaceId
-    const shared = ctx.sessions.create(SessionId('shared'), { meta: { cwd: shown.workspace.path } })
-    const secret = ctx.sessions.create(SessionId('secret'), { meta: { cwd: shown.workspace.path } })
+    const shared = ctx.sessions.create(brandString<SessionId>('shared'), { meta: { cwd: shown.workspace.path } })
+    const secret = ctx.sessions.create(brandString<SessionId>('secret'), { meta: { cwd: shown.workspace.path } })
     const workspace = ctx.workspaceRegistry.get(shownId)
     if (workspace === undefined) throw new Error('fixture Workspace disappeared')
     await workspace.attachSession(shared.id)

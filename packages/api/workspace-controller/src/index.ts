@@ -2,9 +2,8 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
-import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { WorkspaceCommands } from './commands.ts'
 import { DirectoryPickerController } from './directory-picker.ts'
@@ -53,10 +52,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+
 interface ScopeOwner {
   currentScopeKey(): Promise<string | undefined>
   owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
 }
+
 
 /** Host service backing the generated `ctx.remote.workspace` namespace. */
 export class WorkspaceController extends TypertRemoteService {
@@ -90,28 +91,12 @@ export class WorkspaceController extends TypertRemoteService {
   }
 
   /**
-   * Read the Workspaces owned by the current authenticated account scope.
-   * @returns Detached Workspace projections in durable registry order.
-   */
-  async listVisible(): Promise<readonly WorkspaceView[]> {
-    const owner = scopeOwner(this.ctx)
-    if (owner === undefined) return this.ctx.workspaceRegistry.list().map(workspaceView)
-    const scopeKey = await owner.currentScopeKey()
-    if (scopeKey === undefined) return []
-    const visible: WorkspaceView[] = []
-    for (const workspace of this.ctx.workspaceRegistry.list()) {
-      if (await owner.owns('workspace', String(workspace.id), scopeKey)) visible.push(workspaceView(workspace))
-    }
-    return visible
-  }
-
-  /**
    * Create or idempotently resolve one Workspace over an existing directory.
    * @param request - directory path to register.
    * @returns the Workspace and whether this call created it.
    */
   @Remote('create')
-  create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
+  async create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
     return this.commands.create(request)
   }
 
@@ -125,7 +110,7 @@ export class WorkspaceController extends TypertRemoteService {
    */
   @Remote('initializeDefault')
   async initializeDefault(signal: AbortSignal): Promise<WorkspaceValue | undefined> {
-    // The registry's default is process-global; JDCloud owners choose their own directories instead.
+    // JDCloud users select their own account-contained Workspace directories.
     if (this.ctx.get('jdcloudAuthController') !== undefined) return undefined
     const workspace = await this.ctx.workspaceRegistry.initializeDefault(async () => {
       const timeout = AbortSignal.timeout(this.config.documentsLookupTimeoutMs)
@@ -142,18 +127,19 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the updated Workspace projection.
    */
   @Remote('rename')
-  rename(request: WorkspaceRenameRequest): Promise<WorkspaceValue> {
+  async rename(request: WorkspaceRenameRequest): Promise<WorkspaceValue> {
+    await this.assertOwned('workspace', String(request.workspaceId))
     return this.commands.rename(request)
   }
 
   /**
-   * Remove one Workspace registration, optionally deleting its Sessions first.
-   * The project directory remains; a failed Session cleanup retains the registration.
-   * @param request - Workspace identity and whether to delete its Sessions.
+   * Remove one Workspace registration while retaining files and Sessions.
+   * @param request - Workspace identity to remove.
    * @returns deletion confirmation.
    */
   @Remote('delete')
-  delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+  async delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue> {
+    await this.assertOwned('workspace', String(request.workspaceId))
     return this.commands.delete(request)
   }
 
@@ -163,8 +149,11 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the complete resulting Workspace order.
    */
   @Remote('insertBefore')
-  insertBefore(request: WorkspaceInsertBeforeRequest): Promise<WorkspaceOrderValue> {
-    return this.commands.insertBefore(request)
+  async insertBefore(request: WorkspaceInsertBeforeRequest): Promise<WorkspaceOrderValue> {
+    await this.assertOwned('workspace', String(request.workspaceId))
+    if (request.beforeWorkspaceId !== undefined) await this.assertOwned('workspace', request.beforeWorkspaceId)
+    const result = await this.commands.insertBefore(request)
+    return { workspaceIds: await this.ownedIds('workspace', result.workspaceIds) }
   }
 
   /**
@@ -173,7 +162,10 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the updated Workspace projection.
    */
   @Remote('insertSessionBefore')
-  insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue> {
+  async insertSessionBefore(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue> {
+    await this.assertOwned('workspace', String(request.workspaceId))
+    await this.assertOwned('session', request.sessionId)
+    if (request.beforeSessionId !== undefined) await this.assertOwned('session', request.beforeSessionId)
     return this.commands.insertSessionBefore(request)
   }
 
@@ -183,8 +175,10 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the complete resulting archive set.
    */
   @Remote('archiveSession')
-  archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
-    return this.commands.archiveSession(request)
+  async archiveSession(request: WorkspaceArchiveSessionRequest): Promise<WorkspaceArchiveValue> {
+    await this.assertOwned('session', String(request.sessionId))
+    const result = await this.commands.archiveSession(request)
+    return { archivedSessionIds: await this.ownedIds('session', result.archivedSessionIds) }
   }
 
   /**
@@ -193,8 +187,10 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the complete resulting archive set.
    */
   @Remote('unarchiveSession')
-  unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
-    return this.commands.unarchiveSession(request)
+  async unarchiveSession(request: WorkspaceUnarchiveSessionRequest): Promise<WorkspaceArchiveValue> {
+    await this.assertOwned('session', String(request.sessionId))
+    const result = await this.commands.unarchiveSession(request)
+    return { archivedSessionIds: await this.ownedIds('session', result.archivedSessionIds) }
   }
 
   /**
@@ -203,8 +199,10 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   @Remote('pinSession')
-  pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue> {
-    return this.commands.pinSession(request)
+  async pinSession(request: WorkspacePinSessionRequest): Promise<WorkspacePinValue> {
+    await this.assertOwned('session', String(request.sessionId))
+    const result = await this.commands.pinSession(request)
+    return { pinnedSessionIds: await this.ownedIds('session', result.pinnedSessionIds) }
   }
 
   /**
@@ -213,8 +211,10 @@ export class WorkspaceController extends TypertRemoteService {
    * @returns the complete resulting pin set, most recently pinned first.
    */
   @Remote('unpinSession')
-  unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
-    return this.commands.unpinSession(request)
+  async unpinSession(request: WorkspaceUnpinSessionRequest): Promise<WorkspacePinValue> {
+    await this.assertOwned('session', String(request.sessionId))
+    const result = await this.commands.unpinSession(request)
+    return { pinnedSessionIds: await this.ownedIds('session', result.pinnedSessionIds) }
   }
 
   /**
@@ -247,7 +247,38 @@ export class WorkspaceController extends TypertRemoteService {
         pinnedSessionIds: sessions(value.pinnedSessionIds),
       }
     }
-    for await (const frame of this.feed.follow(signal)) {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    const scopeKey = await owner?.currentScopeKey()
+    for await (let frame of this.feed.follow(signal)) {
+      if (owner !== undefined) {
+        const owned = async (kind: 'workspace' | 'session', id: string): Promise<boolean> => scopeKey !== undefined && owner.owns(kind, id, scopeKey)
+        if (frame.type === 'baseline') {
+          const items = []
+          for (const item of frame.value.items) if (await owned('workspace', item.workspaceId)) items.push({ ...item, sessionIds: await this.ownedIds('session', item.sessionIds, scopeKey) })
+          const archivedSessionIds = []
+          for (const id of frame.value.archivedSessionIds) if (await owned('session', id)) archivedSessionIds.push(id)
+          const pinnedSessionIds = []
+          for (const id of frame.value.pinnedSessionIds) if (await owned('session', id)) pinnedSessionIds.push(id)
+          frame = { type: 'baseline', value: { items, archivedSessionIds, pinnedSessionIds } }
+        } else if (frame.type === 'upsert') {
+          if (!await owned('workspace', frame.workspace.workspaceId)) continue
+          frame = { ...frame, workspace: { ...frame.workspace, sessionIds: await this.ownedIds('session', frame.workspace.sessionIds, scopeKey) } }
+        }
+        else if (frame.type === 'remove' && !await owned('workspace', frame.workspaceId)) continue
+        else if (frame.type === 'order') {
+          const workspaceIds = []
+          for (const id of frame.workspaceIds) if (await owned('workspace', id)) workspaceIds.push(id)
+          frame = { type: 'order', workspaceIds }
+        } else if (frame.type === 'archived') {
+          const archivedSessionIds = []
+          for (const id of frame.archivedSessionIds) if (await owned('session', id)) archivedSessionIds.push(id)
+          frame = { type: 'archived', archivedSessionIds }
+        } else if (frame.type === 'pinned') {
+          const pinnedSessionIds = []
+          for (const id of frame.pinnedSessionIds) if (await owned('session', id)) pinnedSessionIds.push(id)
+          frame = { type: 'pinned', pinnedSessionIds }
+        }
+      }
       switch (frame.type) {
         case 'baseline':
           yield { type: 'baseline', value: filtered(frame.value) }
@@ -284,21 +315,45 @@ export class WorkspaceController extends TypertRemoteService {
       }
     }
   }
+
+
+  /**
+   * Read the Workspaces owned by the current authenticated account scope.
+   * @returns Detached Workspace projections in durable registry order.
+   */
+  async listVisible(): Promise<readonly WorkspaceView[]> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner === undefined) return this.ctx.workspaceRegistry.list().map(workspaceView)
+    const scopeKey = await owner.currentScopeKey()
+    if (scopeKey === undefined) return []
+    const visible: WorkspaceView[] = []
+    for (const workspace of this.ctx.workspaceRegistry.list()) {
+      if (await owner.owns('workspace', String(workspace.id), scopeKey)) visible.push({ ...workspaceView(workspace), sessionIds: await this.ownedIds('session', workspace.sessionIds, scopeKey) })
+    }
+    return visible
+  }
+
+  /** Retain only ids owned by the opening JDCloud account. */
+  private async ownedIds<T extends string>(kind: 'session' | 'workspace', ids: readonly T[], scopeKey?: string): Promise<T[]> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner === undefined) return [...ids]
+    const visible: T[] = []
+    for (const id of ids) if (await owner.owns(kind, id, scopeKey)) visible.push(id)
+    return visible
+  }
+
+  /** Refuse resource ids outside the signed-in JDCloud account. */
+  private async assertOwned(kind: 'session' | 'workspace', id: string): Promise<void> {
+    const owner = this.ctx.get('jdcloudAuthController') as ScopeOwner | undefined
+    if (owner !== undefined && !await owner.owns(kind, id)) throw kind === 'session'
+      ? new RemoteError('session/not-found', `session "${id}" not found`, { sessionId: id as SessionId })
+      : new RemoteError('workspace/not-found', `workspace "${id}" not found`, { workspaceId: id as WorkspaceId })
+  }
 }
 
 /* v8 ignore next 3 -- closed-union backstop. */
 function assertNever(value: never): never {
   throw new Error(`unreachable Workspace follow frame: ${JSON.stringify(value)}`)
-}
-
-/** Resolve either supported account authentication controller. */
-function scopeOwner(ctx: Context): ScopeOwner | undefined {
-  const getService = ctx.get.bind(ctx) as (name: string) => object | undefined
-  const candidate = getService('ontologyAuthController') ?? getService('jdcloudAuthController')
-  if (candidate === undefined
-    || typeof Reflect.get(candidate, 'currentScopeKey') !== 'function'
-    || typeof Reflect.get(candidate, 'owns') !== 'function') return undefined
-  return candidate as ScopeOwner
 }
 
 export default WorkspaceController

@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import { mkdir, stat } from 'node:fs/promises'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
@@ -32,7 +33,7 @@ export type WorkspaceId = WorkspaceIdBrand
 
 /** Options controlling registration of a canonical directory path. */
 export interface WorkspaceCreateOptions {
-  /** Permit another registration when an owner already has the same path. */
+  /** Permit another account to register the same canonical path. */
   readonly allowDuplicatePath?: boolean
 }
 
@@ -151,6 +152,22 @@ declare module '@deepseek-ai/cordis' {
      * @mode parallel
      */
     'workspace/session-stop'(request: SessionActivityRequest): Promise<void> | void
+    /**
+     * Admit optional follow-up work after durable archival and any stop requests.
+     * Dispatched inside the registry's write queue: a listener registers its work
+     * and returns, and runs the work and any unbounded I/O afterwards. Listener
+     * failures are logged without undoing archival. Listeners own and drain their background work.
+     * @param request - newly archived Session; repeated archive requests do not dispatch.
+     * @mode parallel
+     */
+    'workspace/session-archived'(request: SessionActivityRequest): Promise<void> | void
+    /**
+     * Cancel or settle archive follow-up work before making a Session available again.
+     * A rejection retains the archived state.
+     * @param request - Session about to leave the archive set.
+     * @mode parallel
+     */
+    'workspace/session-unarchiving'(request: SessionActivityRequest): Promise<void> | void
   }
 }
 
@@ -229,12 +246,12 @@ export class WorkspaceRegistry extends Service {
    * Create or reuse a workspace for an existing directory. The fully qualified
    * path is canonicalized through `fs.realpath`; a relative, nonexistent, or
    * non-directory path rejects. Repeated calls for the same canonical path
-   * return the existing entity without changing its title, unless duplicate registration is requested.
+   * return the existing entity without changing its title.
    * A newly created workspace is prepended to the durable registry order.
    * Different canonical paths may share a display title.
    * @param path - Existing directory to own, in a fully qualified path spelling.
    * @param title - Display title used only when a new record is created.
-   * @param options - Allow another owner to register the same canonical directory.
+   * @param options - Permit another account to register the same canonical directory.
    * @returns the existing or newly durable workspace.
    */
   // TODO: `title` lost its last production caller when the gateway's
@@ -319,29 +336,6 @@ export class WorkspaceRegistry extends Service {
   }
 
   /**
-   * Remove a permanently deleted Session from memberships, archives and pins.
-   * @param sessionId - Session whose producers and durable storage are already removed.
-   * @returns completion after navigation records are durable; failures reject for retry.
-   */
-  forgetSession(sessionId: SessionId): Promise<void> {
-    return this.enqueueOperation(async () => {
-      for (const workspace of this.entities.values()) await workspace.detachSession(sessionId)
-      const state = this.requireState()
-      if (state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)) {
-        await this.setState({
-          ...state,
-          archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
-          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
-        })
-      }
-      this.headers.delete(sessionId)
-      this.sessionPaths.delete(sessionId)
-      this.missingSessionPaths.delete(sessionId)
-      this.invalidSessionPaths.delete(sessionId)
-    })
-  }
-
-  /**
    * Move one workspace within the durable display order, DOM-insertBefore-like.
    * With an anchor it lands before that workspace; without one it appends.
    * @param id - Workspace to move.
@@ -390,7 +384,7 @@ export class WorkspaceRegistry extends Service {
    * resolves without writing, asking, or stopping.
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
-   * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
+   * @returns resolution after durability, any stop requests, and follow-up admission.
    */
   archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void> {
     return this.enqueueOperation(async () => {
@@ -413,6 +407,11 @@ export class WorkspaceRegistry extends Service {
         pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
       })
       if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
+      try {
+        await this.ctx.parallel('workspace/session-archived', { sessionId })
+      } catch (error) {
+        this.ctx.logger.warn('Session archived, but archive follow-up admission failed: %s', error)
+      }
     })
   }
 
@@ -432,6 +431,7 @@ export class WorkspaceRegistry extends Service {
       // check-then-write pair cannot interleave with a concurrent archive.
       const state = this.requireState()
       if (!state.archivedSessionIds.includes(sessionId)) return
+      await this.ctx.parallel('workspace/session-unarchiving', { sessionId })
       await this.setState({
         ...state,
         archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
@@ -530,8 +530,11 @@ export class WorkspaceRegistry extends Service {
    * @returns the workspace owning the canonical path, when one exists.
    */
   async resolveByPath(path: string): Promise<Workspace | undefined> {
-    const matches = await this.resolveAllByPath(path)
-    return matches[0]
+    const canonical = await realpathNormalize(path)
+    for (const entity of this.entities.values()) {
+      if (entity.path === canonical) return entity
+    }
+    return undefined
   }
 
   /**
@@ -546,12 +549,7 @@ export class WorkspaceRegistry extends Service {
       .filter((entity): entity is WorkspaceEntity => entity !== undefined && entity.path === canonical)
   }
 
-  private async createCanonical(
-    canonical: string,
-    title: string | undefined,
-    allowDuplicatePath: boolean,
-    firstUse = false,
-  ): Promise<WorkspaceEntity> {
+  private async createCanonical(canonical: string, title?: string, allowDuplicatePath = false, firstUse = false): Promise<WorkspaceEntity> {
     if (!allowDuplicatePath) {
       for (const entity of this.entities.values()) {
         if (entity.path === canonical) return entity
@@ -561,7 +559,7 @@ export class WorkspaceRegistry extends Service {
     const workspaceName = title ?? defaultWorkspaceTitle(canonical)
     const table = this.requireTable()
     const state = this.requireState()
-    const id = WorkspaceId(randomUUID())
+    const id = brandString<WorkspaceId>(randomUUID())
     const now = new Date().toISOString()
     const record: WorkspaceRecord = {
       path: canonical,
@@ -626,6 +624,31 @@ export class WorkspaceRegistry extends Service {
       throw error
     }
     return entity
+  }
+
+
+
+  /**
+   * Remove a permanently deleted Session from memberships, archives and pins.
+   * @param sessionId - Session whose producers and durable storage are already removed.
+   * @returns completion after navigation records are durable; failures reject for retry.
+   */
+  forgetSession(sessionId: SessionId): Promise<void> {
+    return this.enqueueOperation(async () => {
+      for (const workspace of this.entities.values()) await workspace.detachSession(sessionId)
+      const state = this.requireState()
+      if (state.archivedSessionIds.includes(sessionId) || state.pinnedSessionIds.includes(sessionId)) {
+        await this.setState({
+          ...state,
+          archivedSessionIds: state.archivedSessionIds.filter(id => id !== sessionId),
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
+        })
+      }
+      this.headers.delete(sessionId)
+      this.sessionPaths.delete(sessionId)
+      this.missingSessionPaths.delete(sessionId)
+      this.invalidSessionPaths.delete(sessionId)
+    })
   }
 
   private async deleteKnown(id: WorkspaceId): Promise<boolean> {
@@ -725,7 +748,7 @@ export class WorkspaceRegistry extends Service {
           .map(header => header.id)
           .filter(sessionId => !accounted.has(sessionId))
         if (sessionIds.length === 0) continue
-        id = WorkspaceId(randomUUID())
+        id = brandString<WorkspaceId>(randomUUID())
         const createdAt = new Date(group.newestAt).toISOString()
         const record: WorkspaceRecord = {
           path: group.path,

@@ -1,6 +1,106 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/jdcloud/tool-jdcloud-lowcode/README.md
-README.md: 223a0147161fdc909c746377a744df13a1d63902
-README.zh.md: 138fb4076b99b5d1d0a344b68d479fa7652b35a6
+/:
+  en: ed47d00be8675572
+  zh: 9d4169377ef5d62a
+/deepseek-ai-dsh-tool-jdcloud-lowcode:
+  en: 18b65843021a7af5
+  zh: 099f668d73702d3a
+/deepseek-ai-dsh-tool-jdcloud-lowcode/summary:
+  en: 64b93466c972e2b0
+  zh: bcc84e4c1b8984e2
+/deepseek-ai-dsh-tool-jdcloud-lowcode/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 1fa9a72d1ee045cc
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package:
+  en: 851ee35b036c8801
+  zh: 0f6990712fbc9de2
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package/when-to-choose-it:
+  en: e1b3c83b5a3c8d27
+  zh: 21a4cbf30b254d94
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package/minimal-configuration:
+  en: de088ca82bc67330
+  zh: fd893cf185d46210
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package/per-prompt-capability-snapshot:
+  en: bb7a6e5d22899f0b
+  zh: 8daa0c2d06bce26f
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package/operations-and-authorization:
+  en: a77eafe6fe316b3f
+  zh: b649f95427c6c1c8
+/deepseek-ai-dsh-tool-jdcloud-lowcode/use-this-package/failures-and-recovery:
+  en: c792e3deaefd72c7
+  zh: bb74b2bdf1c23d17
+/deepseek-ai-dsh-tool-jdcloud-lowcode/understand-the-implementation:
+  en: dd9b54c7230eb790
+  zh: f0d6849634b7a316
+/deepseek-ai-dsh-tool-jdcloud-lowcode/understand-the-implementation/design-concept:
+  en: f532ad21316d66cc
+  zh: 65e098a9431793b0
+/deepseek-ai-dsh-tool-jdcloud-lowcode/understand-the-implementation/source-map:
+  en: 8fddf54cf45d544b
+  zh: 9112be996db5774e
+/deepseek-ai-dsh-tool-jdcloud-lowcode/further-exploration:
+  en: 165c691b9770f54c
+  zh: a6f4d025fd40855e
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/capability-snapshot:
+  en: bfef1e619919cad3
+  zh: d138ac15d79190a7
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/capability-snapshot/what-the-model-sees:
+  en: 9d4f6e66d48d2a4a
+  zh: c6495008dcb01115
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/capability-snapshot/token-effect:
+  en: 75492ab28e59f85e
+  zh: 6c63d846b14c6af9
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/capability-snapshot/kv-cache-effect:
+  en: b1b663497fa908f6
+  zh: e25a4e5624274211
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/system-prompt:
+  en: cf78b9dd5596495f
+  zh: bd44560f8c2435e8
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/system-prompt/what-the-model-sees:
+  en: d558233c1d599480
+  zh: d9f894f712e1cbaf
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/system-prompt/what-the-model-sees/jdcloud-low-code-guidance:
+  en: 76fc759773285607
+  zh: c7266b82d410e744
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/system-prompt/token-effect:
+  en: de09bff40cb424f6
+  zh: e7e8919e5bf472bb
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/system-prompt/kv-cache-effect:
+  en: 13e7c6007bf6b5dc
+  zh: e048995c671f1e96
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-schemas:
+  en: 3039bc5e7a796b21
+  zh: 6b7a9eaf69c9ea53
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-schemas/what-the-model-sees:
+  en: 9df6423a69b9b824
+  zh: 74d4eb2f73e28a2e
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-schemas/token-effect:
+  en: 7624ff49fb07a91b
+  zh: be8bd4596d6e2962
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-schemas/kv-cache-effect:
+  en: 4555717d7b481f52
+  zh: eeeed695563ad27d
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-results-and-errors:
+  en: 6f8741bbd4651b00
+  zh: 9906cb5c0911a7e4
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-results-and-errors/what-the-model-sees:
+  en: a2c045465da02e95
+  zh: 11f84e357624eace
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-results-and-errors/token-effect:
+  en: 3ea85b775431ae4d
+  zh: 7148ad0a8f6519d4
+/deepseek-ai-dsh-tool-jdcloud-lowcode/model-experience/tool-results-and-errors/kv-cache-effect:
+  en: 92fe36c5c37550d5
+  zh: ae94a191e1d31f60
+/deepseek-ai-dsh-tool-jdcloud-lowcode/known-limitations-and-deferred-work:
+  en: 3778a34cbb5b984b
+  zh: d9bef7cd6f0e5382
+/deepseek-ai-dsh-tool-jdcloud-lowcode/known-limitations-and-deferred-work/dev-note:
+  en: e04d72c6aa4875d8
+  zh: 95080dab38e53896

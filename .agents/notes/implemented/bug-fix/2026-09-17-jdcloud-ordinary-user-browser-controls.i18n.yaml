@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-17-jdcloud-ordinary-user-browser-controls.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-17-jdcloud-ordinary-user-browser-controls.md
-2026-09-17-jdcloud-ordinary-user-browser-controls.md: 4dd873ff8b5fb99f934500aa3465d9eef6806269
-2026-09-17-jdcloud-ordinary-user-browser-controls.zh.md: 8e5a18f867a357daa72f7e3dfff30f06b1510360
+/agent-note-jdcloud-ordinary-user-browser-controls:
+  en: d168f960e3af969c
+  zh: f8ec99fa74615426
+/agent-note-jdcloud-ordinary-user-browser-controls/problem:
+  en: c159bfa80d2ec70c
+  zh: 6087bdc028f28b92
+/agent-note-jdcloud-ordinary-user-browser-controls/decision:
+  en: 298a85123a9d9ddb
+  zh: 7d8cff50e8cd0d8a
+/agent-note-jdcloud-ordinary-user-browser-controls/alternatives-considered:
+  en: 5ed2678db01857ae
+  zh: 9d8ba66416b06711
+/agent-note-jdcloud-ordinary-user-browser-controls/consequences:
+  en: f6632510a5c43c3f
+  zh: ad4857e3f8569ab1

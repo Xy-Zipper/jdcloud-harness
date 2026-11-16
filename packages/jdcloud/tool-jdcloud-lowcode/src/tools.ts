@@ -658,9 +658,9 @@ async function requireExecutionSnapshot(
   if (ctx.agents.get(agent.id) !== agent || agent.status !== 'running' || ctx.agents.currentInitiator() !== agent) {
     reject('JDCloud low-code tools require the exact live calling agent inside its active driver', 'JDCLOUD_LOWCODE_DRIVER_REQUIRED')
   }
-  const boundary = ctx.sessionProjections.stateOf(agent.session, 'turnBoundary')
+  const boundary = ctx.agents.turnBoundaryOf(agent.session)
   const snapshot = snapshots.get(agent)
-  if (boundary === undefined || boundary.openTurnStartSeq === null || snapshot === undefined
+  if (boundary.openTurnStartSeq === null || snapshot === undefined
     || boundary.lastTurn !== snapshot.turn) {
     const notice = staleSnapshotNotice()
     reject(notice.message, notice.code)

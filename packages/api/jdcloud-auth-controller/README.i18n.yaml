@@ -1,6 +1,34 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/api/jdcloud-auth-controller/README.md
-README.md: b212f9cbbec2087f06978c405abd18d6d93c4edb
-README.zh.md: 2963b82c0340cbbd1d1d1c115390b79ed5a324a5
+/:
+  en: 4fc35c0e230c50fb
+  zh: d4fcbc4bcd1ae20e
+/jdcloud-auth-controller:
+  en: d7b46757c8fb2c2b
+  zh: 3ef722e167ed14e6
+/jdcloud-auth-controller/summary:
+  en: b31a0908871f3e2b
+  zh: ca1b69531b602a35
+/jdcloud-auth-controller/table-of-contents:
+  en: 1abdf1c97f239745
+  zh: 33c002b5ecf4ccfb
+/jdcloud-auth-controller/use-this-package:
+  en: 72984e51afd0e603
+  zh: b2db9f172867edd2
+/jdcloud-auth-controller/configuration:
+  en: 570c9043a8018942
+  zh: 84000b1529d96e96
+/jdcloud-auth-controller/model-experience:
+  en: d1a2a7c677a4b6fb
+  zh: 20a963ddec292ffb
+/jdcloud-auth-controller/model-experience/kv-cache-effect:
+  en: dca5b45a461c5532
+  zh: 6fe52d4d29d2118f
+/jdcloud-auth-controller/known-limitations-and-deferred-work:
+  en: 5de88cd3951bad14
+  zh: ccb6d3f00d3e2756
+/jdcloud-auth-controller/known-limitations-and-deferred-work/dev-note:
+  en: f2320f73dc0ede73
+  zh: c09169f6df2e7d8b

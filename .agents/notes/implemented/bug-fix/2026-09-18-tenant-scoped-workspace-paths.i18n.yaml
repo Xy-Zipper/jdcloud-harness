@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-18-tenant-scoped-workspace-paths.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-18-tenant-scoped-workspace-paths.md
-2026-09-18-tenant-scoped-workspace-paths.md: a773af021726770ce8f56916a2d6be477a95fc24
-2026-09-18-tenant-scoped-workspace-paths.zh.md: 18632ece2422bcd93b6724ee0e8cc9b1b1acadce
+/agent-note-tenant-scoped-workspace-registrations:
+  en: 92ccfc4a3720cbed
+  zh: 0a29d38861edb8f8
+/agent-note-tenant-scoped-workspace-registrations/problem:
+  en: 4293279da833e043
+  zh: 46e38eeafd0b0e6e
+/agent-note-tenant-scoped-workspace-registrations/decision:
+  en: 3e2df0369dee6cb9
+  zh: e604a488b953dc50
+/agent-note-tenant-scoped-workspace-registrations/alternatives-considered:
+  en: 18515d2bdd45bb23
+  zh: 2e0f648304d2cd21
+/agent-note-tenant-scoped-workspace-registrations/consequences:
+  en: c89e62e793fb15a9
+  zh: 077fa8199617b149

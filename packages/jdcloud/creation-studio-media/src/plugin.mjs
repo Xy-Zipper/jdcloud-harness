@@ -85,6 +85,7 @@ export function apply(ctx, config) {
         ctx.effect(() => ctx.webServer.register({
             kind: 'exact',
             path: `${prefix}${operation}`,
+            auth: 'anonymous',
             async handler(req, res) {
                 const send = (status, data) => {
                     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });

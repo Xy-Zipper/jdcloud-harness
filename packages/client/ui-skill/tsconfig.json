@@ -9,6 +9,9 @@
   ],
   "references": [
     {
+      "path": "../../util/text-search"
+    },
+    {
       "path": "../../api/remotes/tsconfig.client.json"
     },
     {
@@ -40,9 +43,6 @@
     },
     {
       "path": "../ui-input-trigger"
-    },
-    {
-      "path": "../ui-conversation/tsconfig.client.json"
     },
     {
       "path": "../ui-settings/tsconfig.client.json"

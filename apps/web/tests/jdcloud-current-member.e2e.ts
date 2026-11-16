@@ -1,11 +1,14 @@
 // Keyless Web-profile coverage for current-account form selections before the first model call.
+import type {} from '@deepseek-ai/dsh-api-jdcloud-auth-controller'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { once } from 'node:events'
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { SessionId as sessionId, type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
+import { brandString as sessionId } from '@deepseek-ai/dsh-brand'
+import { type SessionEvent, type SessionId } from '@deepseek-ai/dsh-session'
 import {
   assertFixtureInventory,
   fixtureUserPrompts,
@@ -153,7 +156,7 @@ describe.skipIf(MODE === 'record')('web e2e: JDCloud current account reaches the
       password: 'secret',
     }, AbortSignal.timeout(5_000))
     const created = await scaffold.ctx.sessionController.create({
-      sessionId: sessionId('jdcloud-current-member'),
+      sessionId: sessionId<SessionId>('jdcloud-current-member'),
       cwd: scaffold.workspaceCwd,
     })
     const settled = scaffold.whenTurnSettled()

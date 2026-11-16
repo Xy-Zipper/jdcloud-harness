@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-09-jdcloud-token-transfer-login.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-09-jdcloud-token-transfer-login.md
-2026-09-09-jdcloud-token-transfer-login.md: e0998d4f730b46a743f797814d563e6dcdd553ee
-2026-09-09-jdcloud-token-transfer-login.zh.md: 954ce01ac810cc702d969610812443302441fc9c
+/agent-note-jdcloud-token-transfer-login:
+  en: ea4a0be28e858340
+  zh: 2e8c38ddd3a1ec17
+/agent-note-jdcloud-token-transfer-login/problem:
+  en: 1413b4c0a0190dfb
+  zh: 4a2a8c849d8e7e3c
+/agent-note-jdcloud-token-transfer-login/decision:
+  en: 611c8bd7bc14fc53
+  zh: 4c92ddcc457db5a1
+/agent-note-jdcloud-token-transfer-login/alternatives-considered:
+  en: 4bab686180fb59f1
+  zh: a26d0b2684efaced
+/agent-note-jdcloud-token-transfer-login/consequences:
+  en: d769dbe7822a43de
+  zh: 746ced331c722ab3

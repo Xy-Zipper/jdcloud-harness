@@ -83,6 +83,8 @@ export const inject: string[] = []
  * halves instead of forking this plugin.
  */
 export interface ClientTransportHooks {
+  /** Authorization for same-origin background carriers that run outside the page's Fetch wrapper. */
+  authorizationHeader?(): Promise<string | undefined>
   /**
    * Already decoded logical RPC carrier. When present it replaces the HTTP
    * caller outright: no envelopes, no `fetch`, no `openStream` (an in-process
@@ -93,18 +95,18 @@ export interface ClientTransportHooks {
   fetch?: RpcFetch
   /** Worker-local Gateway stream carrier; absent when the page uses the Gateway WebSocket or `rpc` is present. */
   openStream?: RpcStreamOpen
-  /** Add transport authentication to one WebSocket URL immediately before opening it. */
-  authorizeWebSocketUrl?(url: string): string | Promise<string>
-  /** Current Authorization header for a background carrier that cannot use this realm's Fetch. */
-  authorizationHeader?(): Promise<string | undefined>
-  /** Authorize one same-origin URL handed to the browser download manager. */
-  authorizeDownloadUrl?(url: string): string | Promise<string>
   /**
    * Bundle transport for the module system, present when the carrier also owns
    * bundle bytes (the worker tunnel). Absent in the served web app, whose
    * bundles load over HTTP.
    */
   loadBundle?(url: string): Promise<void>
+  /**
+   * Package-asset resolver for the module system, present when the page cannot
+   * request `plugins/<package>/assets/<path>` itself (the worker tunnel): it
+   * maps each reference to a URL the page can load. Absent in the served web app.
+   */
+  resolveAsset?(reference: string): string
   /**
    * The transport owner declares the page owns the Host outright: the Host
    * runs inside a worker this page spawned, so no other party can reach it and
@@ -122,9 +124,9 @@ export interface ClientTransportHooks {
 
 /** Page global carrying {@link ClientTransportHooks}; absent in the served web app. */
 interface ClientTransportGlobal {
+  __DSH_BROWSER_SESSION_TRANSPORT__?: 'cookie' | 'bearer'
   __DSH_TRANSPORT__?: ClientTransportHooks
   __DSH_CONNECTION_RECOVERY__?: unknown
-  __DSH_BROWSER_SESSION_TRANSPORT__?: unknown
 }
 
 /** Browser location fields used to classify loopback authority. */
@@ -149,6 +151,8 @@ export interface ConnectionInstallOptions {
  * and reset callbacks; Connection stays independent of downstream domain state.
  */
 export interface ConnectionHandle {
+  /** Authorization for same-origin background uploads; cookie carriers omit this operation. */
+  authorizationHeader?(): Promise<string | undefined>
   /** Forwarded-event participation selected at installation. */
   readonly interactions: ConnectionInteractions
   /**
@@ -163,16 +167,12 @@ export interface ConnectionHandle {
   readonly state: ConnectionStateSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
-  /** Current Authorization header for background carriers outside this realm's Fetch implementation. */
-  readonly authorizationHeader?: () => Promise<string | undefined>
-  /** Add short-lived authentication to a URL opened by the browser download manager. */
-  readonly authorizeDownloadUrl?: (url: string) => Promise<string>
   /**
    * Create a socket on the selected carrier; the channel owns framing and closing.
    * @param path - absolute logical channel path, resolved beneath the Host mount.
    * @returns a newly connecting socket using the installed authentication factory.
    */
-  openWebSocket(path: string): ConnectionWebSocket
+  openWebSocket(path: string): ConnectionWebSocket | Promise<ConnectionWebSocket>
   /** Reset retry progression and replace the current attempt immediately. */
   reconnect(): void
   /**
@@ -237,8 +237,6 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   const recovery = options.recovery ?? {}
   const interactions = options.interactions ?? (pageLocation === undefined ? 'none' : 'answer')
   const rpc = transport?.rpc ?? createWebConnectionRpc(transport?.fetch, transport?.openStream)
-  const authorizationHeader = transport?.authorizationHeader?.bind(transport)
-  const authorizeDownloadUrl = transport?.authorizeDownloadUrl?.bind(transport)
   let generationSource: ConnectionGenerationSource | undefined
   let owner: ConnectionOwner | undefined
   let generationId = 0
@@ -277,14 +275,11 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
     publishState(undefined)
   }
   const handle: ConnectionHandle = {
-    interactions,
-    ...(authorizationHeader === undefined ? {} : { authorizationHeader: async () => await authorizationHeader() }),
-    ...(authorizeDownloadUrl === undefined ? {} : {
-      authorizeDownloadUrl: async url => await authorizeDownloadUrl(url),
+    ...(transport?.authorizationHeader === undefined ? {} : {
+      authorizationHeader: () => transport.authorizationHeader?.() ?? Promise.resolve(undefined),
     }),
-    openWebSocket: path => openConnectionWebSocket(
-      path, transport?.createWebSocket, transport?.streamBaseUrl, transport?.authorizeWebSocketUrl?.bind(transport),
-    ),
+    interactions,
+    openWebSocket: path => openConnectionWebSocket(path, transport?.createWebSocket, transport?.streamBaseUrl),
     isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     generation: {
       getSnapshot: () => generation,
@@ -357,43 +352,21 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
 export function apply(ctx: Context): void {
   const globals = globalThis as ClientTransportGlobal
   const pageLocation = typeof location === 'undefined' ? undefined : location
-  const configuredTransport = globals.__DSH_TRANSPORT__
-  const browserSessionTransport = globals.__DSH_BROWSER_SESSION_TRANSPORT__
-  if (browserSessionTransport !== undefined && browserSessionTransport !== 'cookie'
-    && browserSessionTransport !== 'bearer') {
-    throw new TypeError('connection: invalid browser session transport bootstrap')
-  }
-  let transport = configuredTransport
-  if (browserSessionTransport === 'bearer') {
-    if (typeof document === 'undefined' || typeof sessionStorage === 'undefined') {
-      throw new Error('connection: Bearer browser sessions require document and sessionStorage')
-    }
-    const baseFetch = globalThis.fetch.bind(globalThis)
-    const browserSession = createBrowserBearerSession(baseFetch, sessionStorage, document.baseURI)
-    const authenticatedFetch = browserSession.fetch
-    const configuredFetch = configuredTransport?.fetch
-    const configuredSocketAuthorization = configuredTransport?.authorizeWebSocketUrl?.bind(configuredTransport)
-    const configuredHeader = configuredTransport?.authorizationHeader?.bind(configuredTransport)
-    const configuredDownloadAuthorization = configuredTransport?.authorizeDownloadUrl?.bind(configuredTransport)
+  let transport = globals.__DSH_TRANSPORT__
+  if (globals.__DSH_BROWSER_SESSION_TRANSPORT__ === 'bearer') {
+    const originalFetch = globalThis.fetch
+    const browserSession = createBrowserBearerSession(originalFetch.bind(globalThis), sessionStorage, document.baseURI)
+    // All browser API clients share the tab identity; signed WebSocket tickets remain single-use.
     ctx.effect(() => {
-      const previous = globalThis.fetch
-      globalThis.fetch = authenticatedFetch
-      return () => {
-        if (globalThis.fetch === authenticatedFetch) globalThis.fetch = previous
-      }
+      globalThis.fetch = browserSession.fetch
+      return () => { if (globalThis.fetch === browserSession.fetch) globalThis.fetch = originalFetch }
     }, 'client-connection: browser Bearer Fetch')
+    const configuredSocket = transport?.createWebSocket ?? (url => new WebSocket(url))
     transport = {
-      ...configuredTransport,
-      fetch: configuredFetch ?? ((input, init) => browserSession.fetch(input, init)),
-      authorizeWebSocketUrl: configuredSocketAuthorization === undefined
-        ? url => browserSession.authorizeWebSocketUrl(url)
-        : url => configuredSocketAuthorization(url),
-      authorizationHeader: configuredHeader === undefined
-        ? () => browserSession.authorizationHeader()
-        : () => configuredHeader(),
-      authorizeDownloadUrl: configuredDownloadAuthorization === undefined
-        ? url => browserSession.authorizeDownloadUrl(url)
-        : url => configuredDownloadAuthorization(url),
+      ...transport,
+      authorizationHeader: () => browserSession.authorizationHeader(),
+      fetch: transport?.fetch ?? browserSession.fetch,
+      createWebSocket: async url => configuredSocket(await browserSession.authorizeWebSocketUrl(url)),
     }
   }
   installConnection(ctx, {

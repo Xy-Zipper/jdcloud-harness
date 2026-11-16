@@ -4,7 +4,8 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { credentialKey, type CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { ConnectionIndexRequest, ConnectionIndexResponse, ConnectionTrustRequest } from './rpc.ts'
+import type { ConnectionTrustRequest } from './rpc.ts'
+import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
 import {
   BROWSER_SESSION_DOWNLOAD_TICKET_QUERY,
   type BrowserSessionTransport,
@@ -62,6 +63,8 @@ interface DownloadTicket extends WebSocketTicket {
 /** Carries one opaque browser id through HTTP, RPC, and Fetch handlers. */
 export class BrowserSessionService extends Service {
   static inject = ['credentials']
+  private readonly peers = new Map<string, PeerScope>()
+  private readonly browserIds = new WeakMap<PeerScope, string>()
   private readonly requests = new AsyncLocalStorage<string>()
   private readonly admittedDownloads = new WeakMap<ConnectionTrustRequest, string>()
   private readonly admittedWebSockets = new WeakMap<ConnectionTrustRequest, string>()
@@ -109,7 +112,10 @@ export class BrowserSessionService extends Service {
    * @param response - Response writer used for the redirect and cookie.
    * @returns Whether the request already has a valid browser session.
    */
-  authorizeIndex(request: ConnectionIndexRequest, response: ConnectionIndexResponse): boolean {
+  authorizeIndex(
+    request: ConnectionTrustRequest,
+    response: { writeHead(status: number, headers: Record<string, string>): unknown; end(): unknown },
+  ): boolean {
     if (this.transport === 'bearer') {
       return (request.method === 'GET' || request.method === 'HEAD')
         && requestAuthority(request.headers) !== undefined
@@ -234,7 +240,7 @@ export class BrowserSessionService extends Service {
    * @param request - trusted upgrade request carrying a `ticket` query parameter.
    * @returns whether the ticket authorized this exact request.
    */
-  admitWebSocket(request: ConnectionIndexRequest): boolean {
+  admitWebSocket(request: ConnectionTrustRequest): boolean {
     if (this.transport !== 'bearer') return this.accepts(request)
     this.pruneWebSocketTickets()
     const ticket = requestTicket(request.url)
@@ -266,9 +272,31 @@ export class BrowserSessionService extends Service {
    * @returns The current opaque browser id.
    */
   currentIdRequired(): string {
-    const browserId = this.requests.getStore()
+    const peer = this.ctx.reflect.props.invocation === undefined ? undefined : this.ctx.invocation?.peer
+    const browserId = this.requests.getStore() ?? (peer === undefined ? undefined : this.browserIds.get(peer))
     if (browserId === undefined) throw new Error('browser user session is unavailable outside a request')
     return browserId
+  }
+
+  /**
+   * Authenticate a browser through Connection, including single-use WebSocket tickets.
+   * @param request - Incoming HTTP request or WebSocket upgrade.
+   * @returns the identity's Peer, or undefined when credentials are invalid.
+   */
+  authenticate(request: ConnectionTrustRequest): PeerScope | undefined {
+    if (request.url !== undefined && new URL(request.url, 'http://dsh.invalid').pathname === '/api/remote.mux') {
+      if (!this.admitWebSocket(request)) return undefined
+    } else if (!this.admitHttp(request)) return undefined
+    const browserId = this.admittedDownloads.get(request) ?? this.admittedWebSockets.get(request) ?? this.browserId(request)
+    if (browserId === undefined) return undefined
+    let peer = this.peers.get(browserId)
+    if (peer === undefined) {
+      peer = this.ctx.connection.createPeer({ principal: { kind: 'owner' } })
+      this.peers.set(browserId, peer)
+      this.browserIds.set(peer, browserId)
+      peer.ctx.effect(() => () => { this.peers.delete(browserId) }, 'browser-session: identity Peer')
+    }
+    return peer
   }
 
   private browserId(request: ConnectionTrustRequest): string | undefined {

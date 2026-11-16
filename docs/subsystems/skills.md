@@ -12,7 +12,7 @@ Source: [`packages/skill/skill/src/index.ts`](../../packages/skill/skill/src/ind
 
 The registry is host+per-scope layered, the shape the [tools registry](tools.md) established over [dsh-scope](../../packages/core/scope): a registration files into the layer of its calling context's scope, so host rows and repository plugins land in the global layer while a plugin mounted by an agent preset's standing composition lands in that preset's layer, and provider names are unique per layer rather than process-wide. A read merges the global layer with the viewing scope's chain — the nearest layer's entry wins a duplicate skill name outright, and the rank order below decides duplicates only within one layer. Discovery caches are keyed by the resolved scope chain, so re-parenting a scope (a blank-session recompose) is visible to the next read without a registry mutation.
 
-Within one layer, duplicate names resolve by rank, provider order, then local order; summaries sort by name. A rejected `list()` is logged and omitted from an incomplete observation, while an explicit incomplete observation contributes usable candidates without making the result cacheable; malformed candidates fail fast. Each provider factory receives a registration-scoped control whose `invalidate()` clears completed catalogs only while that exact registration remains active and whose signal aborts on failed registration or disposal. An in-flight discovery retries once when its provider generation changes; a second change returns the latest candidates incomplete and uncached. Provider and runtime mutations emit the unfiltered `skills/change` invalidation event; it carries no diff, so consumers refetch `snapshot()` with their own lookup options.
+Within one layer, duplicate names resolve by rank, provider order, then local order; summaries sort by name. A rejected `list()` is logged and omitted from an incomplete observation, while an explicit incomplete observation contributes usable candidates without making the result cacheable; malformed candidates fail fast as `SkillError` with `SKILL_INVALID_DEFINITION`. Each provider factory receives a registration-scoped control whose `invalidate()` clears completed catalogs only while that exact registration remains active and whose signal aborts on failed registration or disposal. An in-flight discovery retries once when its provider generation changes; a second change returns the latest candidates incomplete and uncached. Provider and runtime mutations emit the unfiltered `skills/change` invalidation event; it carries no diff, so consumers refetch `snapshot()` with their own lookup options.
 
 An array returned by `SkillProvider.list()` is complete-discovery shorthand. `SkillProviderObservation` lets a provider expose candidates that remain directly loadable while reporting that the observation is not authoritative.
 
@@ -74,7 +74,7 @@ The shipped local provider scans roots in rank order:
 | 500 | `user-agents` | `<agentsHome>/skills` |
 | 600 | `bundled` | `Config.bundledSkillDir` when configured |
 
-The project root is the nearest ancestor containing `.git`; without one, the current cwd is used. When `ctx.fs` is available, the git-root walk probes `.git` through the filesystem service so remote or sandboxed workspaces do not fall back to the host filesystem boundary. The user DSH root skips its `.system` child. The local provider does not synthesize built-in system skills; deployments supply packaged skills through configured bundled roots or dedicated providers.
+The project root is the nearest ancestor containing `.git`; without one, the current cwd is used. When `ctx.fs` is available, the git-root walk probes `.git` through the filesystem service so remote or sandboxed workspaces do not fall back to the host filesystem boundary. The user DSH root skips its `.system` child. The local provider does not synthesize built-in system skills; deployments supply packaged skills through configured bundled roots or dedicated providers. A failed root contributes no candidates, so a lower-priority same-name skill from another root may supply both the catalog description and loaded body until recovery.
 
 `dsh-skill-badge` registers one immutable `bundled` candidate at `BUNDLED_SKILL_RANK` and exposes its packaged asset directory through `resourceBase`. The shipped CLI declares the plugin disabled, so enabling its composition row is an explicit opt-in.
 
@@ -127,7 +127,7 @@ interface SkillSummary {
 
 `ctx.skills.list()` preserves all four policy combinations. `isModelInvocable(skill)` and `isUserInvocable(skill)` read the corresponding required field. A model-only skill sets `{ modelInvocable: true, userInvocable: false }`, a user-only skill sets `{ modelInvocable: false, userInvocable: true }`, and setting both fields to `false` keeps the skill available only through trusted `ctx.skills.get()` callers. The local provider reads the exact kebab-case frontmatter keys `disable-model-invocation` and `user-invocable`, defaults omitted fields to `true`, and projects every parsed skill into this normalized policy.
 
-`SkillCatalogSnapshot` distinguishes authoritative absence from transient provider failure or a catalog that kept changing during discovery. `skills` contains the sorted invocation-neutral summaries collected in that observation; `complete` is true only when every registered provider completed without a concurrent catalog revision. Incomplete snapshots are not cached, allowing each consumer to retain its last-good filtered catalog and retry.
+`SkillCatalogSnapshot` distinguishes authoritative absence from transient provider failure or a catalog that kept changing during discovery. `skills` contains the sorted invocation-neutral summaries collected in that observation; `complete` is true only when every registered provider completed without a concurrent catalog revision. Incomplete snapshots are not cached, so the next lookup retries discovery; each consumer decides how to present the partial result.
 
 ```ts type-equiv
 /** One catalog observation plus whether discovery completed within a stable catalog revision. */
@@ -226,9 +226,9 @@ interface Config {
 
 ## Session catalog and tool contract
 
-`dsh-tool-skill` injects the initial durable user-role `<system-reminder>` at the first `agent/pre-step` of a live session that observes a non-empty complete view. The catalog contains sorted skill `name` and normalized, XML-escaped `description` only; it omits bodies, paths, sources, providers, and routing hints. Discovery forwards the step's abort signal through `SkillLookupOptions`. `catalogDescriptionMaxLength` is the consumer config for the description bound, with default `500` and integer minimum `3`.
+`dsh-tool-skill` injects the initial durable user-role `<system-reminder>` at the first `agent/pre-step` of a live session that observes available skills or incomplete discovery. The catalog contains sorted skill `name` and normalized, XML-escaped `description` only; it omits bodies, paths, sources, providers, and routing hints. Discovery forwards the step's abort signal through `SkillLookupOptions`. `catalogDescriptionMaxLength` is the consumer config for the description bound, with default `500` and integer minimum `3`.
 
-Before each later model step, the consumer applies exact tool visibility and digests the exact rendered entries between the `<available_skills>` tags from a complete snapshot. It derives the comparison baseline from the same entries in the newest recognizable visible catalog message sourced by the plugin. A changed digest appends a durable full replacement through `agent.inject()`; deleting every skill appends an explicit empty replacement. Incomplete snapshots preserve the last-good model view. If compaction hides every historical catalog message, the next complete snapshot re-establishes the current catalog; an empty view with no prior catalog emits nothing. These catalog messages are session history, not World State.
+Before each later model step, the consumer applies exact tool visibility and compares the entries and completeness with the newest recognizable visible catalog message in the session log. A changed observation contributes a durable replacement to the pre-step decision; deleting every skill appends an explicit empty replacement. Incomplete discovery publishes the available subset with a warning and optional `incomplete: true` source metadata; absence of that flag means complete. Recovery republishes the catalog even when its entries are unchanged. If compaction hides every historical catalog message, the next observation re-establishes the current catalog; a complete empty view with no prior catalog emits nothing. These catalog messages are session history, not World State.
 
 The model-facing `skill({ name })` tool validates the kebab-case name, finds the summary in the invocation-neutral catalog, rejects it before loading unless `isModelInvocable` permits access, then rereads the complete definition for the calling agent cwd and rechecks the policy before returning content. It reports an unresolved skill as unknown or no longer available and returns a tool result containing `<skill_content name="...">`, `<skill_resources>`, and `<skill_instructions>`. `resourceBase` resolves explicitly referenced scripts, references, and assets only as needed; the loaded result does not enumerate a skill directory. Body-only edits therefore change later tool calls without producing catalog messages or rewriting earlier tool results.
 
@@ -252,6 +252,29 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
 
 ```ts cordis-catalog
 /**
+ * List the current account's personal Skills and every shared built-in Skill without requiring a Session.
+ * @param signal - Caller cancellation for directory reads.
+ * @returns Account Skill metadata and the scopes this account may mutate.
+ */
+async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>
+
+/**
+ * Install one personal or shared built-in Skill for an authenticated account without requiring a Session.
+ * @param request - Managed scope and bounded Skill folder files.
+ * @param signal - Caller cancellation checked before each file publication.
+ * @returns Installed Skill metadata.
+ */
+async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
+
+/**
+ * Delete one personal or administrator-managed built-in Skill without requiring a Session.
+ * @param request - Managed scope and Skill name.
+ * @param signal - Caller cancellation checked before removal.
+ * @returns Deletion confirmation.
+ */
+async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
+
+/**
  * List the user-invocable skills visible to one Session composition.
  * @param request - Session identity whose cwd and preset select the catalog view.
  * @param signal - caller lifetime carried by the Remote transport; admitted catalog reads retain their existing completion semantics.
@@ -259,7 +282,27 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
  * @throws RemoteError when the Session cannot be inspected or no registry can serve it.
  */
 @Remote async list(request: SkillListRequest, signal: AbortSignal): Promise<SkillListValue>
+
+/**
+ * Install one complete user-invocable Skill folder in the Session project's `.dsh/skills` directory.
+ * @param request - Session identity and bounded folder files.
+ * @param signal - caller lifetime carried by the Remote transport.
+ * @returns installed metadata for optimistic catalog display.
+ * @throws RemoteError when validation, ownership, containment, or the guarded create fails.
+ */
+@Remote async create(request: SkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
+
+/**
+ * Delete one personal Skill, or one shared Skill when the current user is an administrator.
+ * @param request - Session owner, account scope, and validated Skill name.
+ * @param signal - caller cancellation checked before the irreversible removal.
+ * @returns deletion confirmation after the complete Skill folder is absent.
+ * @throws RemoteError when authentication, authorization, ownership, or the target folder check fails.
+ */
+@Remote('delete') async delete(request: SkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
 ```
+
+Types: [AccountSkillDeleteRequest](session.md) · [AccountSkillInstallRequest](session.md) · [AccountSkillListValue](session.md) · [SkillDeleteRequest](session.md) · [SkillDeleteValue](session.md) · [SkillInstallRequest](session.md) · [SkillInstallValue](session.md)
 
 Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)
 

@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-api-workspace-controller'
 import type {} from '@deepseek-ai/dsh-api-workspace-files'
 import { AttachmentId, type FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { bridge, type ConnectionFetchHandler, type PeerScope } from '@deepseek-ai/dsh-client-connection'
+import { bridgeFetchRequest as bridge, type ConnectionFetchHandler, type PeerScope } from '@deepseek-ai/dsh-client-connection'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -122,6 +122,7 @@ function register(ctx: Context, path: string): void {
   const route: WebRoute = {
     kind: 'exact',
     path,
+    auth: 'anonymous',
     handler: (request, response) => {
       const peer = peerOf()
       if (peer === undefined) {
@@ -238,7 +239,7 @@ async function sessionHistory(ctx: Context, request: Request): Promise<Response>
       // Recover older foreground calls through paged history without reading the live Session log.
       let hasMore = opening.value.hasMore
       while (running && hasMore && !visibleRecords.some(record => record.event.type === 'turn/start')) {
-        const page = await ctx.sessionController.page({
+        const page = await ctx.sessionController.events({
           address: { kind: 'session', sessionId: id },
           throughSeq: opening.value.cursor,
           beforeSeq: visibleRecords[0]?.event.seq ?? opening.value.cursor + 1,
@@ -344,7 +345,7 @@ async function cancelSession(ctx: Context, request: Request): Promise<Response> 
       const opening = await iterator.next()
       if (opening.done || opening.value.type !== 'snapshot') throw badRequest('Session history is unavailable')
       if (ctx.agents.get(sessionId)?.status === 'running') {
-        ctx.sessionController.cancel({ sessionId })
+        await ctx.sessionController.cancel({ sessionId })
       }
       return { accepted: true, sessionId }
     } finally {
@@ -422,7 +423,7 @@ async function sessionFileContent(ctx: Context, request: Request): Promise<Respo
       let hasMore = opening.value.hasMore
       let ref = userFileAttachment(records, attachmentId)
       while (ref === undefined && hasMore) {
-        const page = await ctx.sessionController.page({
+        const page = await ctx.sessionController.events({
           address, throughSeq: opening.value.cursor,
           beforeSeq: records[0]?.event.seq ?? opening.value.cursor + 1, maxMessages: 200,
         }, request.signal)

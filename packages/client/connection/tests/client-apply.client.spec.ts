@@ -529,21 +529,18 @@ describe('connection client apply', () => {
     try {
       const handle = ctx.get('connection') as ConnectionHandle
       await expect(handle.rpc.call('/api', 'goals/create', {})).resolves.toEqual({ ok: true, value: null })
-      await expect(handle.authorizeDownloadUrl?.('api/session.export?sessionId=one')).resolves.toBe(
-        'http://harness.example/api/session.export?sessionId=one&downloadTicket=download-once',
-      )
       await globalThis.fetch('https://outside.example/data')
       expect(session.setItem).toHaveBeenCalledOnce()
       expect(local.setItem).not.toHaveBeenCalled()
       expect(baseFetch.mock.calls[0]?.[1]).not.toHaveProperty('headers.authorization')
       expect(new Headers(baseFetch.mock.calls[1]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
-      expect(new Headers(baseFetch.mock.calls[3]?.[1]?.headers).get('authorization')).toBeNull()
-      const socket = handle.openWebSocket('/api/remote.mux')
+      expect(new Headers(baseFetch.mock.calls[2]?.[1]?.headers).get('authorization')).toBeNull()
+      const socket = await handle.openWebSocket('/api/remote.mux')
       try {
         await vi.waitFor(() => {
           expect(createSocket).toHaveBeenCalledExactlyOnceWith('ws://harness.example/api/remote.mux?ticket=one-use')
         })
-        expect(new Headers(baseFetch.mock.calls[4]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
+        expect(new Headers(baseFetch.mock.calls[3]?.[1]?.headers).get('authorization')).toBe('Bearer browser-token')
         expect(session.setItem).toHaveBeenCalledOnce()
       } finally {
         socket.close()

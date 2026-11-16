@@ -3,37 +3,26 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-attachment'
-import type {} from '@deepseek-ai/dsh-credentials'
 // Activates the webServer Context merge used below.
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
-import { CONNECT_PATH } from './connect-protocol.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
-import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
-import { BrowserAuth } from './browser-auth.ts'
-import { BrowserSessionService, type BrowserSessionCookieSameSite, type BrowserSessionTransport } from './browser-session.ts'
-import {
-  BROWSER_SESSION_BOOTSTRAP_PATH,
-  BROWSER_SESSION_DOWNLOAD_TICKET_PATH,
-  BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
-} from './browser-session-protocol.ts'
+import { assertTrustedAuthority } from './api-request-trust.ts'
 import { HostConnectionService } from './rpc-host.ts'
+import { ConnectionAuthentication } from './authentication.ts'
 import { ConnectionRecoveryConfigSchema, resolveConnectionConfig, type ConnectionRecoveryConfig } from './recovery-config.ts'
 
 export type {
+  AuthenticationProvider,
   PeerAdmission,
-  ConnectionAdmission,
   ConnectionFetchMethod,
   ConnectionFetchHandler,
   ConnectionFetchRoute,
-  ConnectionIndexRequest,
-  ConnectionIndexResponse,
   ConnectionRpcEndpointMatcher,
   ConnectionRpcAttachment,
   ConnectionRpcFailure,
   ConnectionRpcHandler,
   ConnectionRpcHandlerResult,
-  ConnectionRequestRejection,
   ConnectionRpcResult,
   ConnectionRequestBodyMode,
   ConnectionTrustRequest,
@@ -58,9 +47,9 @@ export {
   serverResponseSchema,
 } from './rpc-schema.ts'
 export { HostConnectionService } from './rpc-host.ts'
+export { ConnectionAuthentication } from './authentication.ts'
 export { BrowserSessionService } from './browser-session.ts'
-export type { BrowserSessionTransport } from './browser-session-protocol.ts'
-export { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES }
+export { bridge as bridgeFetchRequest, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 
 export { API_PATH } from './api-path.ts'
 
@@ -99,21 +88,12 @@ function assertImageBodyCapacity(ctx: Context, maxRequestBodyBytes: number): voi
 }
 
 /** Services required before providing Connection. */
-export const inject = ['credentials']
+export const inject: string[] = []
 
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
-  /** Require the launch-token exchange and signed browser cookie. Default: true. */
-  browserAuthentication?: boolean
-  /** Require an independent opaque browser cookie in addition to launch authentication,
-   * or by itself when launch authentication is disabled. */
-  browserSession?: boolean
-  /** SameSite policy for the independent browser-session cookie; none also adds Secure. */
-  browserSessionCookieSameSite?: BrowserSessionCookieSameSite
-  /** Browser identity carrier. Bearer requires browserAuthentication: false. Default: cookie. */
-  browserSessionTransport?: BrowserSessionTransport
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The fence accepts loopback and the
@@ -121,194 +101,52 @@ export interface ConnectionConfig {
    * an entry here. A non-canonical or non-bare authority fails plugin load.
    */
   trustedHosts?: string[]
-  /** Absolute browser and API cookie lifetime in days. Default: 30. */
-  cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
   maxRequestBodyBytes?: number
 }
 
 export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
-  browserAuthentication: z.boolean().default(true),
-  browserSession: z.boolean().default(false),
-  browserSessionCookieSameSite: z.union(['strict', 'none']).default('strict'),
-  browserSessionTransport: z.union(['cookie', 'bearer']).default('cookie'),
   trustedHosts: z.array(String).default([]),
-  cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
 
 /**
  * Provides carrier-neutral RPC and Fetch registries. When `webServer` is
- * present, the plugin also mounts the `/api` browser transport with Host/Origin
- * checks and persistent browser authentication.
+ * present, the plugin applies Host/Origin checks and registered authentication
+ * to WebServer routes and mounts the `/api` browser transport.
  * @param ctx - Host plugin context.
  * @param config - resolved plugin config (schema defaults applied).
  */
-export async function apply(ctx: Context, config?: ConnectionConfig): Promise<void> {
+export function apply(ctx: Context, config?: ConnectionConfig): void {
   const recovery = resolveConnectionConfig(config?.recovery)
-  const browserAuthentication = config?.browserAuthentication ?? true
-  const browserSession = config?.browserSession ?? false
-  const browserSessionCookieSameSite = config?.browserSessionCookieSameSite ?? 'strict'
-  const browserSessionTransport = config?.browserSessionTransport ?? 'cookie'
-  if (browserAuthentication && browserSessionTransport === 'bearer') {
-    throw new Error('client-connection: browserSessionTransport "bearer" requires browserAuthentication: false')
-  }
-  // Deployment-owned login still needs a browser identity to keep Host state
-  // out of process-global keys.
-  const browserSessionEnabled = browserSession || !browserAuthentication
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
-  const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
   // Config boundary: a malformed entry fails the load loudly here rather than
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
-  const browserSessionService = browserSessionEnabled
-    ? await BrowserSessionService.create(
-      ctx,
-      ctx.credentials,
-      cookieMaxAgeDays,
-      browserSessionCookieSameSite,
-      browserSessionTransport,
-    )
-    : undefined
-  const connection = new HostConnectionService(
-    ctx,
-    trustedHosts,
-    browserAuthentication
-      ? await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays)
-      : undefined,
-    browserSessionService,
-    browserSessionEnabled,
-  )
-  ctx.inject(['webServer'], (webCtx) => {
-    assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
-    webCtx.on('webserver/index-inject', (table) => {
-      table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
-      if (browserSessionTransport === 'bearer' && browserSessionService !== undefined) {
-        table.push({ kind: 'global', name: '__DSH_BROWSER_SESSION_TRANSPORT__', value: 'bearer' })
+  new ConnectionAuthentication(ctx)
+  ctx.inject(['connection.authentication'], (connectionCtx) => {
+    const connection = new HostConnectionService(connectionCtx, trustedHosts)
+    connectionCtx.inject(['webServer'], (webCtx) => {
+      assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
+      webCtx.on('webserver/index-inject', (table) => {
+        table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
+      })
+      const fetchHandler = connection.createSharedFetchHandler(API_PATH)
+      const route: WebRoute = {
+        kind: 'prefix',
+        path: API_PATH,
+        auth: 'required',
+        handler: async (req, res, peer) => {
+          if (peer === undefined || res.destroyed) return
+          await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, peer, maxRequestBodyBytes))
+        },
       }
+      webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
     })
-    const fetchHandler = connection.createSharedFetchHandler(API_PATH)
-    const route: WebRoute = {
-      kind: 'prefix',
-      path: API_PATH,
-      handler: async (req, res) => {
-        const admission = connection.admit(req)
-        if ('rejection' in admission) {
-          res.writeHead(admission.rejection)
-          res.end(admission.rejection === 401 ? 'unauthorized' : 'forbidden')
-          return
-        }
-        await connection.runWithBrowserIdentity(req, () =>
-          webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, admission.peer, maxRequestBodyBytes)))
-      },
-    }
-    webCtx.effect(() => webCtx.webServer.register(route), 'client-connection: /api route')
-    if (browserSessionTransport === 'bearer' && browserSessionService !== undefined) {
-      const bootstrap: WebRoute = {
-        kind: 'exact',
-        path: BROWSER_SESSION_BOOTSTRAP_PATH,
-        handler: (req, res) => {
-          if (req.method !== 'POST') {
-            res.writeHead(405)
-            res.end()
-            return
-          }
-          if (!isTrustedApiRequest(req, trustedHosts)) {
-            res.writeHead(403)
-            res.end('forbidden')
-            return
-          }
-          const session = browserSessionService.issueBearer(req)
-          res.writeHead(200, {
-            'cache-control': 'no-store',
-            'content-type': 'application/json; charset=utf-8',
-            'x-content-type-options': 'nosniff',
-          })
-          res.end(JSON.stringify(session))
-        },
-      }
-      const webSocketTicket: WebRoute = {
-        kind: 'exact',
-        path: BROWSER_SESSION_WEBSOCKET_TICKET_PATH,
-        handler: (req, res) => {
-          if (req.method !== 'POST') {
-            res.writeHead(405)
-            res.end()
-            return
-          }
-          const rejection = connection.requestRejection(req)
-          if (rejection !== undefined) {
-            res.writeHead(rejection)
-            res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
-            return
-          }
-          const ticket = browserSessionService.issueWebSocketTicket(req)
-          res.writeHead(200, {
-            'cache-control': 'no-store',
-            'content-type': 'application/json; charset=utf-8',
-            'x-content-type-options': 'nosniff',
-          })
-          res.end(JSON.stringify({ ticket }))
-        },
-      }
-      const downloadTicket: WebRoute = {
-        kind: 'exact',
-        path: BROWSER_SESSION_DOWNLOAD_TICKET_PATH,
-        handler: (req, res) => {
-          if (req.method !== 'POST') {
-            res.writeHead(405)
-            res.end()
-            return
-          }
-          const rejection = connection.requestRejection(req)
-          if (rejection !== undefined) {
-            res.writeHead(rejection)
-            res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
-            return
-          }
-          const target = new URL(req.url ?? '', 'http://dsh.invalid').searchParams.get('target')
-          if (target === null) {
-            res.writeHead(400)
-            res.end('missing download target')
-            return
-          }
-          let ticket: string
-          try { ticket = browserSessionService.issueDownloadTicket(req, target) }
-          catch (error) {
-            if (!(error instanceof TypeError)) throw error
-            res.writeHead(400)
-            res.end(error.message)
-            return
-          }
-          res.writeHead(200, {
-            'cache-control': 'no-store',
-            'content-type': 'application/json; charset=utf-8',
-            'x-content-type-options': 'nosniff',
-          })
-          res.end(JSON.stringify({ ticket }))
-        },
-      }
-      webCtx.effect(
-        () => webCtx.webServer.register(bootstrap),
-        `client-connection: ${BROWSER_SESSION_BOOTSTRAP_PATH} route`,
-      )
-      webCtx.effect(
-        () => webCtx.webServer.register(webSocketTicket),
-        `client-connection: ${BROWSER_SESSION_WEBSOCKET_TICKET_PATH} route`,
-      )
-      webCtx.effect(
-        () => webCtx.webServer.register(downloadTicket),
-        `client-connection: ${BROWSER_SESSION_DOWNLOAD_TICKET_PATH} route`,
-      )
-    }
-    webCtx.effect(() => webCtx.webServer.register({
-      kind: 'exact', path: CONNECT_PATH,
-      handler: (req, res) => { connection.authorizeConnect(req, res) },
-    }), 'client-connection: /connect route')
   })
   ctx.inject(['attachments'], (attachmentCtx) => {
     assertImageBodyCapacity(attachmentCtx, maxRequestBodyBytes)

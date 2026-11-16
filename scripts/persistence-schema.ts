@@ -69,6 +69,8 @@ export function extractPersistenceSchema(root: string): PersistenceSchemaInvento
     rootDir: root,
     noUnusedLocals: false,
     noUnusedParameters: false,
+    // Private JDCloud media plugins retain JavaScript sources in the Host program.
+    allowJs: true,
     // Reachable declaration-file errors must not become opaque any values.
     skipLibCheck: false,
     strict: true,

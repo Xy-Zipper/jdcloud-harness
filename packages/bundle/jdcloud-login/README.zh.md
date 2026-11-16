@@ -25,6 +25,8 @@ kind: "package-bundle"
 <a id="use-this-package"></a>
 ## 使用本包
 
+侧栏顶部保留 JDCloud 账号控件，底部直接显示设置按钮。该 bundle 会禁用官方账号入口及通知。
+
 将 bundle 添加到 Web profile：
 
 ```sh

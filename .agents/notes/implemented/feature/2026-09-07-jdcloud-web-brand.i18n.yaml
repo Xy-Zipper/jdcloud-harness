@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-07-jdcloud-web-brand.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-07-jdcloud-web-brand.md
-2026-09-07-jdcloud-web-brand.md: 8d2c3ea186e87e556c1fe14fbb7751131b27d0a7
-2026-09-07-jdcloud-web-brand.zh.md: 92291e1660ee6298744a14955ac6371bc1f776b0
+/agent-note-jdcloud-web-brand-overlay:
+  en: a05074b455f83559
+  zh: 0d1c49088ddfed43
+/agent-note-jdcloud-web-brand-overlay/problem:
+  en: 3794da4a1cdd7747
+  zh: a992d593a9846bed
+/agent-note-jdcloud-web-brand-overlay/decision:
+  en: 96f06915d3038640
+  zh: 69f1805c57cca705
+/agent-note-jdcloud-web-brand-overlay/alternatives-considered:
+  en: 6f378989752bb3e0
+  zh: 0a83e1f38dbb8759
+/agent-note-jdcloud-web-brand-overlay/consequences:
+  en: d91da1978130c458
+  zh: 971f0a5a4ac8ce46

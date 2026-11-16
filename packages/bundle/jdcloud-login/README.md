@@ -25,6 +25,8 @@ The bundle includes [Creation Studio media tools](../../jdcloud/creation-studio-
 <a id="use-this-package"></a>
 ## Use this package
 
+The sidebar keeps JDCloud account controls at the top and a direct Settings button at the bottom. The official account launcher and notifications are disabled in this bundle.
+
 Add the bundle to a Web profile:
 
 ```sh

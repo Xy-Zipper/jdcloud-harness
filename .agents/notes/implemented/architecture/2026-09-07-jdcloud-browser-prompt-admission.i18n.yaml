@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-07-jdcloud-browser-prompt-admission.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-07-jdcloud-browser-prompt-admission.md
-2026-09-07-jdcloud-browser-prompt-admission.md: af97bf9608a174d48558b1f7799fe3aaa5698855
-2026-09-07-jdcloud-browser-prompt-admission.zh.md: 9f9285404d173a96dd3d456c26b1da152b7e5c42
+/agent-note-jdcloud-browser-prompt-admission:
+  en: 8fe5aa6e92a9f396
+  zh: c0ec63a30431a4c0
+/agent-note-jdcloud-browser-prompt-admission/problem:
+  en: 0476975c4ca56fdd
+  zh: 90730439ba9fddd3
+/agent-note-jdcloud-browser-prompt-admission/decision:
+  en: a9fc1f3439ee666a
+  zh: 9654e50d53bcc011
+/agent-note-jdcloud-browser-prompt-admission/alternatives-considered:
+  en: 26bf6c4b2c53cc62
+  zh: fd58257328f415e0
+/agent-note-jdcloud-browser-prompt-admission/consequences:
+  en: 1d7169f45a0efa9c
+  zh: ca843f3a150af809

@@ -562,7 +562,7 @@ describe('external API Session files', () => {
     const follow = async function* () { yield { ...snapshot(), cursor: 10, hasMore: true } }
     const page = vi.fn(async () => ({ records: [attachmentRecord()], hasMore: false }))
     const ctx = context({
-      sessions: { follow, page },
+      sessions: { follow, events: page },
       attachments: { readFileStream: async function* () { yield Uint8Array.of(1, 2, 3) } },
     })
     const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/files/content?sessionId=session-files&attachmentId=sha256:image'))
@@ -636,7 +636,7 @@ describe('external API Session history', () => {
       arguments: JSON.stringify({ questions: [{ id: 'references', question: 'Use requirements without references?', options: [{ label: 'Allow', description: 'Continue the same script' }] }] }) } }]
     const page = vi.fn(async () => ({ records: events.map(event => ({ type: 'event', event })), hasMore: false }))
     const ctx = context({ agents: { get: () => ({ status: 'running' }) },
-      sessions: { follow: async function* () { yield { type: 'snapshot', records: [], cursor: 1000, hasMore: true } }, page } })
+      sessions: { follow: async function* () { yield { type: 'snapshot', records: [], cursor: 1000, hasMore: true } }, events: page } })
     const response = await fetchExternalApi(ctx, request('/api/external/v1/sessions/history?sessionId=script'))
     await expect(response.json()).resolves.toMatchObject({ data: { running: true, pendingQuestions: [{
       callId: 'question-call', answerable: false, questions: [{ id: 'references', question: 'Use requirements without references?' }],

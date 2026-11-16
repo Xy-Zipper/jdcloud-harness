@@ -6,12 +6,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { ToolArgsError, defineTool } from '@deepseek-ai/dsh-tools'
 import type { DiffCallView, DiffResultView, ToolResult } from '@deepseek-ai/dsh-tools'
-import type { ParameterSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type { FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-fs'
-import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { computeHunkDiffs, diffsFromMeta, pathFromMeta } from './diff.ts'
 import { remediateFsError } from './error.ts'
 import { mutationResult } from './mutation-result.ts'
@@ -25,7 +23,7 @@ import type { FsSandboxController } from './sandbox.ts'
  * @returns the camelCased input; `content` passes through untouched.
  */
 export function parseWriteArgs(args: { file_path: string; content: string }): { filePath: string; content: string } {
-  if (args.file_path.trim().length === 0) throw new Error('file_path must be a non-empty string')
+  if (args.file_path.trim().length === 0) throw new ToolArgsError(['file_path must be a non-empty string'])
   return { filePath: args.file_path, content: args.content }
 }
 
@@ -67,23 +65,23 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
     order: ctx.systemPrompt.getSectionOrder('TOOL_WRITE'),
     text: ({ scope }) => ctx.tools.get('write', scope) === undefined
       ? ''
-      : 'Read an existing file before overwriting it with write (the default fs-observation-policy requires it)'
+      : 'Read an existing file before overwriting it with write'
         + (ctx.tools.get('edit', scope) === undefined ? '' : ' and prefer edit for targeted changes')
         + '.',
   })
 
-  /** Build the static execution schema or one request's narrower model schema. */
-  const parameters = (modes: readonly SandboxMode[]) => ({
-    file_path: { type: 'string', required: true, description: 'Path to write, resolved by the filesystem backend.' },
-    content: { type: 'string', required: true, description: 'Full UTF-8 text content to write.' },
-    ...modes.length > 0 ? sandbox.schemaFields(modes) : {},
-  } as const satisfies ParameterSchemaSpec)
-
   ctx.tools.register(defineTool({
     name: 'write',
     description: 'Create or fully replace a UTF-8 text file.',
-    parameters: parameters(sandbox.escalationModes),
-    modelSchema: context => ({ parameters: parameters(sandbox.modelEscalationModes(context)) }),
+    parameters: {
+      file_path: {
+        type: 'string', required: true,
+        description: 'Path to write, resolved by the filesystem backend. '
+          + 'Provide `file_path` before `content` in the arguments.',
+      },
+      content: { type: 'string', required: true, description: 'Full UTF-8 text content to write.' },
+      ...sandbox.escalationModes.length > 0 ? sandbox.schemaFields() : {},
+    },
     output: {
       schema: {
         type: 'object',
@@ -128,7 +126,7 @@ export function applyWriteTool(ctx: Context, sandbox: FsSandboxController): void
         // A sandbox denial becomes the shared [sandbox: …] marker (the model
         // recognizes it from bash); guarded mutation failures receive their
         // stable model-facing diagnostic; anything else passes through.
-        throw remediateFsError(sandbox.mapError(error, sandboxPolicy, exec), target.displayPath)
+        throw remediateFsError(sandbox.mapError(error, sandboxPolicy), target.displayPath)
       }
       return mutationResult(ctx, target, outcome, exec)
     },
