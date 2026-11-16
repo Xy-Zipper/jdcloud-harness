@@ -1,0 +1,23 @@
+[
+  {
+    "type": "image_url",
+    "image_url": {
+      "url": "https://platform.example/api/file/previewImage/6ad80f2f1f280486bb45ac3a/aaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "role": "reference_image"
+  },
+  {
+    "type": "image_url",
+    "image_url": {
+      "url": "https://platform.example/api/file/previewImage/6ad80f2f1f280486bb45ac3a/c1c1c1c1c1c1c1c1c1c1c1c1"
+    },
+    "role": "reference_image"
+  },
+  {
+    "type": "image_url",
+    "image_url": {
+      "url": "https://platform.example/api/file/previewImage/6ad80f2f1f280486bb45ac3a/c2c2c2c2c2c2c2c2c2c2c2c2"
+    },
+    "role": "reference_image"
+  }
+]

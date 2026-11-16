@@ -231,6 +231,26 @@ describe('JDCloud login through a real Loader composition', () => {
     })
   })
 
+  it('keeps an explicit media preflight rejection distinguishable on the registered HTTP route', async () => {
+    const context = await bootComposition(undefined, true, true)
+    const rejection = vi.spyOn(context.jdcloudAuthController, 'runExternalRequest').mockRejectedValueOnce(
+      Object.assign(new Error('参考图超过30MB，未提交视频。'), {
+        status: 400, code: 'video/reference-too-large', submissionState: 'not-submitted',
+      }),
+    )
+    try {
+      const response = await localFetch(`http://127.0.0.1:${context.webServer.port}/api/external/v1/creation-studio/media/video/tasks`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer fixture-token', 'x-tenant-id': 'a'.repeat(24), 'x-jdcloud-base-url': 'https://kindoucloud.com' },
+        body: '{}',
+      })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        errorCode: 'video/reference-too-large', submissionState: 'not-submitted', message: '参考图超过30MB，未提交视频。',
+      })
+    } finally { rejection.mockRestore() }
+  })
+
   it('loads media tools and authenticated routes from the JDCloud bundle and removes them on unload', async () => {
     const tenantId = 'a'.repeat(24)
     const usageRows: Record<string, unknown>[] = []

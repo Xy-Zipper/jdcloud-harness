@@ -110,6 +110,10 @@ async function setup() {
         }
         if (url === 'https://result.tos-cn-beijing.volces.com/original.png')
             return new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
+        if (url.includes('/api/file/previewImage/')) {
+            expect(init.headers).toBeUndefined();
+            return new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } });
+        }
         if (url.includes('contents/generations/tasks')) {
             if (init.method === 'POST') {
                 videoCalls++;
@@ -127,7 +131,7 @@ async function setup() {
         key === 'ARK_API_KEY' ? 'ark-key' : key === 'GPT_IMAGE_API_KEY' ? 'gpt-key'
             : key === 'CREATION_STUDIO_ACCOUNT_POOL_TOKEN' && poolRows ? 'reader-token' : '',
         async () => ({ width: 1024, height: 1024 }), async (url, init = {}) => {
-            if (poolRows && url.startsWith('https://platform.example')) {
+            if (poolRows && url.startsWith('https://platform.example') && !url.includes('/api/file/previewImage/')) {
                 expect(init.headers.Authorization).toBe('reader-token');
                 return Response.json({ code: 200, data: init.method === 'GET'
                     ? { userInfo: { corpId: config.tenantId } } : { list: poolRows } });
@@ -141,10 +145,10 @@ async function setup() {
 }
 
 /** Adopt an actually generated and uploaded picture, preserving the real confirmation checks. */
-async function originalPictureFixture(poolRows) {
+async function originalPictureFixture(poolRows, referenceIds = []) {
     const f = await setup();
     const runtime = f.runtime(undefined, poolRows);
-    const request = { ...f.input, prompt: '一位虚构的成年店员，正面人像', size: '1024x1024', referenceIds: [] };
+    const request = { ...f.input, prompt: '一位虚构的成年店员，正面人像', size: '1024x1024', referenceIds };
     await runtime.run('images/tasks', request);
     let task;
     await vi.waitFor(async () => {
@@ -170,6 +174,73 @@ async function originalPictureFixture(poolRows) {
         references: [{ relationId: image.relationId, name: '虚拟店员.png', purpose: '人物外观' }] });
     return { ...f, runtime, image, material, request };
 }
+
+it('sends uploaded reference URLs without putting large image bytes in the video request', async () => {
+    const f = await setup();
+    const ref = f.imageReferences[0];
+    const batch = f.records.get(f.batchId);
+    const saved = decodeGenerationPrompt(batch.prompt);
+    const references = [ref, ...[1, 2].map(index => {
+        const image = { ...ref, relationId: `9${index}`.repeat(12), materialId: `b${index}`.repeat(12), fileId: `c${index}`.repeat(12) };
+        f.records.set(image.relationId, { ...f.records.get(ref.relationId), _id: image.relationId, materialId: image.materialId });
+        f.records.set(image.materialId, { ...f.records.get(ref.materialId), _id: image.materialId, fileId: image.fileId });
+        return image;
+    })].map((image, index) => ({ relationId: image.relationId, name: `产品图${index + 1}`, purpose: '产品外观' }));
+    batch.prompt = encodeGenerationPrompt(saved.prompt, { ...saved.generation, references });
+    // Three 18 MiB inputs exceed 64 MiB when Base64 encoded, while their public URLs fit easily.
+    const bytes = Buffer.alloc(18 * 1024 * 1024, 1);
+    f.auth.downloadFileAuthenticated.mockImplementation(async () => new Response(bytes, { headers: { 'content-type': 'image/png' } }));
+    const previous = f.provider.getMockImplementation();
+    f.provider.mockImplementation(async (url, init) => url.includes('/api/file/previewImage/')
+        ? new Response(bytes, { headers: { 'content-type': 'image/png' } }) : previous(url, init));
+    const runtime = f.runtime();
+    try {
+        expect((await runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).status).toBe('queued');
+        const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init.method === 'POST');
+        const body = JSON.parse(call[1].body);
+        expect(body.content.filter(item => item.type === 'image_url').map(item => item.image_url.url)).toEqual(references.map(reference => {
+            const image = f.records.get(f.records.get(reference.relationId).materialId);
+            return `https://platform.example/api/file/previewImage/${f.config.tenantId}/${image.fileId}`;
+        }));
+        expect(Buffer.byteLength(call[1].body)).toBeLessThan(10000);
+        expect(f.auth.downloadFileAuthenticated).not.toHaveBeenCalled();
+        for (const [url, init] of f.provider.mock.calls.filter(([url]) => url.includes('/api/file/previewImage/'))) {
+            expect(init.headers).toBeUndefined();
+            expect(url).not.toMatch(/token|Authorization/u);
+        }
+        await expect(`${JSON.stringify(body.content.filter(item => item.type === 'image_url'), null, 2)}\n`)
+            .toMatchFileSnapshot('./expected/uploaded-image-video-input.json');
+    } finally { await runtime.close(); }
+});
+
+it.each(['unreadable', 'too-large'])('rejects a %s public image before creating a video task', async (failure) => {
+    const f = await setup();
+    const previous = f.provider.getMockImplementation();
+    f.provider.mockImplementation(async (url, init) => url.includes('/api/file/previewImage/')
+        ? failure === 'unreadable' ? new Response('login required', { status: 403 })
+            : new Response('oversized', { headers: { 'content-type': 'image/png', 'content-length': String(30 * 1024 * 1024) } })
+        : previous(url, init));
+    const runtime = f.runtime();
+    try {
+        await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toMatchObject({
+            submissionState: 'not-submitted', code: failure === 'unreadable' ? 'video/reference-unreadable' : 'video/reference-too-large',
+        });
+        expect(f.counts().videoCalls).toBe(0);
+        expect(await runtime.run('video/list', f.input)).toEqual([]);
+    } finally { await runtime.close(); }
+});
+
+it('uses the provider original URL for a new image edit without treating it as trusted portrait text-to-image', async () => {
+    const f = await originalPictureFixture(undefined, ['6'.repeat(24)]);
+    const runtime = f.runtime;
+    try {
+        expect(f.image.generation.originalUrl).toBe(originalImageUrl);
+        const task = await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+        expect(task.status).toBe('queued');
+        const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init.method === 'POST');
+        expect(JSON.parse(call[1].body).content.find(item => item.type === 'image_url').image_url.url).toBe(originalImageUrl);
+    } finally { await runtime.close(); }
+});
 
 it('sends the original text-to-image URL and original account after low-code upload and a Host restart', async () => {
     const f = await originalPictureFixture();
@@ -268,15 +339,16 @@ it('keeps the paid original receipt when downloading fails and recovers it witho
 
 it('names the rejected picture and keeps its provider policy code without another paid request', async () => {
     const f = await setup();
-    f.provider.mockImplementationOnce(async () => Response.json({
+    const previous = f.provider.getMockImplementation();
+    f.provider.mockImplementation(async (url, init) => url.includes('contents/generations/tasks') ? Response.json({
         error: { code: 'InputImageSensitiveContentDetected.PrivacyInformation', message: 'input may contain real person', param: 'content[1]' },
-    }, { status: 400 }));
+    }, { status: 400 }) : previous(url, init));
     const runtime = f.runtime();
     const task = await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
     expect(task).toMatchObject({ status: 'failed', errorCode: 'InputImageSensitiveContentDetected.PrivacyInformation' });
     expect(task.error).toContain('参考图“product.png”');
     expect((await runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).errorCode).toBe(task.errorCode);
-    expect(f.provider).toHaveBeenCalledOnce();
+    expect(f.provider.mock.calls.filter(([url]) => url.includes('contents/generations/tasks'))).toHaveLength(1);
     await runtime.close();
 });
 it.each(SEEDANCE_MODELS)('submits the saved $label model and preserves it when the same request is recovered', async ({ value }) => {
@@ -449,10 +521,10 @@ it.each([undefined, '', '待确认', ' 自有 '].flatMap(authorization =>
     try {
         const quote = await runtime.run('images/quote', { ...f.input, prompt: 'reference', size: '1024x1024', referenceIds: [ref.relationId] });
         expect(quote.referenceCount).toBe(1);
-        f.auth.downloadFileAuthenticated.mockRejectedValueOnce(new Error('reference-preflight-complete'));
+        f.provider.mockRejectedValueOnce(new Error('reference-preflight-complete'));
         await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toThrow('reference-preflight-complete');
         expect(JSON.stringify(material)).toBe(before);
-        expect(f.provider).not.toHaveBeenCalled();
+        expect(f.provider.mock.calls.filter(([url]) => url.includes('contents/generations/tasks'))).toHaveLength(0);
     }
     finally {
         await runtime.close();
@@ -724,14 +796,15 @@ it('submits multiple Seedream requests before completion and restores each uploa
     const release = Promise.withResolvers();
     let created = 0;
     f.provider.mockImplementation(async (url, init) => {
+        if (url === originalImageUrl) return originalImageBytes();
         expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations');
         const body = JSON.parse(init.body);
-        expect(body).toMatchObject({ model: 'doubao-seedream-5-0-pro-260628', response_format: 'b64_json' });
+        expect(body).toMatchObject({ model: 'doubao-seedream-5-0-pro-260628', response_format: 'url' });
         expect(body.image).toEqual([`https://platform.example/api/file/previewImage/${f.config.tenantId}/${f.imageReferences[0].fileId}`]);
         expect(init.headers.Authorization).toBe('Bearer ark-key');
         created++;
         await release.promise;
-        return Response.json({ data: [{ b64_json: png }] });
+        return seedreamResult();
     });
     const requests = [1, 2].map(index => ({ ...f.input, requestId: `seedream-${index}`, prompt: `view ${index}`,
         referenceIds: [f.imageReferences[0].relationId], size: '1024x1024' }));
@@ -1098,7 +1171,7 @@ it('shares pool capacity between images and videos and polls a disabled account 
     f.provider.mockImplementation(async (url, init) => {
         if (url.endsWith('/images/generations')) {
             await release.promise;
-            return Response.json({ data: [{ b64_json: png }] });
+            return seedreamResult();
         }
         return original(url, init);
     });

@@ -180,7 +180,21 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
   }
   /** 供应商结果先落盘；上传失败沿原步骤恢复，不重新请求图片生成。 */
   async function deliver(input, state) {
-    const bytes = Buffer.from(state.image, 'base64')
+    let bytes
+    if (state.imageUrl) {
+      const response = await fetcher(state.imageUrl, { redirect: 'error', signal: AbortSignal.timeout(60_000) })
+      if (!response.ok || !response.body || !response.headers.get('content-type')?.startsWith('image/'))
+        throw new Error('白底图原始图片尚未下载成功，请查询原任务继续入库。')
+      const chunks = []
+      let size = 0
+      for await (const chunk of response.body) {
+        size += chunk.length
+        if (size > 50 * 1024 * 1024) throw new Error('白底图原始图片超过50MB。')
+        chunks.push(chunk)
+      }
+      bytes = Buffer.concat(chunks)
+    }
+    else bytes = Buffer.from(state.image, 'base64')
     const metadata = await sharp(bytes, { limitInputPixels: 32 * 1024 * 1024 }).metadata()
     if (!['png', 'jpeg'].includes(metadata.format) || !metadata.width || !metadata.height) throw new Error('即梦未返回有效图片。')
     await sharp(bytes, { limitInputPixels: 32 * 1024 * 1024 }).stats()
@@ -261,7 +275,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
               const account = await accounts.resolve('ark', state)
               const image = await requestSeedreamImage(account.apiKey, state.model, { prompt: whiteBackgroundPrompt(state.prompt), size: state.size },
                 [{ url: `${base}/api/file/previewImage/${config.tenantId}/${state.referenceFileId}` }], fetcher)
-              state.image = image.b64
+              state.imageUrl = image.url
               state.taskId = `seedream-${state.requestId}`
               state.status = 'done'
             }
@@ -311,7 +325,7 @@ export function createWhiteBackgroundService(config, auth, keys, billing, fetche
           await persist(input, state)
           await accounts?.settle(state, data.status === 'done' ? 'succeeded' : data.status, state.taskId)
         }
-        if (state.image && !state.result) {
+        if ((state.image || state.imageUrl) && !state.result) {
           try { await deliver(input, state) }
           catch (error) { state.status = 'upload_failed'; state.error = `白底图已生成，保存未完成：${error.message}`; await persist(input, state) }
         }

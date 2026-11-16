@@ -1,0 +1,275 @@
+$ tsx scripts/run-gates.ts doc-quick
+run-gates: doc-quick running 21 gate(s) with 8 worker(s) from 12 local default worker(s) of 20 CPU(s), doc-quick cap 8.
+run-gates: start markdown links
+run-gates: start type equivalence
+run-gates: start translation pairing
+run-gates: start markdown wrap
+run-gates: start npm dependency catalog
+run-gates: start Session format references
+run-gates: start public repository links
+run-gates: start repository references
+run-gates: PASS npm dependency catalog (2.70s)
+run-gates: start concrete terms
+
+== FAILED type equivalence (5.79s) ==
+command: pnpm run verify-type-equiv
+outcome: exit 1
+$ tsx scripts/verify-type-equiv.ts
+verify-type-equiv: type-equiv verification failed:
+  DRIFT: docs/subsystems/filesystem.md:118 — type-equiv block for FsWriteIntent does not match packages/fs/fs/src/types.ts.
+    source structure: type FsWriteIntent = | { kind: 'createIfAbsent' } | { kind: 'replaceIfVersion'; version: FsVersion }
+    doc structure:    type FsWriteIntent = | { kind: 'createIfAbsent' } | { kind: 'replaceIfVersion'; version: FsVersion }
+    source JSDoc:     ["/** * Guarded write intent. `createIfAbsent` rejects an existing target with * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with * `FS_STALE_VERSION`. Omitting the intent from `writeText` or `writeBytes` * means unconditional create-or-overwrite, not a third union arm. */"]
+    doc JSDoc:        ["/** * Guarded write intent. `createIfAbsent` rejects an existing target with * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with * `FS_STALE_VERSION`. Omitting the intent from `writeText` means unconditional * create-or-overwrite, not a third union arm. */"]
+  DRIFT: docs/subsystems/workspace.md:25 — type-equiv block for Workspace does not match packages/workspace/workspace/src/types.ts.
+    source structure: interface Workspace { readonly id: WorkspaceId readonly path: string readonly title: string readonly createdAt: string readonly updatedAt: string readonly sessionIds: readonly SessionId[] setTitle(title: string): Promise<void> attachSession(sessionId: SessionId): Promise<void> insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> detachSession(sessionId: SessionId): Promise<void> status(): Promise<'ok' | 'missing-dir'> }
+    doc structure:    interface Workspace { readonly id: WorkspaceId readonly path: string readonly title: string readonly createdAt: string readonly updatedAt: string readonly sessionIds: readonly SessionId[] setTitle(title: string): Promise<void> attachSession(sessionId: SessionId): Promise<void> insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> detachSession(sessionId: SessionId): Promise<void> status(): Promise<'ok' | 'missing-dir'> }
+    source JSDoc:     ["/** * One workspace: a stable id over an existing directory, a display title, and * an ordered candidate account of sessions. Membership validates header cwd * against the workspace path, but preserves an existing account when its * fully qualified cwd is missing. Consumers only see this interface; the * implementation stays private. */","/** Stable record id (generated uuid). */","/** * Canonical directory path: the `fs.realpath` of the path given at create * time (trailing slashes, `..`, and symlinks all resolved). Never rewritten * afterwards, even when the directory disappears (see {@link status}). */","/** Display title. Defaults to the final path segment, or a filesystem root's own spelling; duplicates are allowed. */","/** ISO-8601 creation instant, stamped at create and never rewritten. */","/** ISO-8601 instant of the last durable mutation (create counts as one). */","/** * Header-validated sessions in manually owned order: a new session is * prepended at attach, explicit reordering goes through * `insertSessionBefore`, and activity never reorders. The durable candidate * account is filtered synchronously: missing headers, invalid cwd values, * and canonical cwd mismatches are never returned. A fully qualified cwd * whose realpath or directory stat fails with ENOENT preserves an existing * candidate, including a dangling symlink; other filesystem failures do not. * A subsequent mutation prunes filtered candidates, not missing-directory * candidates. This does not admit new sessions or recreate directories. */","/** * Replace the display title durably. * @param title - New title; any string, duplicates across workspaces allowed. * @returns resolution after durability. */","/** * Prepend a session to this workspace's candidate account. An already * accounted id resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs. A new id's * live or persisted * header cwd must resolve to an existing directory equal to {@link path}; * unknown ids, missing or invalid cwd values, and mismatches reject without * writing. * @param sessionId - The session to record. * @returns resolution after durability. */","/** * Move an accounted session within the manual order, DOM-insertBefore-like: * with an anchor the session lands before it, without one it appends to the * end. Only the moved id changes position. A session or anchor absent from * the account rejects without writing; a move to the current position * resolves without writing, aside from the durable filtered-candidate * prune every accepted mutation performs; decided on the domain write * chain. * @param sessionId - The accounted session to move. * @param beforeSessionId - Accounted anchor to insert before; omitted appends. * @returns resolution after durability. */","/** * Remove a session from this workspace's account. Idempotent: an id not on * the account resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs; decided on * the domain write chain like attach. Never touches the session's own stored log. * @param sessionId - The session to remove. * @returns resolution after durability. */","/** * Live directory check, uncached: whether {@link path} currently exists and * is a directory. A missing directory never mutates the record — the * directory may only be temporarily moved. * @returns `'ok'` when the directory exists, `'missing-dir'` otherwise. */"]
+[ELIFECYCLE] Command failed with exit code 1.
+    doc JSDoc:        ["/** * One workspace: a stable id over an existing directory, a display title, and * an ordered candidate account of sessions. Membership requires both an id in * that account and a session header whose canonical cwd equals the workspace * path. Consumers only see this interface; the implementation stays private. */","/** Stable record id (generated uuid). */","/** * Canonical directory path: the `fs.realpath` of the path given at create * time (trailing slashes, `..`, and symlinks all resolved). Never rewritten * afterwards, even when the directory disappears (see {@link status}). */","/** Display title. Defaults to the final path segment, or a filesystem root's own spelling; duplicates are allowed. */","/** ISO-8601 creation instant, stamped at create and never rewritten. */","/** ISO-8601 instant of the last durable mutation (create counts as one). */","/** * Header-validated sessions in manually owned order: a new session is * prepended at attach, explicit reordering goes through * `insertSessionBefore`, and activity never reorders. The durable candidate * account is filtered synchronously: missing headers, invalid cwd values, * and canonical cwd mismatches are never returned. A subsequent workspace * mutation prunes those filtered candidates durably. */","/** * Replace the display title durably. * @param title - New title; any string, duplicates across workspaces allowed. * @returns resolution after durability. */","/** * Prepend a session to this workspace's candidate account. An already * accounted id resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs. A new id's * live or persisted * header cwd must resolve to an existing directory equal to {@link path}; * unknown ids, missing or invalid cwd values, and mismatches reject without * writing. * @param sessionId - The session to record. * @returns resolution after durability. */","/** * Move an accounted session within the manual order, DOM-insertBefore-like: * with an anchor the session lands before it, without one it appends to the * end. Only the moved id changes position. A session or anchor absent from * the account rejects without writing; a move to the current position * resolves without writing, aside from the durable filtered-candidate * prune every accepted mutation performs; decided on the domain write * chain. * @param sessionId - The accounted session to move. * @param beforeSessionId - Accounted anchor to insert before; omitted appends. * @returns resolution after durability. */","/** * Remove a session from this workspace's account. Idempotent: an id not on * the account resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs; decided on * the domain write chain like attach. Never touches the session's own stored log. * @param sessionId - The session to remove. * @returns resolution after durability. */","/** * Live directory check, uncached: whether {@link path} currently exists and * is a directory. A missing directory never mutates the record — the * directory may only be temporarily moved. * @returns `'ok'` when the directory exists, `'missing-dir'` otherwise. */"]
+
+(checked 494 primary block(s) across 51 doc(s), 494 paired derivative(s); manifest at scripts/type-equiv.manifest.json)
+run-gates: start doc refs
+run-gates: PASS Session format references (6.81s)
+run-gates: start package README Summaries
+
+== FAILED package README Summaries (2.84s) ==
+command: pnpm run verify-package-readme-summaries
+outcome: exit 1
+$ tsx scripts/verify-package-readme-summaries.ts
+verify-package-readme-summaries: violations found:
+  packages/api/workspace-files/README.md: Summary has 103 words; the limit is 100. Read .agents/skills/dsh-doc/SKILL.md and .agents/skills/dsh-doc/templates/package-reference.md before rewriting it.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start package README model experience
+run-gates: PASS doc refs (3.98s)
+run-gates: start agent note classification
+run-gates: PASS concrete terms (8.31s)
+run-gates: start agent note format
+run-gates: PASS public repository links (12.15s)
+run-gates: start archived agent notes
+run-gates: PASS agent note classification (2.77s)
+run-gates: start skill invocation metadata
+
+== FAILED repository references (13.06s) ==
+[ELIFECYCLE] Command failed with exit code 1.
+command: pnpm run verify-repository-references
+outcome: exit 1
+$ tsx scripts/verify-repository-references.ts
+verify-repository-references: use release tags or maintained repository links:
+  python/sdk/uv.lock:113 commit-hash
+run-gates: start translation prompt
+run-gates: PASS agent note format (2.81s)
+run-gates: start doc budgets
+run-gates: PASS skill invocation metadata (2.53s)
+run-gates: start upgrade guides
+
+== FAILED package README model experience (5.51s) ==
+command: pnpm run verify-package-readme-model-experience
+outcome: exit 1
+$ tsx scripts/verify-package-readme-model-experience.ts
+verify-package-readme-model-experience failed:
+  packages\api\external-api\README.md: line 76: content after #### KV Cache effect paragraph must be a titled H5 plus `markdown` fence owned by that field
+  packages\schedule\schedule\README.md: line 99: tool-catalog link fragment "deepseek-aidsh-tool-schedule" does not name an H2 section
+  packages\schedule\tool-schedule\README.md: line 87: tool-catalog link fragment "deepseek-aidsh-tool-schedule" does not name an H2 section
+  packages\session\tool-working-directory\README.md: line 66: tool-catalog link fragment "deepseek-aidsh-tool-working-directory" does not name an H2 section
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start documentation standard tests
+run-gates: PASS archived agent notes (3.26s)
+run-gates: start package README limitations
+run-gates: PASS translation prompt (2.47s)
+
+== FAILED doc budgets (2.43s) ==
+command: pnpm run verify-doc-budgets
+outcome: exit 1
+$ tsx scripts/verify-doc-budgets.ts
+verify-doc-budgets failed:
+
+  docs/architecture.md: 2414 words exceeds the 2410-word ceiling — relocate or condense per docs/AGENTS.md (raising the ceiling requires justification in the PR)
+
+See docs/AGENTS.md for the documentation standard and the relocation-first rule.
+[ELIFECYCLE] Command failed with exit code 1.
+
+== FAILED markdown links (16.71s) ==
+command: pnpm run verify-md-links
+outcome: exit 1
+$ tsx scripts/verify-md-links.ts
+verify-md-links: broken relative cross-links found:
+  docs\config-catalog.md:1338  ../packages/hooks/hooks-claude-code/src/index.ts  (target does not exist)
+  docs\config-catalog.md:1365  ../packages/hooks/hooks-codex/src/index.ts  (target does not exist)
+  docs\config-catalog.md:1500  ../packages/runtime-diagnostics/invariants/src/index.ts  (target does not exist)
+  docs\config-catalog.md:2763  ../packages/session/session-title-all-prompts-llm/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3672  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3690  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3813  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4166  ../packages/webhook/webhook-github/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4309  ../packages/skill/skill-badge/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4319  ../packages/webhook/webhook/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4368  ../packages/hooks/hook-protocol/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4392  ../packages/subagent/subagent-in-process-driver/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1340  ../packages/hooks/hooks-claude-code/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1367  ../packages/hooks/hooks-codex/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1502  ../packages/runtime-diagnostics/invariants/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:2765  ../packages/session/session-title-all-prompts-llm/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3674  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3692  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3815  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4168  ../packages/webhook/webhook-github/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4311  ../packages/skill/skill-badge/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4321  ../packages/webhook/webhook/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4370  ../packages/hooks/hook-protocol/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4394  ../packages/subagent/subagent-in-process-driver/src/index.ts  (target does not exist)
+  docs\subsystems\schedule.md:265  ../tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  docs\subsystems\schedule.zh.md:265  ../tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  docs\subsystems\workspace.md:120  ../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md  (target does not exist)
+  docs\subsystems\workspace.zh.md:120  ../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md  (target does not exist)
+  docs\tool-catalog.md:1369  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1382  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1411  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1440  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1474  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1507  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2125  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2146  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2159  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2238  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2302  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2362  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2387  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2480  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2498  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1375  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1388  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1417  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1446  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1480  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1513  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2131  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2152  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2165  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2244  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2308  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2368  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2393  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2486  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2504  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  packages\schedule\README.md:38  ../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\README.zh.md:38  ../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\boot\plugin-market\README.md:88  ../../../docs/tool-catalog.md#deepseek-aidsh-plugin-market  (no such anchor in target)
+  packages\boot\plugin-market\README.zh.md:88  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-plugin-market  (no such anchor in target)
+  packages\core\system-prompt\README.md:103  src/invariant.ts  (target does not exist)
+  packages\core\system-prompt\README.zh.md:103  src/invariant.ts  (target does not exist)
+  packages\experimental\claude-code-mods\README.md:56  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-claude-code-mods  (no such anchor in target)
+  packages\experimental\claude-code-mods\README.zh.md:56  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-claude-code-mods  (no such anchor in target)
+  packages\experimental\cua-macos\README.md:56  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-cua-macos  (no such anchor in target)
+  packages\experimental\cua-macos\README.zh.md:56  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-cua-macos  (no such anchor in target)
+  packages\experimental\tool-worktree\README.md:37  ../../../docs/tool-catalog.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.md:71  ../../../docs/tool-catalog.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.zh.md:37  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.zh.md:71  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\worktree\README.md:37  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-worktree  (no such anchor in target)
+  packages\experimental\worktree\README.zh.md:37  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-worktree  (no such anchor in target)
+  packages\llm\llm-deepseek\README.md:76  ../../../docs/config-catalog.md#deepseek-aidsh-llm-deepseek-api-key  (no such anchor in target)
+  packages\llm\llm-deepseek\README.zh.md:76  ../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-deepseek-api-key  (no such anchor in target)
+  packages\schedule\schedule\README.md:99  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\schedule\README.zh.md:99  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.md:74  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.md:87  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.zh.md:74  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.zh.md:87  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\session\tool-working-directory\README.md:66  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-working-directory  (no such anchor in target)
+  packages\session\tool-working-directory\README.zh.md:66  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-working-directory  (no such anchor in target)
+  packages\session\working-directory\README.md:28  ../../../docs/config-catalog.md#deepseek-aidsh-working-directory  (no such anchor in target)
+  packages\session\working-directory\README.zh.md:28  ../../../docs/config-catalog.zh.md#deepseek-aidsh-working-directory  (no such anchor in target)
+  packages\shell\tool-pwsh\README.md:81  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.md  (target does not exist)
+  packages\shell\tool-pwsh\README.md:112  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.md  (target does not exist)
+  packages\shell\tool-pwsh\README.zh.md:81  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.zh.md  (target does not exist)
+  packages\shell\tool-pwsh\README.zh.md:112  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.zh.md  (target does not exist)
+  packages\workspace\workspace\README.md:112  src/invariant.ts  (target does not exist)
+  packages\workspace\workspace\README.zh.md:113  src/invariant.ts  (target does not exist)
+[ELIFECYCLE] Command failed with exit code 1.
+
+== FAILED markdown wrap (16.76s) ==
+command: pnpm run verify-md-wrap
+outcome: exit 1
+$ tsx scripts/verify-md-wrap.ts
+verify-md-wrap: hard-wrapped prose paragraphs found (write one physical line per paragraph):
+  packages\client\ui-settings-general\README.md:56  The onboarding ledger projects in ascending order and mounts exactly one step at…
+  packages\client\ui-settings-general\README.zh.md:56  引导账本按升序投影，每次只挂载一个步骤。注册方持有持久化完成状态、能力就绪状态、文案、变更操作与可见包装，因此独立注册的流程无法堆叠，外壳也不会成为第二个配置事…
+  packages\client\ui-sidebar\README.md:42  Plugins add an icon component to the root-scoped `sidebar.panellist` list with a…
+  packages\client\ui-sidebar\README.zh.md:42  插件在 root 作用域的 `sidebar.panellist` list 中注册图标组件，提供 `id`、可选 `order`，以及字符串或 locale-…
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: PASS upgrade guides (2.56s)
+
+== FAILED translation pairing (19.29s) ==
+command: pnpm run verify-translation-pairing
+outcome: exit 1
+$ tsx scripts/verify-translation-pairing.ts
+verify-translation-pairing: bilingual pairing rules violated (see docs/i18n/README.md):
+  .agents/notes/implemented/architecture/2026-06-21-bounded-llm-request-recovery.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.md: incomplete pair — missing .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.md, .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.zh.md (pairs merge whole: both languages plus the .i18n.yaml record)
+  .agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-09-07-jdcloud-browser-prompt-admission.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-09-15-configurable-browser-authentication.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-08-request-scoped-sandbox-escalation-schemas.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-08-user-stop-clears-todo-plan.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-15-server-managed-models-for-remote-web.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-17-jdcloud-ordinary-user-browser-controls.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-18-jdcloud-browser-user-isolation.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-18-tenant-scoped-workspace-paths.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-07-jdcloud-low-code-conversation-tools.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-07-jdcloud-web-brand.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-09-jdcloud-token-transfer-login.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-10-jdcloud-writable-function-picker.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-10-15-web-project-skill-management.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/simplification/2026-09-15-remove-internal-testing-notice.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/architecture.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/approval.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/commands.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/session.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/tools.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/workspace.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/gateway/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/jdcloud-auth-controller/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/remotes/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/workspace-files/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/bundle/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/bundle/base/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/file-upload/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-settings-general/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-sidebar-right/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-sidebar/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-skill/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/context/session-reference/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+[ELIFECYCLE] Command failed with exit code 1.
+  packages/core/system-prompt/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/core/tools/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/fs/tool-fs/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/host/frontend-static/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/jdcloud/tool-jdcloud-lowcode/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/shell/tool-pwsh/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/skill/skill-filesystem/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/todo/tool-todo/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+run-gates: PASS documentation standard tests (4.06s)
+run-gates: PASS package README limitations (4.53s)
+
+run-gates: 13 passed, 8 failed, 0 skipped in 20.08s.
+run-gates: unsuccessful gates:
+  - FAILED markdown links (16.71s, exit 1)
+    pnpm run verify-md-links
+  - FAILED type equivalence (5.79s, exit 1)
+    pnpm run verify-type-equiv
+  - FAILED translation pairing (19.29s, exit 1)
+    pnpm run verify-translation-pairing
+  - FAILED markdown wrap (16.76s, exit 1)
+    pnpm run verify-md-wrap
+  - FAILED repository references (13.06s, exit 1)
+    pnpm run verify-repository-references
+  - FAILED package README Summaries (2.84s, exit 1)
+    pnpm run verify-package-readme-summaries
+  - FAILED package README model experience (5.51s, exit 1)
+    pnpm run verify-package-readme-model-experience
+  - FAILED doc budgets (2.43s, exit 1)
+    pnpm run verify-doc-budgets
+[ELIFECYCLE] Command failed with exit code 1.

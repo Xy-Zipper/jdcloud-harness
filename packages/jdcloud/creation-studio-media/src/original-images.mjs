@@ -1,4 +1,4 @@
-/** Resolve original Seedream text-to-image outputs from Host receipts, never caller-supplied URLs. */
+/** Resolve original Seedream outputs from Host receipts, never caller-supplied URLs. */
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,17 +8,18 @@ import { SEEDREAM_MODELS } from './seedream.mjs'
 /**
  * Read the generated file binding, original URL validity, and original provider account.
  * @param config - The owning Host state directory and tenant.
- * @returns A reader returning null for ordinary pictures and verified metadata for text-to-image outputs.
+ * @returns A reader returning null for ordinary/legacy edited pictures, or verified URLs; only text-to-image pins the generating account.
  */
 export function createOriginalImageReader(config) {
   return async (input, reference, source) => {
     const generation = imageGenerationSource(source.sourceDescription)
     if (source.sourceKind !== 'generated' || !SEEDREAM_MODELS.includes(generation?.model))
       return null
-    const fail = (message, code) => Object.assign(new Error(`参考图“${reference.name}”${message}`), { code, status: 400 })
+    const fail = (message, code) => Object.assign(new Error(`参考图“${reference.name}”${message}`), { code, status: 400, submissionState: 'not-submitted' })
     if (!Array.isArray(generation.referenceIds))
       throw fail('缺少生图输入方式记录，请核对原始生图任务。', 'image/original-invalid')
-    if (generation.referenceIds.length) return null
+    // 历史编辑任务没有原始 URL 时仍可用平台文件；文生人脸不能走此回退。
+    if (generation.referenceIds.length && !generation.originalUrl) return null
     if (!/^[a-zA-Z0-9-]{8,100}$/u.test(generation.requestId))
       throw fail('缺少原始生图回执，请在分镜中重新规划人像文生图并确认。', 'image/original-missing')
     const identity = [config.tenantId, input.spaceId, input.projectId, input.planId, generation.requestId]
@@ -38,7 +39,8 @@ export function createOriginalImageReader(config) {
     const original = task.result?.source
     if (task.status !== 'succeeded' || task.tenantId !== config.tenantId || task.spaceId !== input.spaceId
       || task.projectId !== input.projectId || task.planId !== input.planId
-      || !SEEDREAM_MODELS.includes(original?.model) || !Array.isArray(original.referenceIds) || original.referenceIds.length
+      || !SEEDREAM_MODELS.includes(original?.model) || !Array.isArray(original.referenceIds)
+      || JSON.stringify(original.referenceIds) !== JSON.stringify(generation.referenceIds)
       || original.requestId !== generation.requestId || original.model !== generation.model
       || uploaded.result?.relationId !== reference.relationId || uploaded.result.fileId !== source.fileId
       || typeof task.providerAccountId !== 'string' || !task.providerAccountId
@@ -55,6 +57,6 @@ export function createOriginalImageReader(config) {
       || !Number.isFinite(expires) || expires <= now) {
       throw fail('原始图片链接已过期，不能用平台文件替代。请返回分镜重新规划并确认文生图，不会自动扣费重生成。', 'image/original-expired')
     }
-    return { url: original.originalUrl, providerAccountId: task.providerAccountId }
+    return { url: original.originalUrl, ...(!original.referenceIds.length ? { providerAccountId: task.providerAccountId } : {}) }
   }
 }

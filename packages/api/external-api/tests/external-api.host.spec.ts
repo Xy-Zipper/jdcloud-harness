@@ -89,6 +89,22 @@ function context(services: {
   return ctx
 }
 
+// External callers use the deployment model; provider changes belong to Harness administration.
+it('does not expose model selection through the external integration API', async () => {
+  const selectModel = vi.fn()
+  const modelCatalog = vi.fn()
+  const ctx = context({ sessions: { selectModel, modelCatalog } })
+  for (const path of ['/api/external/v1/models', '/api/external/v1/sessions/model']) {
+    const response = await fetchExternalApi(ctx, request(path, {
+      method: 'POST', body: JSON.stringify({ sessionId: 'owned', provider: 'backup', model: 'backup-model' }),
+    }, { 'content-type': 'application/json' }))
+    expect(response.status).toBe(404)
+  }
+  expect((await fetchExternalApi(ctx, request('/api/external/v1/models'))).status).toBe(404)
+  expect(selectModel).not.toHaveBeenCalled()
+  expect(modelCatalog).not.toHaveBeenCalled()
+})
+
 describe('external API authentication', () => {
   it('requires a provider Bearer token, JDCloud tenant scope, and service address', async () => {
     const ctx = context()

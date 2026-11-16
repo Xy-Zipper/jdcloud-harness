@@ -112,7 +112,9 @@ export function apply(ctx, config) {
                 }
                 catch (error) {
                     const failure = error;
-                    send(failure.status || 400, { code: failure.status || 400, ...(failure.code ? { errorCode: failure.code } : {}), message: failure.message || '媒体任务执行失败。' });
+                    send(failure.status || 400, { code: failure.status || 400, ...(failure.code ? { errorCode: failure.code } : {}),
+                        ...(operation === 'video/tasks' && failure.submissionState === 'not-submitted' ? { submissionState: 'not-submitted' } : {}),
+                        message: failure.message || '媒体任务执行失败。' });
                 }
             },
         }), `creation-studio-media:${operation}`);

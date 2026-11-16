@@ -1,5 +1,4 @@
 /** Seedream uses a synchronous provider POST and durable Host tasks; unknown paid outcomes never resubmit. */
-import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { imagePrompt } from './image-prompts.mjs'
 
@@ -13,15 +12,15 @@ export const DEFAULT_IMAGE_MODEL = SEEDREAM_MODELS[0]
  * @param input - Validated prompt and dimensions.
  * @param references - Authorized platform image URLs in the user's selected order.
  * @param transport - Provider transport.
- * @returns An original text-to-image URL and creation time, or image-edit bytes, with reported usage.
+ * @returns The original provider URL and creation time for generation or editing, with reported usage.
  */
 export async function requestSeedreamImage(apiKey, model, input, references, transport = fetch) {
   const response = await transport('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
     method: 'POST', redirect: 'error',
     headers: { Authorization: `Bearer ${apiKey.trim().replace(/^Bearer\s+/iu, '')}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      // 文生图保留原始 URL；图生图不具备原始人像产物信任资格，仍沿用字节输出。
-      model, prompt: imagePrompt(input.prompt), size: input.size, response_format: references.length ? 'b64_json' : 'url', output_format: 'png',
+      // 文生图与编辑均保留原始 URL；编辑产物仍不具备文生人像信任资格。
+      model, prompt: imagePrompt(input.prompt), size: input.size, response_format: 'url', output_format: 'png',
       watermark: false, ...(references.length ? { image: references.map(reference => reference.url) } : {}),
     }),
     signal: AbortSignal.timeout(300_000),
@@ -33,23 +32,13 @@ export async function requestSeedreamImage(apiKey, model, input, references, tra
       providerRejected: response.status >= 400 && response.status < 500,
     })
   }
-  if (!references.length) {
-    const raw = data.data?.[0]?.url
-    const url = typeof raw === 'string' ? new URL(raw) : undefined
-    if (data.data?.length !== 1 || !url || url.protocol !== 'https:' || url.username || url.password
-      || !url.hostname.endsWith('.volces.com'))
-      throw new Error('即梦未返回有效的原始图片 URL，请核对原请求，勿重复提交。')
-    const generatedAt = new Date(Number.isFinite(data.created) ? data.created * 1000 : Date.now()).toISOString()
-    return { url: raw, mime: 'image/png', usage: data.usage, generatedAt }
-  }
-  const encoded = data.data?.[0]?.b64_json
-  if (data.data?.length !== 1 || typeof encoded !== 'string' || !encoded.length
-    || encoded.length > 70 * 1024 * 1024 || !/^[A-Za-z0-9+/=\r\n]+$/u.test(encoded))
-    throw new Error('即梦未返回单张有效图片，请核对原请求，勿重复提交。')
-  const bytes = Buffer.from(encoded, 'base64')
-  if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
-    throw new Error('即梦返回内容不是 PNG 图片，请核对原请求。')
-  return { b64: encoded, mime: 'image/png', usage: data.usage }
+  const raw = data.data?.[0]?.url
+  const url = typeof raw === 'string' ? new URL(raw) : undefined
+  if (data.data?.length !== 1 || !url || url.protocol !== 'https:' || url.username || url.password
+    || !url.hostname.endsWith('.volces.com'))
+    throw new Error('即梦未返回有效的原始图片 URL，请核对原请求，勿重复提交。')
+  const generatedAt = new Date(Number.isFinite(data.created) ? data.created * 1000 : Date.now()).toISOString()
+  return { url: raw, mime: 'image/png', usage: data.usage, generatedAt }
 }
 
 /**

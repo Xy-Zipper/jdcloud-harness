@@ -1,0 +1,8 @@
+$ tsx scripts/build.ts --scope check
+run-gates: build:check running 2 gate(s) with 2 worker(s) from 12 local default worker(s) of 20 CPU(s).
+run-gates: start host aggregate check
+run-gates: start client aggregate check
+run-gates: PASS client aggregate check (5.00s)
+run-gates: PASS host aggregate check (10.95s)
+
+run-gates: 2 passed, 0 failed, 0 skipped in 10.95s.

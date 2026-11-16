@@ -139,9 +139,9 @@ it('uses a service password login to read numbered accounts without changing cal
 it.each(SEEDREAM_MODELS)('sends the selected model %s with one Ark Bearer key and image references', async model => {
   const transport = vi.fn(async (_url, init) => {
     expect(init.headers).toEqual({ Authorization: 'Bearer key', 'Content-Type': 'application/json' })
-    expect(JSON.parse(init.body)).toMatchObject({ model, size: '1024x1536', output_format: 'png', response_format: 'b64_json', image: ['https://platform.example/reference'] })
+    expect(JSON.parse(init.body)).toMatchObject({ model, size: '1024x1536', output_format: 'png', response_format: 'url', image: ['https://platform.example/reference'] })
     expect(JSON.parse(init.body)).not.toHaveProperty('async')
-    return Response.json({ data: [{ b64_json: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64') }] })
+    return Response.json({ data: [{ url: 'https://result.tos-cn-beijing.volces.com/original.png' }] })
   })
   await requestSeedreamImage('Bearer key', model, { prompt: 'product', size: '1024x1536' }, [{ url: 'https://platform.example/reference' }], transport)
   expect(transport.mock.calls[0][0]).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations')

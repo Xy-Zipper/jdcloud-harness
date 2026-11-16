@@ -1,0 +1,19 @@
+$ tsx scripts/build.ts --scope artifacts
+run-gates: build:artifacts running 7 gate(s) with 7 worker(s) from 12 local default worker(s) of 20 CPU(s).
+run-gates: start native addon
+run-gates: PASS native addon (2.47s)
+run-gates: start host compiler
+run-gates: PASS host compiler (2.42s)
+run-gates: start Host bundle
+run-gates: PASS Host bundle (39.35s)
+run-gates: start Desktop bundle
+run-gates: PASS Desktop bundle (4.81s)
+run-gates: start client compiler
+run-gates: PASS client compiler (1.86s)
+run-gates: start Client bundle
+run-gates: PASS Client bundle (25.70s)
+run-gates: start Web build
+run-gates: PASS Web build (8.54s)
+
+run-gates: 7 passed, 0 failed, 0 skipped in 85.15s.
+build: recorded 329 client artifact(s) with 4 public value(s)

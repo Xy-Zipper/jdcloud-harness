@@ -213,7 +213,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'metered', rows: [], total: 0 }
     if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'metered', processed: 0 }
     const images = createImageService({ ...env, CHECK_POINTS: spaceId => assertSpacePoints(auth, spaceId) }, transport)
-    const videos = createSeedanceService({ ...env, ORIGINAL_IMAGE: originalImage }, transport)
+    const videos = createSeedanceService({ ...env, ORIGINAL_IMAGE: originalImage, PUBLIC_IMAGE_FETCH: fetcher }, transport)
     if (operation === 'images/quote') {
       const request = await images.quote('host-authenticated', input)
       const binding = billing ? await billing.beginMedia(input) : undefined

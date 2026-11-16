@@ -32,9 +32,11 @@ const terminal = new Set([
 	"expired"
 ]);
 var ApiError = class extends Error {
-	constructor(message, status = 400) {
+	constructor(message, status = 400, code = "video/invalid-request") {
 		super(message);
 		this.status = status;
+		this.code = code;
+		this.submissionState = "not-submitted";
 	}
 };
 /** 生成核心由 Harness Host 调用；项目身份、确认链和原请求回执均在执行前核对。 */
@@ -135,7 +137,7 @@ export function createSeedanceService(env, transport = fetch) {
 		billingParameters: task.billingParameters,
 		...(task.storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt: task.storyboardConfirmedAt })
 	});
-	/** 每张图先核对平台引用；文生图原始产物从 Host 回执解析，普通图片使用认证下载。 */
+	/** 核对项目引用后使用原始火山 URL 或平台公开预览 URL，不向供应商请求体嵌入图片字节。 */
 	async function referenceData(token, scope, reference, download = true) {
 		const relation = await detail(token, MENU.relation, reference.relationId);
 		if (relation?._id !== reference.relationId || relation.spaceId !== scope.spaceId || relation.projectId !== scope.projectId || !id(relation.materialId)) throw new ApiError(`参考图“${reference.name}”不属于当前项目。`);
@@ -161,15 +163,28 @@ export function createSeedanceService(env, transport = fetch) {
 		if (!download) return source;
 		const original = env.ORIGINAL_IMAGE ? await env.ORIGINAL_IMAGE(scope, reference, source) : null;
 		if (original) return original;
-		const response = await transport(`${platform}/api/file/dowloadFile/${tenant}/${source.fileId}`, {
-			headers: { Authorization: token },
+		const url = `${platform}/api/file/previewImage/${tenant}/${source.fileId}`;
+		// 用无登录信息的真实 GET 核验可读性和单图大小；不缓冲、不重编码原文件。
+		const response = await (env.PUBLIC_IMAGE_FETCH || transport)(url, {
 			redirect: "error",
 			signal: AbortSignal.timeout(6e4)
 		});
-		if (!response.ok || Number(response.headers.get("content-length")) >= 30 * 1024 * 1024) throw new ApiError(`参考图“${reference.name}”下载失败或超过30MB。`);
-		const bytes = Buffer.from(await response.arrayBuffer());
-		if (!bytes.length || bytes.length >= 30 * 1024 * 1024 || response.headers.get("content-type")?.includes("text/html")) throw new ApiError(`参考图“${reference.name}”返回内容无效。`);
-		return { url: `data:${source.mime};base64,${bytes.toString("base64")}` };
+		const fail = (message, code) => new ApiError(`参考图“${reference.name}”${message}，未提交视频。`, 400, code);
+		if (!response.ok || !response.body || !response.headers.get("content-type")?.startsWith("image/")) {
+			await response.body?.cancel();
+			throw fail("公开链接无法读取，请检查图片文件和平台预览接口", "video/reference-unreadable");
+		}
+		if (Number(response.headers.get("content-length")) >= 30 * 1024 * 1024) {
+			await response.body.cancel();
+			throw fail("超过单张30MB上限，请更换图片", "video/reference-too-large");
+		}
+		let size = 0;
+		for await (const chunk of response.body) {
+			size += chunk.length;
+			if (size >= 30 * 1024 * 1024) throw fail("超过单张30MB上限，请更换图片", "video/reference-too-large");
+		}
+		if (!size) throw fail("返回内容为空，请更换图片", "video/reference-unreadable");
+		return { url };
 	}
 	/** 音色只取当前可读的共享/本空间目录；实际解码核对时长，不信任调用方 URL 或时长。 */
 	async function audioData(token, scope, reference, maxSeconds) {
@@ -303,13 +318,10 @@ export function createSeedanceService(env, transport = fetch) {
 		buildSeedanceRequest(generation, finalPrompt, duration, generation.references.map(() => "pending"), audioReferences.map(() => "pending"));
 		const urls = [];
 		const originalAccounts = new Set();
-		let encodedSize = 0;
 		for (const reference of generation.references) {
 			const picture = await referenceData(token, input, reference);
 			const { url } = picture;
 			if (picture.providerAccountId) originalAccounts.add(picture.providerAccountId);
-			encodedSize += url.length;
-			if (encodedSize > 63 * 1024 * 1024) throw new ApiError("参考图编码后超过方舟64MB请求体上限，请减小图片文件。");
 			urls.push(url);
 		}
 		if (originalAccounts.size > 1) throw new ApiError("本批文生图原始产物来自不同方舟账号，不能合并提交。请返回分镜，使用同账号产物或调整批次。");
@@ -324,7 +336,7 @@ export function createSeedanceService(env, transport = fetch) {
 			audioUrls.push(audio.url);
 		}
 		const request = buildSeedanceRequest(generation, finalPrompt, duration, urls, audioUrls);
-		if (Buffer.byteLength(JSON.stringify(request)) > 64 * 1024 * 1024) throw new ApiError("图片和音频合计超过64MB，请减少本批参考素材。");
+		if (Buffer.byteLength(JSON.stringify(request)) > 64 * 1024 * 1024) throw new ApiError("请求体超过64MB，请减少本批参考音频或提示词。", 400, "video/request-too-large");
 		const task = {
 			requestId: input.requestId,
 			tenantId: tenant,

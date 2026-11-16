@@ -1,0 +1,768 @@
+$ tsx scripts/run-gates.ts doc-sync
+run-gates: doc-sync running 43 gate(s) with 8 worker(s) from 12 local default worker(s) of 20 CPU(s), doc-sync cap 8.
+run-gates: start doc-typecheck
+run-gates: start documentation build
+run-gates: start doc graphs
+run-gates: start CLI help reference
+run-gates: start markdown links
+run-gates: start type equivalence
+run-gates: start cordis catalog
+run-gates: start Cordis inspect catalog
+
+== FAILED type equivalence (7.74s) ==
+command: pnpm run verify-type-equiv
+outcome: exit 1
+$ tsx scripts/verify-type-equiv.ts
+verify-type-equiv: type-equiv verification failed:
+  DRIFT: docs/subsystems/filesystem.md:118 — type-equiv block for FsWriteIntent does not match packages/fs/fs/src/types.ts.
+    source structure: type FsWriteIntent = | { kind: 'createIfAbsent' } | { kind: 'replaceIfVersion'; version: FsVersion }
+    doc structure:    type FsWriteIntent = | { kind: 'createIfAbsent' } | { kind: 'replaceIfVersion'; version: FsVersion }
+    source JSDoc:     ["/** * Guarded write intent. `createIfAbsent` rejects an existing target with * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with * `FS_STALE_VERSION`. Omitting the intent from `writeText` or `writeBytes` * means unconditional create-or-overwrite, not a third union arm. */"]
+    doc JSDoc:        ["/** * Guarded write intent. `createIfAbsent` rejects an existing target with * `FS_NOT_OBSERVED`; `replaceIfVersion` rejects absence or mismatch with * `FS_STALE_VERSION`. Omitting the intent from `writeText` means unconditional * create-or-overwrite, not a third union arm. */"]
+  DRIFT: docs/subsystems/workspace.md:25 — type-equiv block for Workspace does not match packages/workspace/workspace/src/types.ts.
+    source structure: interface Workspace { readonly id: WorkspaceId readonly path: string readonly title: string readonly createdAt: string readonly updatedAt: string readonly sessionIds: readonly SessionId[] setTitle(title: string): Promise<void> attachSession(sessionId: SessionId): Promise<void> insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> detachSession(sessionId: SessionId): Promise<void> status(): Promise<'ok' | 'missing-dir'> }
+    doc structure:    interface Workspace { readonly id: WorkspaceId readonly path: string readonly title: string readonly createdAt: string readonly updatedAt: string readonly sessionIds: readonly SessionId[] setTitle(title: string): Promise<void> attachSession(sessionId: SessionId): Promise<void> insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void> detachSession(sessionId: SessionId): Promise<void> status(): Promise<'ok' | 'missing-dir'> }
+    source JSDoc:     ["/** * One workspace: a stable id over an existing directory, a display title, and * an ordered candidate account of sessions. Membership validates header cwd * against the workspace path, but preserves an existing account when its * fully qualified cwd is missing. Consumers only see this interface; the * implementation stays private. */","/** Stable record id (generated uuid). */","/** * Canonical directory path: the `fs.realpath` of the path given at create * time (trailing slashes, `..`, and symlinks all resolved). Never rewritten * afterwards, even when the directory disappears (see {@link status}). */","/** Display title. Defaults to the final path segment, or a filesystem root's own spelling; duplicates are allowed. */","/** ISO-8601 creation instant, stamped at create and never rewritten. */","/** ISO-8601 instant of the last durable mutation (create counts as one). */","/** * Header-validated sessions in manually owned order: a new session is * prepended at attach, explicit reordering goes through * `insertSessionBefore`, and activity never reorders. The durable candidate * account is filtered synchronously: missing headers, invalid cwd values, * and canonical cwd mismatches are never returned. A fully qualified cwd * whose realpath or directory stat fails with ENOENT preserves an existing * candidate, including a dangling symlink; other filesystem failures do not. * A subsequent mutation prunes filtered candidates, not missing-directory * candidates. This does not admit new sessions or recreate directories. */","/** * Replace the display title durably. * @param title - New title; any string, duplicates across workspaces allowed. * @returns resolution after durability. */","/** * Prepend a session to this workspace's candidate account. An already * accounted id resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs. A new id's * live or persisted * header cwd must resolve to an existing directory equal to {@link path}; * unknown ids, missing or invalid cwd values, and mismatches reject without * writing. * @param sessionId - The session to record. * @returns resolution after durability. */","/** * Move an accounted session within the manual order, DOM-insertBefore-like: * with an anchor the session lands before it, without one it appends to the * end. Only the moved id changes position. A session or anchor absent from * the account rejects without writing; a move to the current position * resolves without writing, aside from the durable filtered-candidate * prune every accepted mutation performs; decided on the domain write * chain. * @param sessionId - The accounted session to move. * @param beforeSessionId - Accounted anchor to insert before; omitted appends. * @returns resolution after durability. */","/** * Remove a session from this workspace's account. Idempotent: an id not on * the account resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs; decided on * the domain write chain like attach. Never touches the session's own stored log. * @param sessionId - The session to remove. * @returns resolution after durability. */","/** * Live directory check, uncached: whether {@link path} currently exists and * is a directory. A missing directory never mutates the record — the * directory may only be temporarily moved. * @returns `'ok'` when the directory exists, `'missing-dir'` otherwise. */"]
+[ELIFECYCLE] Command failed with exit code 1.
+    doc JSDoc:        ["/** * One workspace: a stable id over an existing directory, a display title, and * an ordered candidate account of sessions. Membership requires both an id in * that account and a session header whose canonical cwd equals the workspace * path. Consumers only see this interface; the implementation stays private. */","/** Stable record id (generated uuid). */","/** * Canonical directory path: the `fs.realpath` of the path given at create * time (trailing slashes, `..`, and symlinks all resolved). Never rewritten * afterwards, even when the directory disappears (see {@link status}). */","/** Display title. Defaults to the final path segment, or a filesystem root's own spelling; duplicates are allowed. */","/** ISO-8601 creation instant, stamped at create and never rewritten. */","/** ISO-8601 instant of the last durable mutation (create counts as one). */","/** * Header-validated sessions in manually owned order: a new session is * prepended at attach, explicit reordering goes through * `insertSessionBefore`, and activity never reorders. The durable candidate * account is filtered synchronously: missing headers, invalid cwd values, * and canonical cwd mismatches are never returned. A subsequent workspace * mutation prunes those filtered candidates durably. */","/** * Replace the display title durably. * @param title - New title; any string, duplicates across workspaces allowed. * @returns resolution after durability. */","/** * Prepend a session to this workspace's candidate account. An already * accounted id resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs. A new id's * live or persisted * header cwd must resolve to an existing directory equal to {@link path}; * unknown ids, missing or invalid cwd values, and mismatches reject without * writing. * @param sessionId - The session to record. * @returns resolution after durability. */","/** * Move an accounted session within the manual order, DOM-insertBefore-like: * with an anchor the session lands before it, without one it appends to the * end. Only the moved id changes position. A session or anchor absent from * the account rejects without writing; a move to the current position * resolves without writing, aside from the durable filtered-candidate * prune every accepted mutation performs; decided on the domain write * chain. * @param sessionId - The accounted session to move. * @param beforeSessionId - Accounted anchor to insert before; omitted appends. * @returns resolution after durability. */","/** * Remove a session from this workspace's account. Idempotent: an id not on * the account resolves without writing, aside from the durable * filtered-candidate prune every accepted mutation performs; decided on * the domain write chain like attach. Never touches the session's own stored log. * @param sessionId - The session to remove. * @returns resolution after durability. */","/** * Live directory check, uncached: whether {@link path} currently exists and * is a directory. A missing directory never mutates the record — the * directory may only be temporarily moved. * @returns `'ok'` when the directory exists, `'missing-dir'` otherwise. */"]
+
+(checked 494 primary block(s) across 51 doc(s), 494 paired derivative(s); manifest at scripts/type-equiv.manifest.json)
+run-gates: start workflow guest source
+
+== FAILED documentation build (11.02s) ==
+[ELIFECYCLE] Command failed with exit code 1.
+command: pnpm run docs:build
+outcome: exit 1
+$ tsx website/build.ts && pnpm run verify-doc-site-fragments
+▲ [WARNING] Unrecognized target environment "es2024" [tsconfig.json]
+
+    tsconfig.base.json:6:14:
+      6 │     "target": "es2024",
+        ╵               ~~~~~~~~
+
+failed to load config from D:\WebstormProjects\jdcloud-harness\website\.vitepress\config.ts
+D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:131
+  throw new Error(`project-doc-site: ${repoPath(sourceAbs, repoRoot)} links to missing path ${JSON.stringify(rawPath)}.`)
+        ^
+
+Error: project-doc-site: docs/subsystems/workspace.zh.md links to missing path "../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md".
+    at resolveRepositoryTarget (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:131:9)
+    at rewrite (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:166:31)
+    at visit (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:190:105)
+    at visit (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:192:42)
+    at visit (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:192:42)
+    at rewriteMarkdown (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:195:3)
+    at projectPagesInto (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:389:23)
+    at projectDocs (D:\WebstormProjects\jdcloud-harness\website\.vitepress\scripts\project-doc-site.ts:423:3)
+    at <anonymous> (D:\WebstormProjects\jdcloud-harness\website\.vitepress\website\.vitepress\config.ts:13:1)
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+
+Node.js v24.15.0
+run-gates: start verify-mermaid
+run-gates: PASS workflow guest source (3.82s)
+run-gates: start translation pairing
+run-gates: PASS CLI help reference (15.86s)
+run-gates: start markdown wrap
+
+== FAILED markdown links (21.67s) ==
+command: pnpm run verify-md-links
+outcome: exit 1
+$ tsx scripts/verify-md-links.ts
+verify-md-links: broken relative cross-links found:
+  docs\config-catalog.md:1338  ../packages/hooks/hooks-claude-code/src/index.ts  (target does not exist)
+  docs\config-catalog.md:1365  ../packages/hooks/hooks-codex/src/index.ts  (target does not exist)
+  docs\config-catalog.md:1500  ../packages/runtime-diagnostics/invariants/src/index.ts  (target does not exist)
+  docs\config-catalog.md:2763  ../packages/session/session-title-all-prompts-llm/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3672  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3690  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\config-catalog.md:3813  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4166  ../packages/webhook/webhook-github/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4309  ../packages/skill/skill-badge/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4319  ../packages/webhook/webhook/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4368  ../packages/hooks/hook-protocol/src/index.ts  (target does not exist)
+  docs\config-catalog.md:4392  ../packages/subagent/subagent-in-process-driver/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1340  ../packages/hooks/hooks-claude-code/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1367  ../packages/hooks/hooks-codex/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:1502  ../packages/runtime-diagnostics/invariants/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:2765  ../packages/session/session-title-all-prompts-llm/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3674  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3692  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:3815  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4168  ../packages/webhook/webhook-github/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4311  ../packages/skill/skill-badge/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4321  ../packages/webhook/webhook/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4370  ../packages/hooks/hook-protocol/src/index.ts  (target does not exist)
+  docs\config-catalog.zh.md:4394  ../packages/subagent/subagent-in-process-driver/src/index.ts  (target does not exist)
+  docs\subsystems\schedule.md:265  ../tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  docs\subsystems\schedule.zh.md:265  ../tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  docs\subsystems\workspace.md:120  ../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.md  (target does not exist)
+  docs\subsystems\workspace.zh.md:120  ../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md  (target does not exist)
+  docs\tool-catalog.md:1369  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1382  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1411  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1440  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1474  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:1507  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2125  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2146  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2159  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.md:2238  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2302  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2362  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2387  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2480  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.md:2498  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1375  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1388  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1417  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1446  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1480  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:1513  ../packages/terminal/tool-terminal/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2131  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2152  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2165  ../packages/schedule/schedule/src/tools.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2244  ../packages/workflow/tool-ralph/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2308  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2368  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2393  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2486  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  docs\tool-catalog.zh.md:2504  ../packages/session-query/tool-session-query/src/index.ts  (target does not exist)
+  packages\schedule\README.md:38  ../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\README.zh.md:38  ../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\boot\plugin-market\README.md:88  ../../../docs/tool-catalog.md#deepseek-aidsh-plugin-market  (no such anchor in target)
+  packages\boot\plugin-market\README.zh.md:88  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-plugin-market  (no such anchor in target)
+  packages\core\system-prompt\README.md:103  src/invariant.ts  (target does not exist)
+  packages\core\system-prompt\README.zh.md:103  src/invariant.ts  (target does not exist)
+  packages\experimental\claude-code-mods\README.md:56  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-claude-code-mods  (no such anchor in target)
+  packages\experimental\claude-code-mods\README.zh.md:56  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-claude-code-mods  (no such anchor in target)
+  packages\experimental\cua-macos\README.md:56  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-cua-macos  (no such anchor in target)
+  packages\experimental\cua-macos\README.zh.md:56  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-cua-macos  (no such anchor in target)
+  packages\experimental\tool-worktree\README.md:37  ../../../docs/tool-catalog.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.md:71  ../../../docs/tool-catalog.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.zh.md:37  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\tool-worktree\README.zh.md:71  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-experimental-tool-worktree  (no such anchor in target)
+  packages\experimental\worktree\README.md:37  ../../../docs/config-catalog.md#deepseek-aidsh-experimental-worktree  (no such anchor in target)
+  packages\experimental\worktree\README.zh.md:37  ../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-worktree  (no such anchor in target)
+  packages\llm\llm-deepseek\README.md:76  ../../../docs/config-catalog.md#deepseek-aidsh-llm-deepseek-api-key  (no such anchor in target)
+  packages\llm\llm-deepseek\README.zh.md:76  ../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-deepseek-api-key  (no such anchor in target)
+  packages\schedule\schedule\README.md:99  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\schedule\README.zh.md:99  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.md:74  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.md:87  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\schedule\tool-schedule\README.zh.md:74  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+[ELIFECYCLE] Command failed with exit code 1.
+  packages\schedule\tool-schedule\README.zh.md:87  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-schedule  (no such anchor in target)
+  packages\session\tool-working-directory\README.md:66  ../../../docs/tool-catalog.md#deepseek-aidsh-tool-working-directory  (no such anchor in target)
+  packages\session\tool-working-directory\README.zh.md:66  ../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-working-directory  (no such anchor in target)
+  packages\session\working-directory\README.md:28  ../../../docs/config-catalog.md#deepseek-aidsh-working-directory  (no such anchor in target)
+  packages\session\working-directory\README.zh.md:28  ../../../docs/config-catalog.zh.md#deepseek-aidsh-working-directory  (no such anchor in target)
+  packages\shell\tool-pwsh\README.md:81  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.md  (target does not exist)
+  packages\shell\tool-pwsh\README.md:112  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.md  (target does not exist)
+  packages\shell\tool-pwsh\README.zh.md:81  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.zh.md  (target does not exist)
+  packages\shell\tool-pwsh\README.zh.md:112  ../../../.agents/notes/implemented/feature/2026-08-02-pwsh-tool-bash-parity.zh.md  (target does not exist)
+  packages\workspace\workspace\README.md:112  src/invariant.ts  (target does not exist)
+  packages\workspace\workspace\README.zh.md:113  src/invariant.ts  (target does not exist)
+run-gates: start client catalog
+
+== FAILED doc graphs (22.47s) ==
+command: pnpm run verify-doc-graphs
+outcome: exit 1
+$ tsx scripts/gen-doc-graphs.ts --check
+D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:51
+  throw new Error(
+        ^
+
+Error: gen-cordis-catalog: 13 signature type-link coverage violation(s):
+  service method ctx.jdcloudAuthController.runExternalRequest (packages/api/jdcloud-auth-controller/src/index.ts:390) references unclassified type 'Awaited'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.listAccount (packages/api/session-controller/src/skill-catalog.ts:84) references unclassified type 'AccountSkillListValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.createAccount (packages/api/session-controller/src/skill-catalog.ts:105) references unclassified type 'AccountSkillInstallRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.createAccount (packages/api/session-controller/src/skill-catalog.ts:105) references unclassified type 'SkillInstallValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.deleteAccount (packages/api/session-controller/src/skill-catalog.ts:126) references unclassified type 'AccountSkillDeleteRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.deleteAccount (packages/api/session-controller/src/skill-catalog.ts:126) references unclassified type 'SkillDeleteValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.create (packages/api/session-controller/src/skill-catalog.ts:212) references unclassified type 'SkillInstallRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+[ELIFECYCLE] Command failed with exit code 1.
+  service method ctx.sessionSkillCatalog.create (packages/api/session-controller/src/skill-catalog.ts:212) references unclassified type 'SkillInstallValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.delete (packages/api/session-controller/src/skill-catalog.ts:338) references unclassified type 'SkillDeleteRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.delete (packages/api/session-controller/src/skill-catalog.ts:338) references unclassified type 'SkillDeleteValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.workspaceController.listVisible (packages/api/workspace-controller/src/index.ts:96) references unclassified type 'WorkspaceView'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.fs.writeBytes (packages/fs/fs/src/index.ts:288) references unclassified type 'FsByteWriteOutcome'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.userQuestions.pendingOpen (packages/interaction/user-questions/src/index.ts:166) references unclassified type 'PendingUserQuestion'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+    at reportTypeLinkViolations (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:51:9)
+    at CordisCatalogProjector.collectServices (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:328:5)
+    at CordisCatalogProjector.project (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:161:22)
+    at projectCordisCatalog (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:398:40)
+    at renderDocs (D:\WebstormProjects\jdcloud-harness\scripts\gen-doc-graphs.ts:1710:21)
+    at withMemoizedFileSystemProbes (D:\WebstormProjects\jdcloud-harness\scripts\gen-doc-graphs.ts:1832:12)
+    at main (D:\WebstormProjects\jdcloud-harness\scripts\gen-doc-graphs.ts:1843:16)
+    at <anonymous> (D:\WebstormProjects\jdcloud-harness\scripts\gen-doc-graphs.ts:1867:3)
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+    at async node:internal/modules/esm/loader:639:26
+
+Node.js v24.15.0
+run-gates: start export jsdoc
+
+== FAILED client catalog (9.27s) ==
+[ELIFECYCLE] Command failed with exit code 1.
+command: pnpm run verify-client-catalog
+outcome: exit 1
+$ tsx scripts/gen-client-catalog.ts --check
+gen-client-catalog: stale — packages/extensions/cordis-client-runner/src/client/slot-catalog.ts. Run `pnpm run gen-client-catalog` and commit the result.
+run-gates: start tool catalog
+run-gates: PASS Cordis inspect catalog (32.32s)
+run-gates: start config catalog
+
+== FAILED cordis catalog (32.70s) ==
+command: pnpm run verify-cordis-catalog
+outcome: exit 1
+$ tsx scripts/gen-cordis-catalog.ts --check
+D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:51
+  throw new Error(
+        ^
+
+Error: gen-cordis-catalog: 13 signature type-link coverage violation(s):
+  service method ctx.jdcloudAuthController.runExternalRequest (packages/api/jdcloud-auth-controller/src/index.ts:390) references unclassified type 'Awaited'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.listAccount (packages/api/session-controller/src/skill-catalog.ts:84) references unclassified type 'AccountSkillListValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.createAccount (packages/api/session-controller/src/skill-catalog.ts:105) references unclassified type 'AccountSkillInstallRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.createAccount (packages/api/session-controller/src/skill-catalog.ts:105) references unclassified type 'SkillInstallValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.deleteAccount (packages/api/session-controller/src/skill-catalog.ts:126) references unclassified type 'AccountSkillDeleteRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.deleteAccount (packages/api/session-controller/src/skill-catalog.ts:126) references unclassified type 'SkillDeleteValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.create (packages/api/session-controller/src/skill-catalog.ts:212) references unclassified type 'SkillInstallRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.create (packages/api/session-controller/src/skill-catalog.ts:212) references unclassified type 'SkillInstallValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.delete (packages/api/session-controller/src/skill-catalog.ts:338) references unclassified type 'SkillDeleteRequest'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.sessionSkillCatalog.delete (packages/api/session-controller/src/skill-catalog.ts:338) references unclassified type 'SkillDeleteValue'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.workspaceController.listVisible (packages/api/workspace-controller/src/index.ts:96) references unclassified type 'WorkspaceView'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.fs.writeBytes (packages/fs/fs/src/index.ts:288) references unclassified type 'FsByteWriteOutcome'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+  service method ctx.userQuestions.pendingOpen (packages/interaction/user-questions/src/index.ts:166) references unclassified type 'PendingUserQuestion'. Add it to linkedTypePages with its documentation page, to foundationTypeNames if TypeScript or the framework owns it, or to typeLinkExemptions with the non-catalog documentation owner.
+    at reportTypeLinkViolations (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:51:9)
+    at CordisCatalogProjector.collectServices (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:328:5)
+    at CordisCatalogProjector.project (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:161:22)
+    at projectCordisCatalog (D:\WebstormProjects\jdcloud-harness\packages\typert\generator\src\cordis-catalog.ts:398:40)
+    at computeOutputs (D:\WebstormProjects\jdcloud-harness\scripts\gen-cordis-catalog.ts:1210:32)
+    at main (D:\WebstormProjects\jdcloud-harness\scripts\gen-cordis-catalog.ts:1280:8)
+    at <anonymous> (D:\WebstormProjects\jdcloud-harness\scripts\gen-cordis-catalog.ts:1317:3)
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.15.0
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start skill plugin package list
+
+== FAILED markdown wrap (18.42s) ==
+command: pnpm run verify-md-wrap
+outcome: exit 1
+$ tsx scripts/verify-md-wrap.ts
+verify-md-wrap: hard-wrapped prose paragraphs found (write one physical line per paragraph):
+  packages\client\ui-settings-general\README.md:56  The onboarding ledger projects in ascending order and mounts exactly one step at…
+  packages\client\ui-settings-general\README.zh.md:56  引导账本按升序投影，每次只挂载一个步骤。注册方持有持久化完成状态、能力就绪状态、文案、变更操作与可见包装，因此独立注册的流程无法堆叠，外壳也不会成为第二个配置事…
+  packages\client\ui-sidebar\README.md:42  Plugins add an icon component to the root-scoped `sidebar.panellist` list with a…
+  packages\client\ui-sidebar\README.zh.md:42  插件在 root 作用域的 `sidebar.panellist` list 中注册图标组件，提供 `id`、可选 `order`，以及字符串或 locale-…
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start npm dependency catalog
+run-gates: PASS npm dependency catalog (3.40s)
+run-gates: start persistence catalog
+
+== FAILED skill plugin package list (5.54s) ==
+command: pnpm run verify-plugin-packages
+outcome: exit 1
+$ tsx scripts/gen-plugin-packages.ts --check
+gen-plugin-packages: packages/preset/agent-preset/skills/cordis-composition-reference/references/packages.md is stale. Run `pnpm run gen-plugin-packages` and commit packages/preset/agent-preset/skills/cordis-composition-reference/references/packages.md.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start persistence type history
+
+== FAILED config catalog (6.73s) ==
+command: pnpm run verify-config-catalog
+outcome: exit 1
+$ tsx scripts/gen-config-catalog.ts --check
+gen-config-catalog: stale — docs/config-catalog.md, docs/config-catalog.zh.md, docs/config-catalog.i18n.yaml. Run `pnpm run gen-config-catalog` and commit the result.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start released persistence history
+
+== FAILED tool catalog (8.63s) ==
+command: pnpm run verify-tool-catalog
+outcome: exit 1
+$ tsx scripts/gen-tool-catalog.ts --check
+gen-tool-catalog: docs/tool-catalog.md is stale. Run `pnpm run gen-tool-catalog` and commit docs/tool-catalog.md.
+gen-tool-catalog: first difference at line 20
+  committed: "| `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |"
+  generated: "| `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |"
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start Session format references
+
+== FAILED export jsdoc (18.55s) ==
+command: pnpm run verify-export-jsdoc
+outcome: exit 1
+$ tsx scripts/verify-export-jsdoc.ts
+verify-export-jsdoc: 1 JSDoc completeness violation(s) (see AGENTS.md):
+  exported class method 'SandboxedFileSystem.writeBytes' (packages/fs/fs-sandbox/src/index.ts:91) is missing @param sandboxPolicy.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start Session format catalog
+run-gates: PASS Session format catalog (3.38s)
+run-gates: start public repository links
+run-gates: PASS released persistence history (5.99s)
+run-gates: start repository references
+
+== FAILED translation pairing (34.28s) ==
+command: pnpm run verify-translation-pairing
+outcome: exit 1
+$ tsx scripts/verify-translation-pairing.ts
+verify-translation-pairing: bilingual pairing rules violated (see docs/i18n/README.md):
+  .agents/notes/implemented/architecture/2026-06-21-bounded-llm-request-recovery.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.md: incomplete pair — missing .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.md, .agents/notes/implemented/architecture/2026-08-10-remote-event-delivery.zh.md (pairs merge whole: both languages plus the .i18n.yaml record)
+  .agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-09-07-jdcloud-browser-prompt-admission.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/architecture/2026-09-15-configurable-browser-authentication.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-08-request-scoped-sandbox-escalation-schemas.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-08-user-stop-clears-todo-plan.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-15-server-managed-models-for-remote-web.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-17-jdcloud-ordinary-user-browser-controls.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-18-jdcloud-browser-user-isolation.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/bug-fix/2026-09-18-tenant-scoped-workspace-paths.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-07-jdcloud-low-code-conversation-tools.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-07-jdcloud-web-brand.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-09-jdcloud-token-transfer-login.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-09-10-jdcloud-writable-function-picker.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/feature/2026-10-15-web-project-skill-management.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  .agents/notes/implemented/simplification/2026-09-15-remove-internal-testing-notice.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/architecture.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/approval.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/commands.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/session.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/tools.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  docs/subsystems/workspace.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/gateway/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/jdcloud-auth-controller/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+[ELIFECYCLE] Command failed with exit code 1.
+  packages/api/remotes/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/api/workspace-files/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/bundle/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/bundle/base/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/file-upload/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-settings-general/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-sidebar-right/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-sidebar/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/client/ui-skill/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/context/session-reference/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/core/system-prompt/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/core/tools/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/fs/tool-fs/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/host/frontend-static/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/jdcloud/tool-jdcloud-lowcode/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/shell/tool-pwsh/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/skill/skill-filesystem/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+  packages/todo/tool-todo/README.i18n.yaml: malformed consistency record (expected `/<section path>:` entries, each followed by `  en: <16-hex>` and `  zh: <16-hex>`)
+run-gates: start concrete terms
+run-gates: PASS Session format references (8.23s)
+run-gates: start doc refs
+run-gates: PASS doc-typecheck (50.93s)
+run-gates: start subsystem pages
+run-gates: PASS doc refs (4.32s)
+run-gates: start package paths
+
+== FAILED subsystem pages (3.45s) ==
+command: pnpm run verify-subsystem-pages
+outcome: exit 1
+$ tsx scripts/verify-subsystem-pages.ts
+verify-subsystem-pages: package-group documentation violations found:
+  exemption hooks: no matching package group; remove the stale entry
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start tsconfig paths
+
+== FAILED persistence catalog (18.34s) ==
+command: pnpm run verify-persistence-catalog
+outcome: exit 1
+$ tsx scripts/gen-persistence-catalog.ts --check
+D:\WebstormProjects\jdcloud-harness\scripts\persistence-schema.ts:93
+  if (diagnostics.length > 0) throw new PersistenceSchemaError(diagnostics.map(diagnosticText).join('\n'))
+                                    ^
+
+PersistenceSchemaError: persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/account-pool-reader.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/billing-price.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/billing-recorder.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/image-generation.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/image-prompts.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/images.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/material-authorization.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/narration.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/original-images.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/plugin.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/project-points.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/provider-accounts.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/runtime.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedance-request.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedance.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedream.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+[ELIFECYCLE] Command failed with exit code 1.
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/upstream.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/white-background.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+    at extractPersistenceSchema (D:\WebstormProjects\jdcloud-harness\scripts\persistence-schema.ts:93:37)
+    at main (D:\WebstormProjects\jdcloud-harness\scripts\gen-persistence-catalog.ts:236:18)
+    at <anonymous> (D:\WebstormProjects\jdcloud-harness\scripts\gen-persistence-catalog.ts:266:3)
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.15.0
+run-gates: start config source ownership
+
+== FAILED persistence type history (18.16s) ==
+command: pnpm run verify-persistence-changes
+outcome: exit 1
+$ tsx scripts/persistence-changes.ts --check
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/account-pool-reader.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/billing-price.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/billing-recorder.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/image-generation.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/image-prompts.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/images.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/material-authorization.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/narration.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/original-images.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/plugin.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/project-points.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/provider-accounts.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/runtime.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedance-request.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedance.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/seedream.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/upstream.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+persistence schema: TypeScript TS6504: File 'D:/WebstormProjects/jdcloud-harness/packages/jdcloud/creation-studio-media/src/white-background.mjs' is a JavaScript file. Did you mean to enable the 'allowJs' option?
+  The file is in the program because:
+    Root file specified for compilation
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start package README Summaries
+
+== FAILED tsconfig paths (2.83s) ==
+command: pnpm run verify-tsconfig-paths
+outcome: exit 1
+$ tsx scripts/gen-tsconfig-paths.ts --check
+gen-tsconfig-paths: tsconfig.base.json is stale; run `pnpm run gen-tsconfig-paths`.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start package README model experience
+
+== FAILED package paths (5.18s) ==
+command: pnpm run verify-package-paths
+outcome: exit 1
+$ tsx scripts/verify-package-paths.ts
+verify-package-paths: broken packages/* references found (target does not exist):
+  docs/config-catalog.md:1338  packages/hooks/hooks-claude-code/src/index.ts
+  docs/config-catalog.md:1338  packages/hooks/hooks-claude-code/src/index.ts
+  docs/config-catalog.md:1365  packages/hooks/hooks-codex/src/index.ts
+  docs/config-catalog.md:1365  packages/hooks/hooks-codex/src/index.ts
+  docs/config-catalog.md:2763  packages/session/session-title-all-prompts-llm/src/index.ts
+  docs/config-catalog.md:2763  packages/session/session-title-all-prompts-llm/src/index.ts
+  docs/config-catalog.md:3672  packages/workflow/tool-ralph/src/index.ts
+  docs/config-catalog.md:3672  packages/workflow/tool-ralph/src/index.ts
+  docs/config-catalog.md:3690  packages/session-query/tool-session-query/src/index.ts
+  docs/config-catalog.md:3690  packages/session-query/tool-session-query/src/index.ts
+  docs/config-catalog.md:3813  packages/terminal/tool-terminal/src/index.ts
+  docs/config-catalog.md:3813  packages/terminal/tool-terminal/src/index.ts
+  docs/config-catalog.md:4166  packages/webhook/webhook-github/src/index.ts
+  docs/config-catalog.md:4166  packages/webhook/webhook-github/src/index.ts
+  docs/config-catalog.md:4309  packages/skill/skill-badge/src/index.ts
+  docs/config-catalog.md:4309  packages/skill/skill-badge/src/index.ts
+  docs/config-catalog.md:4319  packages/webhook/webhook/src/index.ts
+  docs/config-catalog.md:4319  packages/webhook/webhook/src/index.ts
+  docs/config-catalog.md:4368  packages/hooks/hook-protocol/src/index.ts
+  docs/config-catalog.md:4368  packages/hooks/hook-protocol/src/index.ts
+  docs/config-catalog.zh.md:1340  packages/hooks/hooks-claude-code/src/index.ts
+  docs/config-catalog.zh.md:1340  packages/hooks/hooks-claude-code/src/index.ts
+  docs/config-catalog.zh.md:1367  packages/hooks/hooks-codex/src/index.ts
+  docs/config-catalog.zh.md:1367  packages/hooks/hooks-codex/src/index.ts
+  docs/config-catalog.zh.md:2765  packages/session/session-title-all-prompts-llm/src/index.ts
+  docs/config-catalog.zh.md:2765  packages/session/session-title-all-prompts-llm/src/index.ts
+  docs/config-catalog.zh.md:3674  packages/workflow/tool-ralph/src/index.ts
+  docs/config-catalog.zh.md:3674  packages/workflow/tool-ralph/src/index.ts
+  docs/config-catalog.zh.md:3692  packages/session-query/tool-session-query/src/index.ts
+  docs/config-catalog.zh.md:3692  packages/session-query/tool-session-query/src/index.ts
+  docs/config-catalog.zh.md:3815  packages/terminal/tool-terminal/src/index.ts
+  docs/config-catalog.zh.md:3815  packages/terminal/tool-terminal/src/index.ts
+  docs/config-catalog.zh.md:4168  packages/webhook/webhook-github/src/index.ts
+  docs/config-catalog.zh.md:4168  packages/webhook/webhook-github/src/index.ts
+  docs/config-catalog.zh.md:4311  packages/skill/skill-badge/src/index.ts
+  docs/config-catalog.zh.md:4311  packages/skill/skill-badge/src/index.ts
+  docs/config-catalog.zh.md:4321  packages/webhook/webhook/src/index.ts
+  docs/config-catalog.zh.md:4321  packages/webhook/webhook/src/index.ts
+  docs/config-catalog.zh.md:4370  packages/hooks/hook-protocol/src/index.ts
+  docs/config-catalog.zh.md:4370  packages/hooks/hook-protocol/src/index.ts
+  docs/tool-catalog.md:1369  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1369  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1382  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1382  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1411  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1411  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1440  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1440  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1474  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1474  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1507  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:1507  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.md:2125  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2125  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2146  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2146  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2159  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2159  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.md:2238  packages/workflow/tool-ralph/src/index.ts
+  docs/tool-catalog.md:2238  packages/workflow/tool-ralph/src/index.ts
+  docs/tool-catalog.md:2302  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2302  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2362  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2362  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2387  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2387  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2480  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2480  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2498  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.md:2498  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:1375  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1375  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1388  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1388  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1417  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1417  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1446  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1446  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1480  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1480  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1513  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:1513  packages/terminal/tool-terminal/src/index.ts
+  docs/tool-catalog.zh.md:2131  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2131  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2152  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2152  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2165  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2165  packages/schedule/schedule/src/tools.ts
+  docs/tool-catalog.zh.md:2244  packages/workflow/tool-ralph/src/index.ts
+  docs/tool-catalog.zh.md:2244  packages/workflow/tool-ralph/src/index.ts
+  docs/tool-catalog.zh.md:2308  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2308  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2368  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2368  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2393  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2393  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2486  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2486  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2504  packages/session-query/tool-session-query/src/index.ts
+  docs/tool-catalog.zh.md:2504  packages/session-query/tool-session-query/src/index.ts
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start agent note classification
+run-gates: PASS config source ownership (2.58s)
+run-gates: start agent note format
+
+== FAILED package README Summaries (2.63s) ==
+command: pnpm run verify-package-readme-summaries
+outcome: exit 1
+$ tsx scripts/verify-package-readme-summaries.ts
+verify-package-readme-summaries: violations found:
+  packages/api/workspace-files/README.md: Summary has 103 words; the limit is 100. Read .agents/skills/dsh-doc/SKILL.md and .agents/skills/dsh-doc/templates/package-reference.md before rewriting it.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start archived agent notes
+run-gates: PASS agent note classification (2.63s)
+run-gates: start skill invocation metadata
+run-gates: PASS agent note format (2.68s)
+run-gates: start translation prompt
+run-gates: PASS skill invocation metadata (2.57s)
+run-gates: start doc budgets
+
+== FAILED package README model experience (5.50s) ==
+command: pnpm run verify-package-readme-model-experience
+outcome: exit 1
+$ tsx scripts/verify-package-readme-model-experience.ts
+verify-package-readme-model-experience failed:
+  packages\api\external-api\README.md: line 72: content after #### KV Cache effect paragraph must be a titled H5 plus `markdown` fence owned by that field
+  packages\schedule\schedule\README.md: line 99: tool-catalog link fragment "deepseek-aidsh-tool-schedule" does not name an H2 section
+  packages\schedule\tool-schedule\README.md: line 87: tool-catalog link fragment "deepseek-aidsh-tool-schedule" does not name an H2 section
+  packages\session\tool-working-directory\README.md: line 66: tool-catalog link fragment "deepseek-aidsh-tool-working-directory" does not name an H2 section
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start upgrade guides
+run-gates: PASS translation prompt (2.49s)
+run-gates: start documentation standard tests
+run-gates: PASS verify-mermaid (53.15s)
+run-gates: start documentation site checks
+
+== FAILED doc budgets (2.33s) ==
+command: pnpm run verify-doc-budgets
+outcome: exit 1
+$ tsx scripts/verify-doc-budgets.ts
+verify-doc-budgets failed:
+
+  docs/architecture.md: 2414 words exceeds the 2410-word ceiling — relocate or condense per docs/AGENTS.md (raising the ceiling requires justification in the PR)
+
+See docs/AGENTS.md for the documentation standard and the relocation-first rule.
+[ELIFECYCLE] Command failed with exit code 1.
+run-gates: start package README limitations
+run-gates: PASS upgrade guides (2.69s)
+run-gates: PASS archived agent notes (6.25s)
+run-gates: PASS documentation standard tests (5.09s)
+run-gates: PASS package README limitations (5.82s)
+
+== FAILED documentation site checks (11.37s) ==
+command: pnpm exec vitest run scripts/project-doc-site.spec.ts scripts/verify-doc-site-fragments.spec.ts website/tests/mermaid-viewer.spec.ts website/tests/image-viewer.spec.ts website/tests/code-groups.spec.ts website/tests/page-markdown-actions.spec.ts website/tests/raw-markdown.spec.ts
+outcome: exit 1
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+The plugin "vite-tsconfig-paths" is detected. Vite now supports tsconfig paths resolution natively via the resolve.tsconfigPaths option. You can remove the plugin and set resolve.tsconfigPaths: true in your Vite config instead.
+
+ RUN  v4.1.11 D:/WebstormProjects/jdcloud-harness
+
+ ❯ |thread-safe| scripts/project-doc-site.spec.ts (64 tests | 3 skipped) 4475ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |thread-safe| scripts/project-doc-site.spec.ts > raw Markdown projection of the published manifest
+Error: project-doc-site: docs/subsystems/workspace.zh.md links to missing path "../../.agents/notes/implemented/feature/2026-07-27-workspace-registration-deletion.zh.md".
+ ❯ resolveRepositoryTarget scripts/project-doc-site.ts:131:9
+    129|   }
+    130|
+    131|   throw new Error(`project-doc-site: ${repoPath(sourceAbs, repoRoot)} …
+       |         ^
+    132| }
+    133|
+ ❯ rewrite scripts/project-doc-site.ts:166:31
+ ❯ visit scripts/project-doc-site.ts:190:105
+ ❯ visit scripts/project-doc-site.ts:192:42
+ ❯ visit scripts/project-doc-site.ts:192:42
+ ❯ rewriteMarkdown scripts/project-doc-site.ts:195:3
+ ❯ projectPagesInto scripts/project-doc-site.ts:389:23
+ ❯ emitRawMarkdownPages scripts/project-doc-site.ts:501:3
+ ❯ scripts/project-doc-site.spec.ts:764:5
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  148 passed | 3 skipped (151)
+   Start at  15:50:10
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+   Duration  8.42s (transform 962ms, setup 451ms, import 18.71s, tests 6.47s, environment 9.67s)
+
+run-gates: PASS concrete terms (30.29s)
+run-gates: PASS public repository links (31.85s)
+
+== FAILED repository references (35.90s) ==
+command: pnpm run verify-repository-references
+outcome: exit 1
+$ tsx scripts/verify-repository-references.ts
+verify-repository-references: use release tags or maintained repository links:
+  python/sdk/uv.lock:113 commit-hash
+[ELIFECYCLE] Command failed with exit code 1.
+
+run-gates: 21 passed, 22 failed, 0 skipped in 81.15s.
+run-gates: unsuccessful gates:
+  - FAILED documentation build (11.02s, exit 1)
+    pnpm run docs:build
+  - FAILED doc graphs (22.47s, exit 1)
+    pnpm run verify-doc-graphs
+  - FAILED markdown links (21.67s, exit 1)
+    pnpm run verify-md-links
+  - FAILED type equivalence (7.74s, exit 1)
+    pnpm run verify-type-equiv
+  - FAILED cordis catalog (32.70s, exit 1)
+    pnpm run verify-cordis-catalog
+  - FAILED translation pairing (34.28s, exit 1)
+    pnpm run verify-translation-pairing
+  - FAILED markdown wrap (18.42s, exit 1)
+    pnpm run verify-md-wrap
+  - FAILED client catalog (9.27s, exit 1)
+    pnpm run verify-client-catalog
+  - FAILED export jsdoc (18.55s, exit 1)
+    pnpm run verify-export-jsdoc
+  - FAILED tool catalog (8.63s, exit 1)
+    pnpm run verify-tool-catalog
+  - FAILED config catalog (6.73s, exit 1)
+    pnpm run verify-config-catalog
+  - FAILED skill plugin package list (5.54s, exit 1)
+    pnpm run verify-plugin-packages
+  - FAILED persistence catalog (18.34s, exit 1)
+    pnpm run verify-persistence-catalog
+  - FAILED persistence type history (18.16s, exit 1)
+    pnpm run verify-persistence-changes
+  - FAILED repository references (35.90s, exit 1)
+    pnpm run verify-repository-references
+  - FAILED subsystem pages (3.45s, exit 1)
+    pnpm run verify-subsystem-pages
+  - FAILED package paths (5.18s, exit 1)
+    pnpm run verify-package-paths
+  - FAILED tsconfig paths (2.83s, exit 1)
+    pnpm run verify-tsconfig-paths
+  - FAILED package README Summaries (2.63s, exit 1)
+    pnpm run verify-package-readme-summaries
+  - FAILED package README model experience (5.50s, exit 1)
+    pnpm run verify-package-readme-model-experience
+  - FAILED doc budgets (2.33s, exit 1)
+    pnpm run verify-doc-budgets
+  - FAILED documentation site checks (11.37s, exit 1)
+    pnpm exec vitest run scripts/project-doc-site.spec.ts scripts/verify-doc-site-fragments.spec.ts website/tests/mermaid-viewer.spec.ts website/tests/image-viewer.spec.ts website/tests/code-groups.spec.ts website/tests/page-markdown-actions.spec.ts website/tests/raw-markdown.spec.ts
+[ELIFECYCLE] Command failed with exit code 1.

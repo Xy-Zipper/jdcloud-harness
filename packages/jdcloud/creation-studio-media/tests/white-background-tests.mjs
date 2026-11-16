@@ -91,13 +91,15 @@ it('generates white-background images with the selected Seedream model and recor
   const f = await setup()
   const pool = createProviderAccountPool(f.config, f.auth, async key => key === 'ARK_API_KEY' ? 'ark-test-key' : '')
   f.provider.mockImplementation(async (url, init) => {
+    if (url === 'https://result.tos-cn-beijing.volces.com/white.png')
+      return new Response(f.png, { headers: { 'content-type': 'image/png' } })
     expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/images/generations')
     const body = JSON.parse(init.body)
-    expect(body).toMatchObject({ model: 'doubao-seedream-5-0-flash-260915', size: '1536x864' })
+    expect(body).toMatchObject({ model: 'doubao-seedream-5-0-flash-260915', size: '1536x864', response_format: 'url' })
     expect(body.prompt).toContain('只编辑背景，不重新设计或重绘商品')
     expect(body.prompt).toContain('不修改包装文字、图案、按钮及接口')
     expect(body.prompt).toContain('不增加原图中不存在的配件')
-    return Response.json({ data: [{ b64_json: f.png.toString('base64') }] })
+    return Response.json({ data: [{ url: 'https://result.tos-cn-beijing.volces.com/white.png' }] })
   })
   f.input.model = 'doubao-seedream-5-0-flash-260915'
   f.input.size = '1536x864'
