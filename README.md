@@ -56,6 +56,8 @@ Start with the [development guide](docs/development.md) and [architecture docume
 
 `pnpm run dev:web` builds, serves, and rebuilds client bundles on source edits in one terminal, and `make help` lists the matching Make targets for Web and Desktop; the guide's application commands section owns the full table.
 
+`pnpm run plugins:ontology` removes the JDCloud login bundle from the Web profile, then installs and activates the local Ontology login bundle with its authentication, tools, and login UI. Maintain the removal and installation lists in [`scripts/plugins-ontology.mjs`](scripts/plugins-ontology.mjs); each command must succeed before the next runs. Configure the Runtime URL before starting Web; see the [Ontology login bundle](packages/bundle/ontology-login/README.md).
+
 For agents, follow [AGENTS.md](AGENTS.md).
 
 ## Citation
