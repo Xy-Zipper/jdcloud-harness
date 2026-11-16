@@ -75,7 +75,7 @@ pnpm dsh web
 
 `pnpm run dev:web` 会在一个终端里完成构建、启动，并在源码修改时重建 client bundle；`make help` 列出 Web 与 Desktop 对应的 Make target。完整表格见开发指南的「应用命令」一节。
 
-`pnpm run plugins:jdcloud` 会从 Web profile 卸载 Ontology 登录组合包，然后安装并启用本地 JDCloud 登录组合包。在 [`scripts/plugins-jdcloud.mjs`](scripts/plugins-jdcloud.mjs) 中维护卸载与装载清单；每一步成功后才会执行下一步。配置说明见 [JDCloud 登录组合包](packages/bundle/jdcloud-login/README.zh.md)。
+`pnpm run plugins:jdcloud` 会在 Web profile 将 Ontology 登录组合包声明为依赖时卸载它，然后安装并启用本地 JDCloud 登录组合包。脚本会跳过未安装的依赖，支持重复执行。在 [`scripts/plugins-jdcloud.mjs`](scripts/plugins-jdcloud.mjs) 中维护卸载与装载清单；每一步成功后才会执行下一步。配置说明见 [JDCloud 登录组合包](packages/bundle/jdcloud-login/README.zh.md)。
 
 面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
 
