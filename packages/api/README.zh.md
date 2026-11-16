@@ -28,14 +28,13 @@ kind: "package-group"
 |---|---|---|
 | [`remotes/`](remotes/README.zh.md) | 决定 Client 可以消费哪些 Host 能力与事件。 | — |
 | [`gateway/`](gateway/README.zh.md) | 承载类型化一元调用、带 Client 上行的多路复用流，以及转发的 Host 事件。 | `ctx.typertGateway` / `ctx.remote` |
-| [`ontology-auth-controller/`](ontology-auth-controller/README.zh.md) | 拥有按浏览器隔离的 Ontology Runtime 登录、Token 轮换、稳定用户身份与 Prompt 准入。 | `ctx.ontologyAuthController` / `ctx.remote.ontologyAuth` |
+| [`remote-access/`](remote-access/README.zh.md) | 决定非 owner Peer 可以调用哪些 Remote 方法，过滤列表结果，并为每个 Peer 推送其访问快照。 | `ctx.remoteAccess` / `ctx.remote.remoteAccess` |
 | [`job-controller/`](job-controller/README.zh.md) | 把一个后台任务的观测 record 流式送到 Client。 | `ctx.jobController` / `ctx.remote.job` |
 | [`session-controller/`](session-controller/README.zh.md) | 拥有会话命令、历史记录流、实时控制状态与 Agent/Session 身份策略。 | `ctx.sessionController` / `ctx.remote.session` |
 | [`settings-controller/`](settings-controller/README.zh.md) | 拥有 settings 域各 seam 之上的配置界面读写。 | `ctx.settingsController`、`ctx.credentialsController` / `ctx.remote.settings`、`ctx.remote.credentials` |
 | [`workspace-controller/`](workspace-controller/README.zh.md) | 拥有 Workspace 变更与完整 Client Workspace 投影。 | `ctx.workspaceController` / `ctx.remote.workspace` |
 | [`terminal-controller/`](terminal-controller/README.zh.md) | Session 拥有的交互式 shell、屏幕恢复和浏览器终端控制。 | `ctx.terminalController` / `ctx.remote.terminal` |
 | [`workspace-files/`](workspace-files/README.zh.md) | 拥有有界的工作区文件访问——`stat`、分页 `read`、`list` 与已埋点操作的 `changes` 流——以及其上的 Client `file` 资源提供方。 | `ctx.workspaceFiles` / `ctx.remote.workspaceFiles` |
-| [`external-api/`](external-api/README.zh.md) | 提供基于平台 Token 鉴权的 HTTP 与 SSE 路由，用于 Skill、工作区、文件和 Session 对话。 | — |
 
 Remote 调用沿 Client → Host 方向运行在应用共享的 Connection 之上；流项沿 Host → Client 方向经 Gateway mux 传输，流的上行项则沿 Client → Host 方向走同一条逻辑流。API Gateway 拥有 Remote 传输，各控制器包分别拥有 Session、配置界面与 Workspace 行为。流式下载等不适合 Remote 调用的响应由功能包注册精确的 Connection Fetch 路由。
 

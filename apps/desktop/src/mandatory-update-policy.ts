@@ -1,16 +1,15 @@
 /** Mandatory-update policy, independent of local business traffic and updater artifacts. */
 
 import { valid } from 'semver'
-import { desktopClientHeaders } from '@deepseek-ai/dsh-deepseek-account'
+import type { AccountClientMetadata } from '@deepseek-ai/dsh-deepseek-account'
+import { platformClientHeaders } from '@deepseek-ai/dsh-deepseek-account/client-metadata'
 
 /** Installed release identity; no field is supplied by a renderer. */
 export interface DesktopPolicyIdentity {
   readonly platform: 'win32' | 'darwin'
-  readonly version: string
   readonly bundledDshVersion: string
-  readonly bundleId: string
-  readonly locale: string
   readonly arch: 'x64' | 'arm64'
+  readonly channel: 'nightly' | 'stable'
 }
 
 /** Validated deployment choices; test authentication is explicitly enabled, never inferred from a redirect. */
@@ -127,39 +126,44 @@ function parsePolicy(body: unknown, ok: boolean, config: DesktopPolicyConfig): D
   throw new Error('desktop policy: response does not contain a valid mandatory or no-force decision')
 }
 
-/** Owns one immutable installed-client context, its in-flight request, and polling schedule. */
+/** Owns one installed-client context, its in-flight request, and polling schedule. */
 export class DesktopMandatoryUpdatePolicy {
   private current: DesktopPolicyState = { blocking: false, checking: false }
   private pending: Promise<DesktopPolicyState> | undefined
+  private pendingChannel: DesktopPolicyIdentity['channel'] | undefined
   private controller: AbortController | undefined
   private timer: ReturnType<typeof setTimeout> | undefined
   private disposed = false
   private failures = 0
   private nextCheck = -Infinity
-  private readonly headers: Readonly<Record<string, string>>
 
   /**
    * @param config - Resolved deployment settings.
-   * @param identity - Installed software identity, copied once for this lifetime.
+   * @param identity - Installed software identity; a channel getter may follow an explicit user selection.
    * @param publish - Receives policy changes without controlling downloads or existing tasks.
    * @param request - Anonymous Fetch or the dedicated test-authentication Session transport.
+   * @param client - UI build version, language, and UTC offset, sampled for every check.
    * @param random - Jitter source, replaceable for clock-driven tests.
    */
   constructor(
     private readonly config: DesktopPolicyConfig,
-    identity: DesktopPolicyIdentity,
+    private readonly identity: DesktopPolicyIdentity,
     private readonly publish: (state: DesktopPolicyState) => void,
     private readonly request: typeof fetch = fetch,
+    private readonly client: () => AccountClientMetadata,
     private readonly random: () => number = Math.random,
   ) {
-    if (valid(identity.version) === null || valid(identity.bundledDshVersion) === null || identity.bundleId.trim() === ''
+    if (valid(this.client().version) === null || valid(identity.bundledDshVersion) === null
       || (identity.platform === 'win32' && identity.arch !== 'x64')) throw new Error('desktop policy: invalid installed client identity')
-    this.headers = Object.freeze({
-      ...desktopClientHeaders(identity.platform), 'x-client-version': identity.version,
-      'x-client-bundle-id': identity.bundleId, 'x-client-locale': identity.locale,
-      'x-client-arch': identity.arch, 'x-client-update-channel': 'nightly',
-      'x-client-bundled-dsh-version': identity.bundledDshVersion,
-    })
+  }
+
+  /** Platform headers for one check; the calling UI's language and UTC offset are read now. */
+  private requestHeaders(channel: DesktopPolicyIdentity['channel']): Record<string, string> {
+    return {
+      ...platformClientHeaders(this.identity.platform, this.client()),
+      'x-client-arch': this.identity.arch, 'x-client-update-channel': channel,
+      'x-client-bundled-dsh-version': this.identity.bundledDshVersion,
+    }
   }
 
   /** Latest policy; failures never erase a known mandatory decision. */
@@ -173,9 +177,12 @@ export class DesktopMandatoryUpdatePolicy {
    */
   check(scenario: string, manual = false): Promise<DesktopPolicyState> {
     if (this.disposed) return Promise.reject(new Error('desktop policy: disposed'))
-    if (this.pending !== undefined) return this.pending
+    if (this.pending !== undefined) return this.pendingChannel === this.identity.channel
+      ? this.pending : this.pending.then(() => this.check(scenario, true))
     if (!manual && Date.now() < this.nextCheck) return Promise.resolve(this.current)
     clearTimeout(this.timer)
+    const channel = this.identity.channel
+    this.pendingChannel = channel
     this.pending = Promise.resolve().then(async () => {
       if (this.disposed) return this.current
       const controller = new AbortController()
@@ -185,7 +192,7 @@ export class DesktopMandatoryUpdatePolicy {
       try {
         const url = new URL('/api/v0/check_client_update', this.config.origin)
         url.searchParams.set('scenario', scenario)
-        const response = await this.request(url, { headers: this.headers, signal: controller.signal,
+        const response = await this.request(url, { headers: this.requestHeaders(channel), signal: controller.signal,
           credentials: this.config.authentication === 'feishu-test' ? 'include' : 'omit', cache: 'no-store', redirect: 'error' })
         const body: unknown = await response.json()
         if (this.config.authentication === 'feishu-test' && response.status === 401

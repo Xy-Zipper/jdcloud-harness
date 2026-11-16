@@ -212,6 +212,20 @@ describe('file upload worker body', () => {
 })
 
 describe('file upload service', () => {
+  it('passes the tab identity to the background upload carrier', async () => {
+    const fetch = vi.fn(() => Promise.resolve(new Response('accepted')))
+    ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = { fetch }
+    const ctx = new Context()
+    ctx.provide('connection', { authorizationHeader: () => Promise.resolve('Bearer tab-session') })
+    await ctx.plugin(FileUploadRuntime)
+    try {
+      await (ctx.fileUpload as FileUploadRuntime).post({ path: 'api/upload', body: new Blob(['data']) })
+      expect(fetch).toHaveBeenCalledWith('api/upload', expect.objectContaining({
+        headers: { authorization: 'Bearer tab-session' },
+      }))
+    } finally { await ctx.fiber.dispose() }
+  })
+
   it('uses a page-owned Host fetch for Blob and ReadableStream bodies', async () => {
     const fetch = vi.fn((_url: string | URL, _init?: RequestInit) =>
       Promise.resolve(new Response('accepted', { status: 202 })))
@@ -493,5 +507,54 @@ describe('Session-addressed file upload', () => {
       },
     })
     await failed.fiber.dispose()
+  })
+
+  it('uploads an image with its media type and parses the stored image', async () => {
+    const image = {
+      attachmentId: 'image-1', mediaType: 'image/png', bytes: 4, width: 2, height: 2,
+      name: 'shot.png', originalDimensions: { width: 4, height: 4 },
+    }
+    const fetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      ok: true, value: { receiptId: 'receipt-2', image },
+    }), { status: 200 })))
+    ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = { fetch }
+    const { fiber, service } = await scopedService()
+    const file = new Blob(['data'], { type: 'image/png' })
+    await expect(service.uploadImage(SESSION_ID, file, 'image/png', 'shot.png')).resolves.toEqual({
+      ok: true, value: { receiptId: 'receipt-2', image },
+    })
+    expect(fetch).toHaveBeenCalledWith(
+      'api/session/uploadFileBinary?sessionId=s1&mediaType=image%2Fpng&name=shot.png',
+      expect.objectContaining({ method: 'POST', body: file }),
+    )
+    await fiber.dispose()
+
+    const plain = { attachmentId: 'image-2', mediaType: 'image/webp', bytes: 1, width: 1, height: 1 }
+    ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = {
+      fetch: () => Promise.resolve(new Response(JSON.stringify({
+        ok: true, value: { receiptId: 'receipt-4', image: plain },
+      }), { status: 200 })),
+    }
+    const unnamed = await scopedService()
+    await expect(unnamed.service.uploadImage(SESSION_ID, file, 'image/webp')).resolves.toEqual({
+      ok: true, value: { receiptId: 'receipt-4', image: plain },
+    })
+    await unnamed.fiber.dispose()
+
+    for (const malformed of [
+      null,
+      { receiptId: 'receipt-3', image: { ...image, mediaType: 'image/bmp' } },
+      { receiptId: 'receipt-3', image: { ...image, width: -1 } },
+      { receiptId: 'receipt-3', image: { ...image, name: 3 } },
+      { receiptId: 'receipt-3', image: { ...image, originalDimensions: { width: 1 } } },
+    ]) {
+      ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = {
+        fetch: () => Promise.resolve(new Response(JSON.stringify({ ok: true, value: malformed }), { status: 200 })),
+      }
+      const rejected = await scopedService()
+      await expect(rejected.service.uploadImage(SESSION_ID, file, 'image/png'))
+        .rejects.toThrow('file upload transport returned an invalid image receipt')
+      await rejected.fiber.dispose()
+    }
   })
 })

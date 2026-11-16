@@ -1,3 +1,4 @@
+import { es, fr, de, ru, pt } from '../src/client/locales.ts'
 /**
  * ui-skill browser half: source and keyed toolview registration +
  * locale dictionaries + source duplicate-name proof +
@@ -5,7 +6,8 @@
  * the source behavior contract driven directly on the captured source with
  * real ClientSessionContext projections — sessionId addressing, the
  * session-keyed catalog cache (single-flight per key, scope-birth warm
- * prewarm, connection/reset clear), shared fuzzy name ranking, RPC-failure
+ * prewarm, plugin-manager/changed and connection/reset clears), shared fuzzy
+ * name ranking, RPC-failure
  * rejection, pick → plain-text outcome (the plain-text-reference decision:
  * .agents/notes/archived/architecture/2026-07-25-web-input-machine-and-slash-pipeline.md),
  * the synchronous
@@ -20,43 +22,19 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { InputTriggerService } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { RemoteError, TestRemote, TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionFixture } from '@deepseek-ai/dsh-client-test-runtime'
+import type { InjectParams } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
-import type {
-  SkillInstallFile,
-  SkillInstallScope,
-  SkillManagedScope,
-} from '@deepseek-ai/dsh-api-session-controller/types'
 import type { ClientSessionContext, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import { apply, inject } from '../src/client/index.ts'
 import { SkillRow as SkillToolRow } from '../src/client/SkillRow.tsx'
-import {
-  SkillPicker,
-  SkillSettingsSection,
-  type SkillPickerInjected,
-} from '../src/client/SkillPicker.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { SkillReference, type SkillReferenceInjected } from '../src/client/SkillReference.tsx'
+import { UserTextRegistry } from '../../ui-conversation/src/client/conversation/user-text-registry.ts'
 
 type SkillRow = { name: string; description: string; whenToUse?: string; path?: string; modelInvocable?: boolean }
-type ManagedSkillRow = SkillRow & { scope: SkillManagedScope }
 type ListResult =
-  | {
-    ok: true
-    value: {
-      skills: SkillRow[]
-      installScopes: SkillInstallScope[]
-      managedSkills: ManagedSkillRow[]
-    }
-  }
+  | { ok: true; value: { skills: SkillRow[] } }
   | { ok: false; error: RemoteFailure }
 type ListFn = (payload: object, signal?: AbortSignal) => Promise<ListResult>
-type InstallResult =
-  | { ok: true; value: { skill: SkillRow } }
-  | { ok: false; error: RemoteFailure }
-type InstallFn = (payload: object, signal?: AbortSignal) => Promise<InstallResult>
-type DeleteResult =
-  | { ok: true; value: { deleted: true; scope: SkillManagedScope; name: string } }
-  | { ok: false; error: RemoteFailure }
-type DeleteFn = (payload: object, signal?: AbortSignal) => Promise<DeleteResult>
 
 interface PresentationCapture {
   slots: SlotRegistry
@@ -67,11 +45,13 @@ interface PresentationCapture {
 /** Provide the presentation registries and capture the plugin's registrations. */
 function providePresentation(ctx: Context): PresentationCapture {
   const slots = new SlotRegistry(ctx)
+  const userText = new UserTextRegistry(ctx)
+  ctx.provide('uiConversation', { userText } as never)
   slots.register({
-    name: 'root', children: {
+    name: 'root',
+    children: {
       'tool.call.toolview': { kind: 'keyed', scope: 'session' },
-      'conversation.input.left': { kind: 'list', scope: 'session' },
-      'settings.section': { kind: 'list', scope: 'root' },
+      'conversation.user.text.node': { kind: 'keyed', scope: 'session', inline: true },
     },
   } as never, () => null)
   const capture: PresentationCapture = {
@@ -91,13 +71,7 @@ function providePresentation(ctx: Context): PresentationCapture {
 }
 
 /** Boot the plugin over fake slash/connection faces; returns the captured source and its ctx. */
-async function bench(
-  list: ListFn,
-  addressed?: SessionId,
-  opening: Pick<SessionFixture, 'initialOpen' | 'snapshot'> = {},
-  create: InstallFn = () => Promise.reject(new Error('unexpected skills/create call')),
-  remove: DeleteFn = () => Promise.reject(new Error('unexpected skills/delete call')),
-) {
+async function bench(list: ListFn, addressed?: SessionId, opening: Pick<SessionFixture, 'initialOpen' | 'snapshot'> = {}) {
   const ctx = new Context()
   const openResource = vi.fn()
   ctx.provide('sidebarRight', { openResource })
@@ -115,12 +89,12 @@ async function bench(
       ? { parentSessionId: sid('parent'), childSessionId: addressed, mode: 'continuable' }
       : sid(id))
   }
-  const remote = new TestRemote(ctx, { skills: { create, delete: remove, list } })
+  const remote = new TestRemote(ctx, { skills: { list } })
   const presentation = providePresentation(ctx)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   onTestFinished(async () => { await fiber.dispose() })
   await fiber.await()
-  return { ctx, source: captured!, remote, fiber, openResource, presentation, sessions }
+  return { ctx, source: captured!, remote, fiber, openResource, sessions, presentation }
 }
 
 const CATALOG: SkillRow[] = [
@@ -129,10 +103,7 @@ const CATALOG: SkillRow[] = [
   { name: 'deploy', description: 'deploy flow', modelInvocable: true },
 ]
 
-const listOk = (skills: SkillRow[]): ListFn => () => Promise.resolve({
-  ok: true as const,
-  value: { skills, installScopes: ['project'], managedSkills: [] },
-})
+const listOk = (skills: SkillRow[]): ListFn => () => Promise.resolve({ ok: true as const, value: { skills } })
 
 /** Counting fake: records payloads, resolves the shared catalog. */
 function countingList(skills: SkillRow[] = CATALOG) {
@@ -153,11 +124,12 @@ const req = (query: string, signal?: AbortSignal) =>
 
 describe('apply', () => {
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight'])
+    expect(inject).toEqual(['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight', 'uiConversation'])
   })
 
   it('registers the dedicated skill row and its locale dictionaries', async () => {
     const ctx = new Context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
     ctx.provide('sidebarRight', { openResource: vi.fn() })
     ctx.provide('inputTriggers', { registerSource: () => () => {} })
     ctx.provide('sessions', { subagentAddress: () => undefined })
@@ -168,89 +140,46 @@ describe('apply', () => {
     expect(entry?.options).toMatchObject({ key: 'skill' })
     expect(entry?.locale).toBe('skill')
     expect(entry?.component).toBe(SkillToolRow)
-    const picker = presentation.slots.entries('conversation.input.left')[0]
-    expect(picker?.options).toMatchObject({ id: '@deepseek-ai/dsh-client-ui-skill' })
-    expect(picker?.locale).toBe('skill')
-    expect(picker?.component).toBe(SkillPicker)
-    const settings = presentation.slots.entries('settings.section')[0]
-    expect(settings?.options).toMatchObject({ id: 'skills', order: 30 })
-    expect(settings?.locale).toBe('skill')
-    expect(settings?.component).toBe(SkillSettingsSection)
-    expect(presentation.dictionaries).toEqual([{
-      namespace: 'skill', dictionaries: { zh, en },
+    expect(presentation.dictionaries).toMatchObject([{
+      namespace: 'skill', dictionaries: {
+        es, fr, de, ru, pt,
+        zh: {
+          'row.title': '加载技能',
+          'row.running': '正在加载 skill',
+          'row.preparing': '准备加载技能',
+          'row.failed': 'skill 加载失败',
+          'row.stopped': 'skill 加载已中止',
+          'row.instructions': '说明',
+          'row.inspect': '查看',
+          'menu.userOnly': '仅用户',
+        },
+        en: {
+          'row.title': 'Skill',
+          'row.running': 'Loading skill',
+          'row.preparing': 'Preparing to load a skill',
+          'row.failed': 'Skill load failed',
+          'row.stopped': 'Skill load stopped',
+          'row.instructions': 'Instructions',
+          'row.inspect': 'Inspect',
+          'menu.userOnly': 'user-only',
+        },
+        ja: {
+          'row.title': 'スキル',
+          'row.running': 'スキルを読み込み中',
+          'row.preparing': 'スキルの読み込みを準備中',
+          'row.failed': 'スキルの読み込みに失敗しました',
+          'row.stopped': 'スキルの読み込みが停止しました',
+          'row.instructions': '手順',
+          'row.inspect': '詳細を確認',
+          'menu.userOnly': 'ユーザー専用',
+        },
+      },
     }])
-  })
-
-  it('injects a session-bound picker face and refreshes its cached catalog after installation', async () => {
-    const installed = { name: 'workspace-helper', description: 'workspace flow', modelInvocable: true }
-    const install = vi.fn<InstallFn>(() => Promise.resolve({ ok: true, value: { skill: installed } }))
-    const b = await bench(listOk(CATALOG), sid('child'), {}, install)
-    const picker = b.presentation.slots.entries('conversation.input.left')[0]
-    const injectPicker = picker?.inject as ((sessionId: SessionId) => SkillPickerInjected) | undefined
-    expect(injectPicker).toBeDefined()
-
-    const face = injectPicker!(sid('s1'))
-    expect(face.available).toBe(true)
-    expect(injectPicker!(sid('child')).available).toBe(false)
-    await expect(face.loadCatalog()).resolves.toEqual({
-      skills: CATALOG,
-      installScopes: ['project'],
-      managedSkills: [],
-    })
-
-    const files: readonly SkillInstallFile[] = [{
-      path: 'SKILL.md',
-      contentBase64: Buffer.from('---\nname: workspace-helper\ndescription: workspace flow\n---\n\nRun it.\n').toString('base64'),
-    }]
-    await expect(face.installSkill('project', files)).resolves.toEqual({ ok: true, skill: installed })
-    expect(install).toHaveBeenCalledWith({ sessionId: sid('s1'), scope: 'project', files })
-    await expect(face.loadCatalog()).resolves.toEqual({
-      skills: [...CATALOG, installed].sort((left, right) => left.name.localeCompare(right.name)),
-      installScopes: ['project'],
-      managedSkills: [],
-    })
-  })
-
-  it('invalidates the catalog after deletion so a same-name built-in Skill can become visible', async () => {
-    const managed = {
-      name: 'personal-helper',
-      description: 'private helper',
-      modelInvocable: true,
-      scope: 'personal' as const,
-    }
-    const builtIn = {
-      name: managed.name,
-      description: 'shared fallback',
-      modelInvocable: true,
-    }
-    let deleted = false
-    const list = vi.fn<ListFn>(() => Promise.resolve({
-      ok: true,
-      value: deleted
-        ? { skills: [builtIn], installScopes: ['personal'], managedSkills: [] }
-        : { skills: [managed], installScopes: ['personal'], managedSkills: [managed] },
-    }))
-    const remove = vi.fn<DeleteFn>(() => {
-      deleted = true
-      return Promise.resolve({
-        ok: true,
-        value: { deleted: true, scope: 'personal', name: managed.name },
-      })
-    })
-    const b = await bench(list, undefined, {}, undefined, remove)
-    const picker = b.presentation.slots.entries('conversation.input.left')[0]
-    const injectPicker = picker?.inject as ((sessionId: SessionId) => SkillPickerInjected) | undefined
-    const face = injectPicker!(sid('s1'))
-
-    await expect(face.loadCatalog()).resolves.toMatchObject({ managedSkills: [managed] })
-    await expect(face.deleteSkill('personal', managed.name)).resolves.toEqual({ ok: true })
-    expect(remove).toHaveBeenCalledWith({ sessionId: sid('s1'), scope: 'personal', name: managed.name })
-    await expect(face.loadCatalog()).resolves.toMatchObject({ skills: [builtIn], managedSkills: [] })
-    expect(list).toHaveBeenCalledTimes(2)
   })
 
   it('registers the "/" skill source; disposal frees the name (HMR safety)', async () => {
     const ctx = new Context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
     ctx.provide('sidebarRight', { openResource: vi.fn() })
     // InputTriggerService itself injects 'sessions'; the stub unblocks its fiber.
     ctx.provide('sessions', {})
@@ -272,8 +201,6 @@ describe('apply', () => {
     await fiber.dispose()
     expect(() => inputTriggers.registerSource(rival)).not.toThrow()
     expect(presentation.slots.entries('tool.call.toolview')).toHaveLength(0)
-    expect(presentation.slots.entries('conversation.input.left')).toHaveLength(0)
-    expect(presentation.slots.entries('settings.section')).toHaveLength(0)
     expect(presentation.localeDisposed).toBe(true)
   })
 })
@@ -291,12 +218,12 @@ describe('candidates: sessionId addressing', () => {
       opened.resolve(undefined)
       await vi.waitFor(() => { expect(list).toHaveBeenCalledOnce() })
       expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(2)
-      response.resolve({ ok: true, value: { skills: CATALOG, installScopes: ['project'], managedSkills: [] } })
+      response.resolve({ ok: true, value: { skills: CATALOG } })
       await pending
       expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(1)
     } finally {
       opened.resolve(undefined)
-      response.resolve({ ok: true, value: { skills: CATALOG, installScopes: ['project'], managedSkills: [] } })
+      response.resolve({ ok: true, value: { skills: CATALOG } })
     }
   })
 
@@ -333,7 +260,7 @@ describe('candidates: sessionId addressing', () => {
     }
   })
 
-  it('lists via {sessionId} and ranks case-insensitive subsequence matches with prefixes first', async () => {
+  it('lists via {sessionId} and ranks prefix, substring, then fuzzy name matches', async () => {
     const { list, payloads } = countingList()
     const { source } = await bench(list)
     const items = await source.candidates(proj('s1'), req('co'))
@@ -344,10 +271,12 @@ describe('candidates: sessionId addressing', () => {
       { name: 'code-review', description: 'review flow' },
     ])
     const names = async (query: string) => (await source.candidates(proj('s1'), req(query))).map(c => c.name)
-    // 'de' prefixes deploy and is a subsequence of code-review: the prefix ranks first.
+    // 'de' prefixes deploy and occurs inside code-review: the prefix ranks first.
     await expect(names('de')).resolves.toEqual(['deploy', 'code-review'])
     await expect(names('REV')).resolves.toEqual(['code-review'])
     await expect(names('zzz')).resolves.toEqual([])
+    // Descriptions do not match: 'flow' appears only in descriptions.
+    await expect(names('flow')).resolves.toEqual([])
   })
 
   it('rejects on a failed result (the slash shell owns the menu-side fold)', async () => {
@@ -461,6 +390,19 @@ describe('catalog cache', () => {
     await source.candidates(proj('s2'), req(''))
     expect(payloads).toHaveLength(4)
   })
+
+  it('plugin-manager/changed clears every cached session', async () => {
+    const { list, payloads } = countingList()
+    const { source, remote } = await bench(list)
+    await source.candidates(proj('s1'), req(''))
+    await source.candidates(proj('s2'), req(''))
+    expect(payloads).toHaveLength(2)
+    // A switched plugin may register into the global layer every session reads.
+    remote.emit('plugin-manager/changed', [{ reason: 'bundle' }])
+    await source.candidates(proj('s1'), req(''))
+    await source.candidates(proj('s2'), req(''))
+    expect(payloads).toHaveLength(4)
+  })
 })
 
 describe('lexicon', () => {
@@ -556,6 +498,31 @@ describe('reference preview', () => {
     { name: 'virtual', description: 'Virtual' },
   ]
 
+  it('routes sent skill previews through the reference entry’s own Session and ignores an absent scope', async () => {
+    const b = await bench(listOk(rows))
+    const entry = b.presentation.slots.entries('conversation.user.text.node').find(row => row.options.key === 'skill')
+    expect(entry?.component).toBe(SkillReference)
+    if (entry?.inject === undefined) throw new Error('Skill reference injector was not registered')
+    const injectReference = entry.inject as (
+      ...params: InjectParams<'conversation.user.text.node', undefined>
+    ) => Pick<SkillReferenceInjected, 'openSkill'>
+    const openReference = vi.spyOn(b.source, 'openReference')
+    const first = injectReference(sid('first'))
+    const second = injectReference(sid('second'))
+    first.openSkill('review')
+    await b.source.candidates(proj('first'), req(''))
+    expect(openReference).toHaveBeenLastCalledWith(proj('first'), { ref: '/review' })
+    expect(b.openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/first//skills/review/SKILL.md')
+    second.openSkill('review')
+    await b.source.candidates(proj('second'), req(''))
+    expect(openReference).toHaveBeenLastCalledWith(proj('second'), { ref: '/review' })
+    expect(b.openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/second//skills/review/SKILL.md')
+    vi.spyOn(b.sessions, 'scope').mockReturnValueOnce(undefined)
+    first.openSkill('review')
+    expect(openReference).toHaveBeenCalledTimes(2)
+    expect(b.openResource).toHaveBeenCalledTimes(2)
+  })
+
   it('finishes the first click after a shared warm fetch and reloads after reconnect', async () => {
     const gate = Promise.withResolvers<ListResult>()
     const list = vi.fn<ListFn>().mockReturnValueOnce(gate.promise).mockImplementation(listOk(rows))
@@ -566,7 +533,7 @@ describe('reference preview', () => {
     const candidates = source.candidates(session, req(''))
     expect(openResource).not.toHaveBeenCalled()
     await vi.waitFor(() => { expect(list).toHaveBeenCalledTimes(1) })
-    gate.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
+    gate.resolve({ ok: true, value: { skills: rows } })
     await candidates
     expect(openResource).toHaveBeenCalledExactlyOnceWith('dsh-resource://file/session/preview//skills/review/SKILL.md')
     expect(source.openReference!(session, { ref: '/virtual' })).toBe(false)
@@ -588,23 +555,16 @@ describe('reference preview', () => {
     const firstDone = source.candidates(proj('first'), req(''))
     source.openReference!(proj('second'), { ref: '/review' })
     const secondDone = source.candidates(proj('second'), req(''))
-    second.resolve({
-      ok: true,
-      value: {
-        skills: [{ ...rows[0]!, path: '/second/SKILL.md' }],
-        installScopes: ['project'],
-        managedSkills: [],
-      },
-    })
+    second.resolve({ ok: true, value: { skills: [{ ...rows[0]!, path: '/second/SKILL.md' }] } })
     await secondDone
     expect(openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/second//second/SKILL.md')
-    first.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
+    first.resolve({ ok: true, value: { skills: rows } })
     await firstDone
     expect(openResource).toHaveBeenLastCalledWith('dsh-resource://file/session/first//skills/review/SKILL.md')
     expect(list.mock.calls.map(([payload]) => payload)).toEqual([{ sessionId: 'first' }, { sessionId: 'second' }])
   })
 
-  it.each(['reset', 'preset', 'dispose'] as const)('cancels a pending preview on %s even if the RPC completes late', async (reason) => {
+  it.each(['reset', 'preset', 'plugin', 'dispose'] as const)('cancels a pending preview on %s even if the RPC completes late', async (reason) => {
     const gate = Promise.withResolvers<ListResult>()
     const { ctx, source, remote, fiber, openResource } = await bench(() => gate.promise)
     const session = proj('preview')
@@ -614,9 +574,10 @@ describe('reference preview', () => {
     const completion = expect(source.candidates(session, req(''))).rejects.toThrow()
     if (reason === 'reset') ctx.emit('connection/reset')
     else if (reason === 'preset') remote.emit('agent-preset/selected', [session.sessionId, 'minimal'])
+    else if (reason === 'plugin') remote.emit('plugin-manager/changed', [{ reason: 'plugin' }])
     else await fiber.dispose()
     expect(listener).toHaveBeenCalledTimes(1)
-    gate.resolve({ ok: true, value: { skills: rows, installScopes: ['project'], managedSkills: [] } })
+    gate.resolve({ ok: true, value: { skills: rows } })
     await completion
     expect(source.lexicon!(session)).toBeUndefined()
     expect(listener).toHaveBeenCalledTimes(1)

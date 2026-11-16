@@ -1,10 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  ContextMessageNode, ConversationNodeDefinition, SteeringMessageNode, UserMessageNode,
+  ContextMessageNode, ConversationContextReader, ConversationLocation, ConversationNodeDefinition,
+  SteeringMessageNode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type { InboxState } from './inbox.ts'
-import { chatNode } from './common.ts'
+import type { ProcessEvidenceState } from './turn-process.ts'
+import { chatNode, contextLocation } from './common.ts'
 import { contextForm, contextProducer } from './event-projection.ts'
 
 interface ReferencedUserMessageNode extends UserMessageNode {
@@ -19,6 +21,11 @@ interface ReferencedSteeringMessageNode extends SteeringMessageNode {
   readonly referenceLabels?: readonly string[]
   /** Skill names the same step's `skill-invocation` injections loaded. */
   readonly skillNames?: readonly string[]
+  /**
+   * First human message of its `next-step` claim that Chat orders after its Turn's process control;
+   * the row keeps the Turn tail slot above it.
+   */
+  readonly batchStart?: true
 }
 
 type MessageNode = ReferencedUserMessageNode | ReferencedSteeringMessageNode | (ContextMessageNode & { readonly waking?: boolean })
@@ -31,7 +38,7 @@ declare module '../contract/chat-nodes.ts' {
     steering: ReferencedSteeringMessageNode
     /** Non-user context injected into model history. */
     context: ContextMessageNode
-    /** Non-human input that starts a Turn. */
+    /** Recorded notification or manual continuation that starts a Turn. */
     'turn-trigger': ContextMessageNode
   }
 }
@@ -40,6 +47,35 @@ function isCompactionCheckpoint(event: Parameters<ConversationNodeDefinition['ma
   if (event.type !== 'user/message' || !isReplacementSurfaceEvent(event)) return false
   const source = event.data.source as { kind?: unknown }
   return source.kind === 'compact-checkpoint'
+}
+
+/** Context presentation shared by user-role injections and developer messages. */
+function contextMessage(
+  event: Pick<ContextMessageNode, 'seq' | 'time'>,
+  message: Pick<ContextMessageNode, 'content' | 'source'>,
+): ContextMessageNode {
+  return {
+    kind: 'context',
+    seq: event.seq,
+    time: event.time,
+    content: message.content,
+    source: message.source,
+    producer: contextProducer(message.source),
+    form: contextForm(message.source),
+  }
+}
+
+/**
+ * Decide whether an input follows its Turn's process control in Chat order. The control anchors at the
+ * Turn's first process evidence, so the input follows it exactly when its Turn recorded evidence earlier;
+ * the nearest earlier evidence record then belongs to the input's own Turn.
+ * @param location - the input's Location.
+ * @param reader - strictly-backward Context lookup of the input's start.
+ * @returns whether Chat orders the input after the control.
+ */
+function followsProcessEvidence(location: ConversationLocation, reader: ConversationContextReader): boolean {
+  if (location.kind !== 'turn' && location.kind !== 'step') return false
+  return reader.previous<ProcessEvidenceState>('process-evidence')?.state.turn === location.turn.turn
 }
 
 /** User, steering, and injected-context message classification Definition. */
@@ -52,13 +88,11 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
         ? { id: String(event.data.id), role: 'start' }
         : null
     }
-    // Developer history is persisted for V4; presentation is intentionally deferred.
-    if (event.type === 'developer/message') throw new Error('Chat developer messages are not supported yet')
     return null
   },
   start: (_context, match, reader) => {
-    if (match.event.type !== 'user/message') throw new Error('input-message start requires user/message')
     const event = match.event
+    if (event.type !== 'user/message') throw new Error('input-message start requires user/message')
     if (event.data.source.kind !== 'user') {
       const nextTurn = reader.previous<InboxState>('inbox-next-turn')?.state
       const nextStep = reader.previous<InboxState>('inbox-next-step')?.state
@@ -68,23 +102,17 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
       // A human in that same next-step claim owns the opening instead of its notices.
       const idleSteer = location.kind === 'step' && location.step.step === 1
         && turnStart !== undefined && (nextStep?.claimSeq ?? -1) > turnStart
-        && (nextTurn?.claimSeq ?? -1) < turnStart && nextStep?.claimedHuman === false
-        && nextStep.currentClaimed.has(String(event.data.id))
+        && (nextTurn?.claimSeq ?? -1) < turnStart && nextStep !== undefined
+        && nextStep.firstClaimedHuman === undefined && nextStep.currentClaimed.has(String(event.data.id))
 
       return {
-        kind: 'context',
+        ...contextMessage(event, event.data),
         waking: nextTurn?.currentClaimed.has(String(event.data.id)) === true || idleSteer,
-        seq: event.seq,
-        time: event.time,
-        content: event.data.content,
-        source: event.data.source,
-        producer: contextProducer(event.data.source),
-        form: contextForm(event.data.source),
       }
     }
-    const claimed = reader.previous<InboxState>('inbox-next-step')
-      ?.state.currentClaimed.has(String(event.data.id)) === true
-    return claimed
+    const id = String(event.data.id)
+    const claim = reader.previous<InboxState>('inbox-next-step')?.state
+    return claim?.currentClaimed.has(id) === true
       ? {
         kind: 'steering',
         messageId: event.data.id,
@@ -92,9 +120,13 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
         time: event.time,
         content: event.data.content,
         source: event.data.source,
+        ...claim.firstClaimedHuman === id && followsProcessEvidence(match.location, reader)
+          ? { batchStart: true }
+          : {},
       }
       : {
         kind: 'user',
+        messageId: event.data.id,
         seq: event.seq,
         time: event.time,
         content: event.data.content,
@@ -104,17 +136,47 @@ export const messageDefinition: ConversationNodeDefinition<MessageNode> = {
   update: context => context.state,
   buildViewNode: (context) => {
     if (context.state === undefined) return null
+    const location = contextLocation(context)
+    if (context.state.kind === 'context' && context.start?.event.type === 'user/message'
+      && context.start.event.data.source.kind === 'retry' && context.start.event.data.content.length === 0) {
+      return chatNode(context, 'turn-trigger', context.state.seq, context.state, { location, groupTree: 'input' })
+    }
     const waking = context.state.kind === 'context'
       && context.start?.event.type === 'user/message'
       && context.state.waking === true
-    return chatNode(context, waking ? 'turn-trigger' : context.state.kind, context.state.seq, context.state)
+    // Human input claimed for Step 1 opens an exchange; Notice-woken Turns and
+    // later steering stay in the current exchange, so they never fold earlier Turns.
+    const human = context.state.kind === 'user' || context.state.kind === 'steering'
+    const opensExchange = human && location.kind === 'step' && location.step.step === 1
+    return chatNode(
+      context,
+      waking ? 'turn-trigger' : context.state.kind,
+      context.state.seq,
+      context.state,
+      { location, groupTree: opensExchange ? 'exchange' : (human || waking) ? 'input' : undefined },
+    )
+  },
+}
+
+/** Developer history uses the input-message lifecycle and context presentation. */
+export const developerMessageDefinition: ConversationNodeDefinition<MessageNode> = {
+  ...messageDefinition,
+  kind: 'developer-message',
+  match: event => event.type === 'developer/message'
+    ? { id: String(event.data.message.id), role: 'start' }
+    : null,
+  start: (_context, match) => {
+    const event = match.event
+    if (event.type !== 'developer/message') throw new Error('developer-message start requires developer/message')
+    return contextMessage(event, event.data.message)
   },
 }
 
 /**
- * Register the user, steering, and injected-context message contribution.
+ * Register user, steering, injected-context, and developer message contributions.
  * @param ctx - owning UI Conversation context.
  */
 export function registerMessageConversationNode(ctx: Context): void {
   ctx.uiConversation.events.register(messageDefinition)
+  ctx.uiConversation.events.register(developerMessageDefinition)
 }

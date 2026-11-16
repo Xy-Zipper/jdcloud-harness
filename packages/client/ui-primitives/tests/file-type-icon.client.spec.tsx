@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   classifyFileType, fileExtension, FileTypeIcon, type FileTypeKind,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { classifyCodeFileType } from '../src/code-file-types.ts'
 import css from '../src/FileTypeIcon.module.css'
 
 afterEach(cleanup)
@@ -58,6 +59,30 @@ describe('classifyFileType', () => {
   })
 })
 
+describe('Object.prototype key names', () => {
+  const keys = ['constructor', '__proto__', 'toString', 'hasOwnProperty']
+
+  it.each(keys.flatMap(key => [
+    [key, 'other'],
+    [`src/${key.toUpperCase()}`, 'other'],
+    [`archive.${key}`, 'other'],
+    [`${key}.md`, 'markdown'],
+    [`${key}.ts`, 'typescript'],
+  ] as [string, Exclude<FileTypeKind, 'folder'>][]))('%s → %s', (path, type) => {
+    expect(classifyFileType(path)).toBe(type)
+  })
+
+  it.each(keys)('%s misses the code-file name and extension tables', (key) => {
+    expect(classifyCodeFileType(key, key)).toBeNull()
+    expect(classifyCodeFileType(key, 'ts')).toBe('typescript')
+  })
+
+  it.each(keys.flatMap(key => [key, `notes.${key}`]))('%s renders the generic file glyph', (path) => {
+    const { container } = render(<FileTypeIcon path={path} />)
+    expect(container.querySelector('svg')!.classList.contains(css.other!)).toBe(true)
+  })
+})
+
 describe('FileTypeIcon', () => {
   const types: FileTypeKind[] = [
     'code', 'excel', 'folder', 'html', 'image', 'markdown', 'other', 'pdf', 'ppt', 'video', 'word',
@@ -108,7 +133,7 @@ describe('FileTypeIcon', () => {
     expect(new Set(paths).size).toBe(types.length)
   })
 
-  it.each(['code', 'folder', 'html', 'image', 'video'] as const)(
+  it.each(['folder', 'html', 'image', 'video'] as const)(
     'enlarges the %s center mark without scaling the file shell',
     (type) => {
       const { container } = render(<FileTypeIcon kind={type} />)

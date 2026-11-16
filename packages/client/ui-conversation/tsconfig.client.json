@@ -19,6 +19,9 @@
       "path": "../../api/session-controller/tsconfig.client.json"
     },
     {
+      "path": "../ui-session-status/tsconfig.client.json"
+    },
+    {
       "path": "../../api/workspace-controller/tsconfig.client.json"
     },
     {
@@ -98,9 +101,19 @@
     },
     {
       "path": "../../context/file-reference"
+    },
+    {
+      "path": "../shortcuts/tsconfig.client.json"
+    },
+    {
+      "path": "../product-analytics/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-context-menu"
     }
   ],
   "exclude": [
-    "src/index.ts"
+    "src/index.ts",
+    "src/host"
   ]
 }

@@ -74,6 +74,16 @@ async function fixture(external: boolean) {
   }
   await writeFile(join(source, 'node_modules', 'foo', 'companion.json'), '{}')
   await writeFile(join(source, 'node_modules', 'foo', '$xarchy.binary'), 'neighbor')
+  for (const [name, manifest] of [
+    ['@deepseek-ai/libreoffice-kit', { name: '@deepseek-ai/libreoffice-kit', optionalDependencies: { '@deepseek-ai/libreoffice-kit-win32-x64': '0.0.4' }, dependencies: { 'office-codec': '1' } }],
+    ['@deepseek-ai/libreoffice-kit-win32-x64', { name: '@deepseek-ai/libreoffice-kit-win32-x64' }],
+    ['office-codec', { name: 'office-codec' }],
+  ] as const) {
+    const directory = join(source, 'node_modules', name)
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'package.json'), JSON.stringify(manifest))
+    await writeFile(join(directory, 'cli.js'), 'export {}')
+  }
   const config = {
     files: [{ from: source, to: 'dsh', filter: ['**/*'] },
       { from: join(source, 'node_modules'), to: 'dsh/node_modules', filter: ['**/*'] }],
@@ -114,6 +124,42 @@ async function packageFixture(input: Awaited<ReturnType<typeof fixture>>) {
     defaultDestination: destination, resourcePath: input.resources, options: {}, unpackPattern: matchers[0]!.createFilter(),
   }).pack([{ src: mapping.from, destination: join(destination, 'dsh'), files, metadata }])
 }
+
+it('includes the diagnostic worker in the archive selected by the shipping file rules', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'diagnostic-worker-asar-'))
+  roots.push(root)
+  const appDir = join(root, 'app')
+  const resources = join(root, 'resources')
+  const destination = join(resources, 'app')
+  await mkdir(join(appDir, 'lib'), { recursive: true })
+  await mkdir(resources)
+  const worker = join(appDir, 'lib', 'operation-report-worker.js')
+  const excluded = join(appDir, 'lib', 'not-shipped.js')
+  await writeFile(worker, 'export {}')
+  await writeFile(excluded, 'export {}')
+  const config = unsignedWindowsConfig('com.example.diagnostics', join(root, 'dsh'))
+  const filesConfig = config.files.map(entry => typeof entry === 'string' ? entry : { ...entry, filter: [...entry.filter] })
+  const matchers = getFileMatchers({ files: filesConfig }, 'files', destination, {
+    defaultSrc: appDir, globalOutDir: root, customBuildOptions: {}, macroExpander: value => value,
+  })!
+  const matcher = matchers.find(entry => entry.from === appDir)!
+  const filter = matcher.createFilter()
+  const files: string[] = []
+  const metadata = new Map<string, Stats>()
+  for (const file of [worker, excluded]) {
+    const stat = await lstat(file)
+    if (filter(file, stat)) {
+      files.push(file)
+      metadata.set(file, stat)
+    }
+  }
+  await new AsarPackager({ info: { getWorkspaceRoot: async () => root } }, {
+    defaultDestination: destination, resourcePath: resources, options: {}, unpackPattern: () => false,
+  }).pack([{ src: appDir, destination, files, metadata }])
+  const archive = await readAsar(join(resources, 'app.asar'))
+  expect(archive.getFile('lib/operation-report-worker.js').size).toBe(Buffer.byteLength('export {}'))
+  expect(() => archive.getFile('lib/not-shipped.js')).toThrow()
+})
 
 it.each([false, true])('unpacks PE files through builder source patterns (external=%s)', async (external) => {
   const input = await fixture(external)
@@ -220,7 +266,7 @@ it.each([false, true])('unpacks platform ripgrep executables with external sourc
 it.each([false, true])('keeps the complete Office engine outside ASAR with external source=%s', async (external) => {
   const input = await fixture(external)
   const engine = join('node_modules', '@deepseek-ai', 'libreoffice-kit-win32-x64')
-  const files = ['package.json', 'prebuilds.json', 'bin/libreoffice-kit', 'program/registry/main.xcd']
+  const files = ['package.json', 'prebuilds.json', 'bin/dsoffice', 'program/registry/main.xcd']
   for (const file of files) {
     const path = join(input.source, engine, file)
     await mkdir(dirname(path), { recursive: true })
@@ -235,6 +281,9 @@ it.each([false, true])('keeps the complete Office engine outside ASAR with exter
   await packageFixture(input)
   const archive = await readAsar(join(input.resources, 'app.asar'))
   expect(archive.getFile(join('dsh', 'node_modules', '@deepseek-ai', 'libreoffice-kit-wasm', 'package.json')).unpacked).not.toBe(true)
+  for (const name of ['@deepseek-ai/libreoffice-kit', 'office-codec']) {
+    expect(archive.getFile(join('dsh', 'node_modules', name, 'cli.js')).unpacked).toBe(true)
+  }
   for (const file of files) {
     expect(archive.getFile(join('dsh', engine, file), false).unpacked).toBe(true)
     expect(await readFile(join(input.resources, 'app.asar.unpacked', 'dsh', engine, file), 'utf8')).toBe('{}')

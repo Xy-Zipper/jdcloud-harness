@@ -69,7 +69,7 @@
   padding: 10px;
   overflow: auto;
   border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 8px;
+  border-radius: var(--dsw-radius-lg);
 }
 
 .models legend {
@@ -103,12 +103,14 @@
   gap: 8px;
   min-width: 0;
   padding: 6px;
-  border-radius: 6px;
+  border-radius: var(--dsw-radius-md);
   cursor: pointer;
 }
 
-.model:hover {
-  background: var(--dsw-alias-bg-layer-4);
+@media (hover: hover) {
+  .model:hover {
+    background: var(--dsw-alias-bg-layer-4);
+  }
 }
 
 .modelName,

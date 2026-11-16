@@ -9,7 +9,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { PreparationCard, VoicePreparation } from '../src/client/PreparationCard.tsx'
 import type { VoiceInputProps } from '../src/client/VoiceInput.tsx'
 import type { SpeechReadiness } from '../src/client/readiness.ts'
-import { zh } from '../src/client/locales.ts'
+import { Recording } from '../src/client/audio.ts'
+import { zh, en, ja, es, fr, de, ru, pt } from '../src/client/locales.ts'
 
 afterEach(() => { cleanup(); vi.useRealTimers() })
 const id = 'local' as SpeechProviderId, t = makeTranslate(zh, commonZh)
@@ -70,6 +71,7 @@ it('starts preparation and offers retry without showing progress for completed o
   expect(b.prepare).toHaveBeenCalledWith(id)
   b.rerender(<PreparationCard {...b.props} provider={{ ...b.props.provider,
     preparation: { phase: 'failed', message: 'network unavailable', steps: [{ kind: 'model', status: 'failed' }] } }} />)
+  await waitFor(() => { expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.retryPrepare }).disabled).toBe(false) })
   b.prepare.mockRejectedValueOnce(new Error('offline'))
   fireEvent.click(screen.getByRole('button', { name: zh.retryPrepare }))
   await screen.findByText('语音识别失败：offline')
@@ -112,11 +114,13 @@ it('persists settings and reports disconnection in the detail card', async () =>
   const store = createSnapshotStore<SpeechReadiness>({ connected: true, error: null, catalog: {
     selection: { providerId: id, language: 'auto' }, maxAudioBytes: 100, maxDurationSeconds: 120,
     providers: [{ id, name: 'SenseVoiceSmall', location: 'host-local', languages: ['auto', 'zh', 'en', 'ja'], preparation: { phase: 'ready' } },
-      { id: 'cloud' as SpeechProviderId, name: 'Cloud', location: 'cloud', languages: ['auto', 'en', 'zh', 'ja', 'fr'], preparation: { phase: 'ready' } }],
+      { id: 'cloud' as SpeechProviderId, name: 'Cloud', location: 'cloud', languages: ['auto', 'en', 'zh', 'ja', 'fr', 'it'], preparation: { phase: 'ready' } }],
   } })
   const configure = vi.fn<VoiceInputProps['configure']>(async () => {})
   const props = { useSpeechReadiness: bindSnapshotSelector(store), configure, t,
-    prepare: vi.fn(async () => {}), cancelPreparation: vi.fn(async () => {}), transcribe: vi.fn(), createRecording: vi.fn() }
+    useMicrophoneDevice: bindSnapshotSelector(createSnapshotStore({ id: '', label: '' })),
+    selectMicrophone: vi.fn(), createRecording: () => new Recording(() => {}),
+    prepare: vi.fn(async () => {}), cancelPreparation: vi.fn(async () => {}) }
   const view = render(<VoicePreparation {...props} />)
   fireEvent.change(screen.getByLabelText(zh.provider), { target: { value: 'cloud' } })
   await waitFor(() => { expect(configure).toHaveBeenCalledWith({ providerId: 'cloud' }) })
@@ -124,8 +128,9 @@ it('persists settings and reports disconnection in the detail card', async () =>
   act(() => { store.set({ ...current, catalog: { ...current.catalog!, selection: { providerId: 'cloud' as SpeechProviderId, language: 'en' } } }) })
   expect(screen.getByText(zh.cloud)).toBeTruthy()
   expect(within(screen.getByLabelText(zh.language)).getAllByRole<HTMLOptionElement>('option').map(item => item.value))
-    .toEqual(['auto', 'en', 'zh', 'ja', 'fr'])
-  expect(within(screen.getByLabelText(zh.language)).getByRole('option', { name: 'fr' })).toBeTruthy()
+    .toEqual(['auto', 'en', 'zh', 'ja', 'fr', 'it'])
+  expect(within(screen.getByLabelText(zh.language)).getByRole('option', { name: zh.fr })).toBeTruthy()
+  expect(within(screen.getByLabelText(zh.language)).getByRole('option', { name: 'it' })).toBeTruthy()
   configure.mockRejectedValueOnce(new Error('settings are read-only'))
   fireEvent.change(screen.getByLabelText(zh.language), { target: { value: 'zh' } })
   await screen.findByText('语音识别失败：settings are read-only')
@@ -154,4 +159,68 @@ it('shows provider-specific installation estimates before preparation and remove
   expect(screen.getByText(/参考 5–30 分钟/)).toBeTruthy()
   b.rerender(<PreparationCard {...b.props} provider={{ ...provider, preparation: { phase: 'checking', startedAt: Date.now() } }} />)
   expect(screen.queryByText(zh['setup.local'])).toBeNull()
+})
+
+it('offers Host sources, submits a manual choice, and retains it for retry', async () => {
+  const b = fixture({ phase: 'unprepared' })
+  const provider = { ...b.props.provider, downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'] }
+  b.rerender(<PreparationCard {...b.props} provider={provider} />)
+  const picker = screen.getByLabelText<HTMLSelectElement>(zh.sourceChoice)
+  expect(picker.value).toBe('')
+  expect(within(picker).getAllByRole('option').map(option => option.textContent)).toEqual([zh.sourceAuto, zh.sourceHuggingFace, zh.sourceMirror])
+  expect(screen.getByText(zh.sourceAutoHelp)).toBeTruthy()
+  fireEvent.change(picker, { target: { value: 'https://hf-mirror.com' } })
+  expect(screen.getByText(zh.sourceManualHelp)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: zh.prepare }))
+  await waitFor(() => { expect(b.prepare).toHaveBeenCalledWith(id, { downloadSource: 'https://hf-mirror.com' }) })
+  b.rerender(<PreparationCard {...b.props} provider={{ ...provider, preparation: { phase: 'failed', message: 'offline' } }} />)
+  expect(screen.getByLabelText<HTMLSelectElement>(zh.sourceChoice).value).toBe('https://hf-mirror.com')
+  fireEvent.change(picker, { target: { value: 'https://huggingface.co' } })
+  fireEvent.click(screen.getByRole('button', { name: zh.retryPrepare }))
+  await waitFor(() => { expect(b.prepare).toHaveBeenLastCalledWith(id, { downloadSource: 'https://huggingface.co' }) })
+  fireEvent.change(picker, { target: { value: '' } })
+  fireEvent.click(screen.getByRole('button', { name: zh.retryPrepare }))
+  await waitFor(() => { expect(b.prepare).toHaveBeenLastCalledWith(id) })
+})
+
+it('respects a fixed private source and removes a choice that the Host withdraws', async () => {
+  const b = fixture({ phase: 'unprepared' })
+  b.rerender(<PreparationCard {...b.props} provider={{ ...b.props.provider, downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'] }} />)
+  fireEvent.change(screen.getByLabelText(zh.sourceChoice), { target: { value: 'https://hf-mirror.com' } })
+  b.rerender(<PreparationCard {...b.props} provider={{ ...b.props.provider, downloadSources: ['https://private.example'] }} />)
+  const picker = screen.getByLabelText<HTMLSelectElement>(zh.sourceChoice)
+  expect(picker.value).toBe('https://private.example')
+  expect(picker.disabled).toBe(true)
+  expect(within(picker).getAllByRole('option')).toHaveLength(1)
+  fireEvent.click(screen.getByRole('button', { name: zh.prepare }))
+  await waitFor(() => { expect(b.prepare).toHaveBeenCalledWith(id, { downloadSource: 'https://private.example' }) })
+  b.rerender(<PreparationCard {...b.props} provider={{ ...b.props.provider, downloadSources: [] }} />)
+  expect(screen.queryByLabelText(zh.sourceChoice)).toBeNull()
+})
+
+it('locks source changes while a preparation request is pending and hides them during active work', async () => {
+  const b = fixture({ phase: 'unprepared' }), pending = Promise.withResolvers<undefined>()
+  b.prepare.mockImplementation(async () => { await pending.promise })
+  const provider = { ...b.props.provider, downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'] }
+  b.rerender(<PreparationCard {...b.props} provider={provider} />)
+  fireEvent.click(screen.getByRole('button', { name: zh.prepare }))
+  try {
+    expect(screen.getByLabelText<HTMLSelectElement>(zh.sourceChoice).disabled).toBe(true)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.prepare }).disabled).toBe(true)
+  } finally { await act(async () => { pending.resolve(undefined); await pending.promise }) }
+  b.rerender(<PreparationCard {...b.props} provider={provider} connected={false} />)
+  expect(screen.getByLabelText<HTMLSelectElement>(zh.sourceChoice).disabled).toBe(true)
+  b.rerender(<PreparationCard {...b.props} provider={{ ...provider, preparation: { phase: 'downloading', resource: 'model.onnx', completedBytes: 0 } }} />)
+  expect(screen.queryByLabelText(zh.sourceChoice)).toBeNull()
+})
+
+it('gives each speech recognition language a distinct localized name', () => {
+  for (const dictionary of [zh, en, ja, es, fr, de, ru, pt]) {
+    const names = [
+      dictionary.zh, dictionary.en, dictionary.yue, dictionary.ja, dictionary.es,
+      dictionary.fr, dictionary.de, dictionary.ru, dictionary.pt, dictionary.ko,
+    ]
+    expect(new Set(names).size).toBe(names.length)
+  }
+  expect(zh.fr).toBe('法语')
 })

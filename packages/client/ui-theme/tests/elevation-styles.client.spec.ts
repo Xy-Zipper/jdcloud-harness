@@ -57,14 +57,18 @@ describe('elevation tokens', () => {
   })
 
   it('defines the translucent menu material for both palettes', () => {
+    expect(bodyOnly.get('--dsw-mask-blur')).toBe('none')
     expect(bodyOnly.get('--dsw-menu-backdrop-filter')).toBe('blur(40px) saturate(150%)')
     const platformRules = parseRules(platformCss)
-    const value = (selector: string): string | undefined => platformRules
+    const value = (selector: string, token = '--dsw-menu-surface-fill'): string | undefined => platformRules
       .filter(rule => rule.selectors.includes(selector))
       .flatMap(rule => rule.declarations)
-      .findLast(([property]) => property === '--dsw-specific-menu')?.[1]
-    expect(value('body')).toBe('rgba(248, 249, 250, 0.58)')
-    expect(value('body[data-ds-dark-theme]')).toBe('rgba(48, 49, 54, 0.5)')
+      .findLast(([property]) => property === token)?.[1]
+    expect(value('body')).toBe('rgba(252, 253, 254, 0.7)')
+    expect(value('body[data-ds-dark-theme]')).toBe('rgba(48, 49, 54, 0.64)')
+    expect(value('body', '--dsw-specific-menu')).toBe('var(--dsw-menu-surface-fill)')
+    expect(value("html[data-platform='darwin'] body", '--dsw-specific-menu')).toBe('rgba(248, 249, 250, 0.94)')
+    expect(value("html[data-platform='darwin'] body[data-ds-dark-theme]", '--dsw-specific-menu')).toBe('rgba(48, 49, 54, 0.94)')
   })
 })
 
@@ -73,7 +77,7 @@ function translucentMenusWithoutBackdrop(css: string): string[] {
   return parseRules(css)
     .filter(rule => rule.declarations.some(([property, value]) =>
       (property === 'background' || property === 'background-color')
-      && value === 'var(--dsw-specific-menu)'))
+      && /^var\(--dsw-(?:specific-menu|menu-surface-fill)\)$/.test(value)))
     .filter(rule => rule.declarations.some(([property, value]) =>
       property === 'box-shadow' && ELEVATED_SHADOW.test(value))
       || rule.selectors.some(selector => /::(?:before|after)$/.test(selector)))
@@ -98,6 +102,15 @@ describe('translucent menu surfaces pair fill and filter', () => {
     )).toEqual([])
   })
 
+  it('rejects a backed menu fill without the shared backdrop filter', () => {
+    expect(translucentMenusWithoutBackdrop(
+      '.a { background: var(--dsw-menu-surface-fill); box-shadow: var(--dsw-elevation-panel); }',
+    )).toEqual(['.a'])
+    expect(translucentMenusWithoutBackdrop(
+      '.a { background: var(--dsw-menu-surface-fill); box-shadow: var(--dsw-elevation-panel); backdrop-filter: var(--dsw-menu-backdrop-filter); }',
+    )).toEqual([])
+  })
+
   it('covers every package menu-fill consumer', () => {
     const missing = packageStylesheets().flatMap(file =>
       translucentMenusWithoutBackdrop(readFileSync(file, 'utf8'))
@@ -107,6 +120,7 @@ describe('translucent menu surfaces pair fill and filter', () => {
 
   it('keeps backdrop filtering on background layers when descendants use fixed positioning', () => {
     const surfaces = [
+      ['packages/client/ui-primitives/src/MenuSurface.module.css', '.surface', '.material'],
       ['packages/client/ui-goal/src/client/GoalBar.module.css', '.bar', '.bar::before'],
       ['packages/client/ui-conversation/src/client/queue/QueueDock.module.css', '.panel', '.panel::before'],
       ['packages/extensions/ui-cordis/src/client/CordisPanel.module.css', '.panel', '.panel::before'],
@@ -120,7 +134,7 @@ describe('translucent menu surfaces pair fill and filter', () => {
         .filter(rule => rule.selectors.length === 1 && rule.selectors[0] === selector)
         .flatMap(rule => rule.declarations))
       expect(declarations(container).has('backdrop-filter'), container).toBe(false)
-      expect(declarations(background).get('background'), background).toBe('var(--dsw-specific-menu)')
+      expect(declarations(background).get('background'), background).toBe(container === '.surface' ? 'var(--dsw-menu-surface-fill)' : 'var(--dsw-specific-menu)')
       expect(declarations(background).get('backdrop-filter'), background)
         .toBe('var(--dsw-menu-backdrop-filter)')
     }
@@ -188,6 +202,15 @@ function wideNeutralBorders(css: string, exempt: Set<string> = new Set()): strin
   return wide
 }
 
+/** Centered, zero-blur inset strokes with literal widths and neutral border colors. */
+function wideNeutralInsetShadows(css: string): string[] {
+  return parseRules(css).flatMap(rule => rule.declarations
+    .filter(([property, value]) => property === 'box-shadow'
+      && [...value.matchAll(/\binset\s+(?:0(?:px)?\s+){3}(\d*\.?\d+)([a-z%]+)\s+var\(--dsw-alias-border-[\w-]+\)/g)]
+        .some(([, width, unit]) => unit !== 'px' || Number(width) > 0.5))
+    .map(([property, value]) => `${rule.selectors.join(', ')} ${property}: ${value}`))
+}
+
 /**
  * Filled divider lines (a border-token background on a 1px-tall or 1px-wide
  * box) that keep the pre-hairline weight.
@@ -238,6 +261,24 @@ describe('neutral solid borders are hairlines', () => {
       return wideNeutralBorders(readFileSync(file, 'utf8'), exempt)
         .map(line => `${file} ${line}`)
     })
+    expect(wide).toEqual([])
+  })
+
+  it('rejects thick neutral inset strokes while allowing hairlines and state colors', () => {
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l2); }'))
+      .toEqual(['.a box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l2)'])
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0 0 0 1em var(--dsw-alias-border-l2); }'))
+      .toEqual(['.a box-shadow: inset 0 0 0 1em var(--dsw-alias-border-l2)'])
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0px 0px 0px 0.5px var(--dsw-alias-border-l2); }')).toEqual([])
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0 0 0 var(--dsh-hairline-width, 0.5px) var(--dsw-alias-border-l2); }')).toEqual([])
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0 0 0 2px var(--dsw-alias-state-business-primary); }')).toEqual([])
+    expect(wideNeutralInsetShadows('.a { box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l2), inset 0 0 0 2px var(--dsw-alias-border-l3); }'))
+      .toEqual(['.a box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l2), inset 0 0 0 2px var(--dsw-alias-border-l3)'])
+  })
+
+  it('keeps literal neutral inset strokes at or below 0.5px under packages/', () => {
+    const wide = packageStylesheets().flatMap(file =>
+      wideNeutralInsetShadows(readFileSync(file, 'utf8')).map(line => `${file} ${line}`))
     expect(wide).toEqual([])
   })
 

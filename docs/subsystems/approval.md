@@ -50,7 +50,7 @@ Both policies contribute their complete current meaning to the cache-safe runtim
 
 ## Approval request
 
-`ApprovalRequest` identifies the agent and tool action closely enough to route and audit the question. It deliberately omits tool arguments: an answerer attaches the prompt to the already-streamed tool call through `callId` instead of rendering a second copy that could drift.
+`ApprovalRequest` identifies the agent and tool action closely enough to route and audit the question. It deliberately omits tool arguments: an answerer attaches the prompt to the already-streamed tool call through `callId` instead of rendering a second copy that could drift. Optional `displayReason` carries requester-owned locale strings to presentation; `reason` remains the audit text.
 
 ```ts type-equiv
 /**
@@ -132,7 +132,7 @@ setPolicy(agent: Agent, policy: ApprovalPolicy): void
 async request(req: ApprovalRequest): Promise<ApprovalOutcome>
 
 /**
- * The session's effective policy: its own `approval/policy` fold, else the
+ * The session's effective policy: its projected override, else the
  * configured default (the schema already defaulted an omitted policy to
  * `'ask'`; the `??` only narrows the optional-input TYPE).
  * @param session - the exact accepted session whose policy applies.

@@ -1,8 +1,8 @@
 /** Shared zoom viewport, gesture handling, anchoring, and fit-width measurement. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent,
   type ReactNode, type RefCallback } from 'react'
-import { ZoomControls, type ZoomControlsHandle } from './ZoomControls.tsx'
-import { FIT_WIDTH, MAX_FIXED_ZOOM, MIN_FIXED_ZOOM, type ZoomLabels, type ZoomPreference } from './types.ts'
+import { DOCUMENT_ZOOM, ZoomControls, type ZoomControlsHandle } from '@deepseek-ai/dsh-client-ui-primitives'
+import { FIT_WIDTH, type ZoomLabels, type ZoomPreference } from './types.ts'
 import css from './ZoomViewport.module.css'
 
 const PINCH_SETTLE_DELAY_MS = 120
@@ -42,6 +42,8 @@ export interface ZoomViewportProps {
   readonly signal: AbortSignal
   readonly scrollportRef: RefCallback<HTMLElement>
   readonly onPreference: (preference: ZoomPreference) => void
+  /** Resolved scale after a gesture settles or fit-width measurement changes. */
+  readonly onRenderZoom?: (zoom: number) => void
   readonly children: ReactNode
 }
 
@@ -107,7 +109,7 @@ export function ZoomViewport(props: ZoomViewportProps): ReactNode {
   const showZoom = useCallback((next: number, clientX?: number, clientY?: number): number => {
     const node = scrollport.current as HTMLDivElement
     const previous = zoomRef.current
-    next = Math.min(MAX_FIXED_ZOOM, Math.max(MIN_FIXED_ZOOM, next))
+    next = Math.min(DOCUMENT_ZOOM.maximum, Math.max(DOCUMENT_ZOOM.minimum, next))
     if (next === previous) return previous
     const bounds = node.getBoundingClientRect()
     const x = clientX === undefined ? node.clientWidth / 2 : clientX - bounds.left
@@ -164,7 +166,8 @@ export function ZoomViewport(props: ZoomViewportProps): ReactNode {
     frame.current?.setAttribute('data-document-zoom-mode', props.preference.kind)
     frame.current?.style.setProperty('--document-zoom', String(zoom))
     controls.current?.showZoom(zoom)
-  }, [props.preference.kind, zoom])
+    props.onRenderZoom?.(zoom)
+  }, [props.onRenderZoom, props.preference.kind, zoom])
   useEffect(() => {
     const node = scrollport.current as HTMLDivElement
     const clearPendingPinch = (): void => {
@@ -203,8 +206,8 @@ export function ZoomViewport(props: ZoomViewportProps): ReactNode {
     <div ref={attachScrollport} className={css.scrollport} data-document-zoom-scrollport>{props.children}</div>
     <div className={css.revealZone} data-document-zoom-reveal-zone aria-hidden="true" />
     {props.intrinsicWidth !== undefined && <ZoomControls ref={controls} zoom={zoomRef.current}
-      fitWidth={modeRef.current === 'fit-width'} labels={props.labels} visible={controlsVisible}
-      onZoom={setZoom} onFitWidth={fitWidth} onActiveChange={handleControlsActive} />}
+      fit={{ label: props.labels.fitWidth, selected: modeRef.current === 'fit-width', onSelect: fitWidth }}
+      labels={props.labels} visible={controlsVisible} onZoom={setZoom} onActiveChange={handleControlsActive} />}
   </section>
 }
 

@@ -16,9 +16,9 @@ import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, ContextFormed, Message, MessageSource } from '@deepseek-ai/dsh-llm'
-import { deriveEventMessage, SessionId } from '@deepseek-ai/dsh-session'
+import { deriveEventMessage, type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-api-terminal-controller'
@@ -29,7 +29,8 @@ import {
   launchWebScaffold, parseSeedFixture, realizeSeedFixture, recordFixture, renderSeedFixture, seedSession, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
+import { expandOwningTurnProcess, newEnglishPage, pinBrowserClock, pinHostClock, saveFailureShot, WEB_FIXTURE_TIME } from './support.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -41,6 +42,7 @@ type CheckpointSource = Extract<MessageSource, { readonly kind: 'compact-checkpo
 type CheckpointCommandId = NonNullable<CheckpointSource['sourceCommandId']>
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('../../../snapshots/web/seeded-history', import.meta.url))
+const REASONING_EXPECTED_DIR = fileURLToPath(new URL('./expected/seeded-history', import.meta.url))
 const SEED = fileURLToPath(new URL('../../../snapshots/web/seeded-history/session.v3.jsonl', import.meta.url))
 const UI_EXPECTED = fileURLToPath(new URL('../../../snapshots/web/seeded-history/ui.expected.md', import.meta.url))
 const UI_EXPANDED_EXPECTED = fileURLToPath(
@@ -228,8 +230,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
   let tripwire: ReturnType<typeof watchConsole>
   let seededThroughSeq = -1
   let openingWindow: unknown
+  let hostClock: ReturnType<typeof pinHostClock> | undefined
 
   beforeAll(async () => {
+    // Seeded and later command timestamps share the renderer's fixture day across midnight.
+    if (MODE !== 'record') hostClock = pinHostClock()
     // The POSIX terminal fixture stays off Windows; the pinned desktop applies
     // everywhere. The Open In rows carry the document header's file controls,
     // and the SSH marker keeps the application catalog empty so the
@@ -262,10 +267,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
       if (meter === undefined) throw new Error('seeded-history requires the host token meter')
       const realizedWithCompaction = withCompaction(realizeSeedFixture(scaffold, raw, SEED_ID), meter)
       seededThroughSeq = parseSeedFixture(realizedWithCompaction).events.at(-1)?.seq ?? -1
-      await seedSession(scaffold, realizedWithCompaction, SEED_ID)
+      await seedSession(scaffold, realizedWithCompaction, SEED_ID, undefined, { createdAt: WEB_FIXTURE_TIME })
     }
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
+    if (MODE !== 'record') await pinBrowserClock(page)
     tripwire = watchConsole(page)
     if (MODE !== 'record') {
       // A one-message tail makes this short recording exercise the real Load earlier path.
@@ -293,8 +299,12 @@ describe('web e2e: seeded history renders through cold resume', () => {
   }, 120_000)
 
   afterAll(async () => {
-    await browser?.close()
-    await scaffold?.close()
+    try {
+      await browser?.close()
+      await scaffold?.close()
+    } finally {
+      hostClock?.mockRestore()
+    }
   })
 
   it.skipIf(MODE !== 'record')('records the seed turn live through the composer', async () => {
@@ -316,7 +326,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     // production Session Controller against the booted real host.
     const controller = new AbortController()
     const stream = scaffold.ctx.sessionController.follow({
-      address: { kind: 'session', sessionId: SessionId(SEED_ID) },
+      address: { kind: 'session', sessionId: brandString<SessionId>(SEED_ID) },
     }, controller.signal)[Symbol.asyncIterator]()
     const first = await stream.next()
     controller.abort()
@@ -362,6 +372,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
       payload: { args: { request: { maxMessages: 500, turnWindow: { minMessages: 50, minTurns: 2 } } } },
     })
     await expect.poll(() => page.getByText(PROMPT, { exact: true }).count(), { timeout: 10_000 }).toBe(1)
+    const history = page.locator('[data-chat-history]')
+    await expect.poll(() => history.getAttribute('data-chat-history'), { timeout: 10_000 }).toBe('idle')
+    await expect.poll(() => history.getByRole('button', { name: 'Start of conversation', exact: true }).isDisabled(), {
+      timeout: 10_000,
+    }).toBe(true)
     await expect.poll(() => page.getByText('compact', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => page.getByText(/^Compacted \d+ history items \(~\d+ tokens\)$/).count(), {
       timeout: 10_000,
@@ -372,8 +387,8 @@ describe('web e2e: seeded history renders through cold resume', () => {
     const processBottom = await process.evaluate(element => element.getBoundingClientRect().bottom)
     const answerTop = await page.getByText('DONE', { exact: true }).evaluate(element =>
       element.getBoundingClientRect().top)
-    // Collapsed control row keeps its own 8px margin plus the 8px flow gap.
-    expect(answerTop).toBe(processBottom + 16)
+    // Hidden process rows separate the folded control from the answer, so it keeps the 12px reply gap.
+    expect(answerTop).toBe(processBottom + 12)
     expect(await page.getByText('Context compacted', { exact: true }).count()).toBe(0)
     // Tool cards render from logged tool/call + tool/result alone (views are
     // host-recomputed per page; the generic card is the documented default).
@@ -385,10 +400,10 @@ describe('web e2e: seeded history renders through cold resume', () => {
     expect(await page.getByText(PROMPT, { exact: true }).count()).toBe(1)
 
     await expect.poll(
-      () => scaffold.ctx.agents.get(SessionId(SEED_ID)) !== undefined,
+      () => scaffold.ctx.agents.get(brandString<SessionId>(SEED_ID)) !== undefined,
       { timeout: 10_000 },
     ).toBe(true)
-    const agent = scaffold.ctx.agents.get(SessionId(SEED_ID))
+    const agent = scaffold.ctx.agents.get(brandString<SessionId>(SEED_ID))
     if (agent === undefined) throw new Error('seeded session did not attach an agent')
     const injected = agent.session.append('user/message', createUserMessage({
       content: [{
@@ -414,7 +429,10 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await scaffold.ctx.sessions.flush(agent.session)
     expect(agent.session.snapshotEvents()).toContainEqual(injected)
     await waitForContextInClient(page, injected.seq)
-    expect(await page.locator('[data-chat-flow-kind="context"]').count()).toBe(0)
+    const contextRows = page.locator('[data-chat-flow-kind="context"]')
+    await expect.poll(() => contextRows.count()).toBe(1)
+    expect(await contextRows.getByRole('button', { name: /^Context injection/ }).getAttribute('aria-expanded')).toBe('false')
+    expect(await contextRows.locator('[data-context-injection-body]').count()).toBe(0)
   }, 60_000)
 
   it.skipIf(MODE === 'record')('matches the historical conversation aria golden', async () => {
@@ -470,15 +488,26 @@ describe('web e2e: seeded history renders through cold resume', () => {
     }
   })
 
-  it.skipIf(MODE === 'record')('omits ordinary instructions from Chat while retaining their logged content', async () => {
-    const session = scaffold.ctx.sessions.get(SessionId(SEED_ID))
+  it.skipIf(MODE === 'record')('shows ordinary instructions as one collapsed Context row that expands to their logged content', async () => {
+    const session = scaffold.ctx.sessions.get(brandString<SessionId>(SEED_ID))
     if (session === undefined) throw new Error('seeded session is unavailable')
     const instructions = session.snapshotEvents().filter(event => event.type === 'user/message'
       && event.data.source.kind === 'agent-instructions')
     expect(instructions).toHaveLength(1)
     expect(instructions[0]?.data).toMatchObject({ source: { form: 'instructions', changes: [{ path: 'AGENTS.md' }] } })
     expect(JSON.stringify(instructions[0]?.data)).toContain('Instruction 24: preserve the logged context contract.')
-    expect(await page.locator('[data-chat-flow-kind="context"], [data-context-injection-body]').count()).toBe(0)
+    const row = page.locator('[data-chat-flow-kind="context"]')
+    expect(await row.count()).toBe(1)
+    const disclosure = row.getByRole('button', { name: /^Context injection/ })
+    expect(await disclosure.getAttribute('aria-expanded')).toBe('false')
+    await disclosure.click()
+    try {
+      await expect.poll(() => row.locator('[data-context-injection-body]').textContent())
+        .toContain('Instruction 24: preserve the logged context contract.')
+    } finally {
+      await disclosure.click()
+    }
+    await expect.poll(() => row.locator('[data-context-injection-body]').count()).toBe(0)
   })
 
   it.skipIf(MODE === 'record')('restores the active turn rail mark across Chat and Trajectory', async () => {
@@ -735,7 +764,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await expect.poll(() => access.isEnabled(), { timeout: 10_000 }).toBe(true)
     const row = page.locator('[data-variant="others"]').filter({ hasText: 'preset read-only' })
     expect(await row.count()).toBe(0)
-    const agent = scaffold.ctx.agents.get(SessionId(SEED_ID))
+    const agent = scaffold.ctx.agents.get(brandString<SessionId>(SEED_ID))
     if (agent === undefined) throw new Error('seeded session did not attach an agent')
     const events = agent.session.snapshotEvents()
     const run = events.findLast(event => event.type === 'command/run' && event.data.name === 'permission')
@@ -764,7 +793,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
       await disclosure.click()
       await expect.poll(() => disclosure.getAttribute('aria-expanded')).toBe('true')
 
-      const agent = scaffold.ctx.agents.get(SessionId(SEED_ID))
+      const agent = scaffold.ctx.agents.get(brandString<SessionId>(SEED_ID))
       if (agent === undefined) throw new Error('seeded session did not attach an agent')
       const done = agent.session.snapshotEvents().filter(event => event.type === 'command/done').at(-1)
       if (done?.type !== 'command/done') throw new Error('feedback command did not settle')
@@ -788,9 +817,11 @@ describe('web e2e: seeded history renders through cold resume', () => {
     }
   }, 60_000)
 
-  it.skipIf(MODE === 'record')('keeps short injected context out of Chat without dropping the event', async () => {
-    const agent = scaffold.ctx.agents.get(SessionId(SEED_ID))
+  it.skipIf(MODE === 'record')('shows short injected context as a collapsed Context row without dropping the event', async () => {
+    const agent = scaffold.ctx.agents.get(brandString<SessionId>(SEED_ID))
     if (agent === undefined) throw new Error('seeded session did not attach an agent')
+    const contextRows = page.locator('[data-chat-flow-kind="context"]')
+    const before = await contextRows.count()
     const injected = agent.session.append('user/message', createUserMessage({
       content: [{ type: 'text', text: 'Short injected context.' }],
       source: { kind: 'fixture' },
@@ -799,8 +830,16 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await scaffold.ctx.sessions.flush(agent.session)
     expect(agent.session.snapshotEvents()).toContainEqual(injected)
     await waitForContextInClient(page, injected.seq)
-    expect(await page.locator('[data-chat-flow-kind="context"]').count()).toBe(0)
-    expect(await page.getByText('Short injected context.', { exact: true }).count()).toBe(0)
+    await expect.poll(() => contextRows.count()).toBe(before + 1)
+    const row = contextRows.last()
+    const disclosure = row.getByRole('button', { name: /^Context injection/ })
+    expect(await disclosure.getAttribute('aria-expanded')).toBe('false')
+    await disclosure.click()
+    try {
+      await expect.poll(() => row.locator('[data-context-injection-body]').getByText('Short injected context.', { exact: true }).count()).toBe(1)
+    } finally {
+      await disclosure.click()
+    }
   })
 
   it.skipIf(MODE === 'record')('restores the recorded file preview in its original tab after page reload', async () => {
@@ -825,7 +864,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-seeded-terminal-unavailable'))
     await page.locator('[data-dockkit-add-tab]').click()
     await page.locator('[data-sidebar-right-guide-entry="terminal"]').getByRole('button', { name: /^New terminal/u }).click()
-    const sessionId = SessionId(SEED_ID)
+    const sessionId = brandString<SessionId>(SEED_ID)
     const terminals = () => scaffold.ctx.terminalController.list(sessionId)
     await expect.poll(() => terminals().length).toBe(1)
     const previous = terminals()[0]!.id
@@ -844,7 +883,65 @@ describe('web e2e: seeded history renders through cold resume', () => {
     await expect.poll(() => terminals().length).toBe(1)
     expect(terminals()[0]!.id).not.toBe(previous)
     await terminal.getByRole('status').waitFor({ state: 'hidden' })
-    await terminal.getByRole('textbox', { name: 'Terminal', exact: true }).waitFor()
+    await terminal.locator('.xterm-screen').waitFor({ state: 'visible' })
+    // xterm's input proxy can remain zero-sized until its cursor moves.
+    await terminal.getByRole('textbox', { name: 'Terminal', exact: true }).waitFor({ state: 'attached' })
+  })
+
+  it.skipIf(MODE === 'record')('omits blank reasoning rows around recorded text in an appended fixture turn', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-seeded-blank-reasoning'))
+    const session = scaffold.ctx.sessions.get(brandString<SessionId>(SEED_ID))
+    if (session === undefined) throw new Error('seeded session is unavailable')
+    const events = session.snapshotEvents()
+    const recorded = events.flatMap(event => event.type === 'assistant/message' ? event.data.message.content : [])
+      .find(block => block.type === 'reasoning' && block.text.trim() !== '')
+    if (recorded?.type !== 'reasoning') throw new Error('seeded history requires recorded reasoning text')
+    const previousEnd = events.findLast(event => event.type === 'turn/end')
+    if (previousEnd?.type !== 'turn/end') throw new Error('seeded history requires a closed turn')
+    const turn = previousEnd.data.turn + 1
+    const answer = 'BLANK_REASONING_FIXTURE_DONE'
+    // The blank blocks are a test condition around authentic recorded text, not model output.
+    session.append('turn/start', { turn })
+    session.append('step/start', { turn, step: 1 })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Show recorded reasoning surrounded by blank blocks.' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const message = session.append('assistant/message', {
+      turn, step: 1, stream: [],
+      message: createMessage({
+        role: 'assistant',
+        source: { kind: 'model', provider: 'fixture', model: 'fixture' },
+        content: [
+          { type: 'reasoning', text: '' },
+          { type: 'reasoning', text: recorded.text },
+          { type: 'reasoning', text: ' \t\r\n' },
+          { type: 'reasoning', text: '' },
+          { type: 'text', text: answer },
+        ],
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn, step: 1 })
+    session.append('turn/end', { turn, reason: { kind: 'completed' } })
+    await scaffold.ctx.sessions.flush(session)
+    await page.getByText(answer, { exact: true }).waitFor({ timeout: 10_000 })
+    const selector = `[data-chat-turn="${turn}"][data-chat-group-part="reasoning"]`
+    const rows = page.locator(selector).locator('[data-variant="think"]')
+    await expect.poll(() => rows.count(), { timeout: 10_000 }).toBe(1)
+    await expandOwningTurnProcess(page, rows.first())
+    const toggle = rows.getByRole('button').first()
+    expect(await toggle.getAttribute('aria-expanded')).toBe('false')
+    await toggle.click()
+    await expect.poll(() => toggle.getAttribute('aria-expanded')).toBe('true')
+    const body = rows.locator('[data-markdown-variant="compact"]')
+    await body.waitFor({ state: 'visible' })
+    expect(await body.innerText()).not.toBe('')
+    expect(message.data.message.content[1]).toEqual({ type: 'reasoning', text: recorded.text })
+    await compareOrRefreshGolden(join(REASONING_EXPECTED_DIR, 'blank-reasoning.expected.md'), [
+      await captureStableAria(page, selector, scaffold.workspaceCwd),
+      '',
+      `- Reasoning rows: ${await rows.count()}`,
+    ].join('\n'), MODE)
   })
 
   it.skipIf(MODE === 'record')('issued zero model calls and stayed clean', async () => {
@@ -852,6 +949,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
     // stream would have failed the turn loudly. Cleanliness pins the wire.
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
+    await assertFixtureInventory(REASONING_EXPECTED_DIR, ['blank-reasoning.expected.md'])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'command-row.expected.md', 'feedback-row.expected.md', 'file-preview.expected.md',
       'session.v3.jsonl', 'sticky-geometry.expected.md', 'thinking-expanded.expected.md',

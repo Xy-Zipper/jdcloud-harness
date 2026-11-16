@@ -1,5 +1,5 @@
 /**
- * Client-safe complete-descendant rows and browser continuation requests,
+ * Client-safe recursive catalog rows and browser continuation requests,
  * receipts, and failures.
  *
  * @module @deepseek-ai/dsh-subagent/control-types
@@ -7,8 +7,9 @@
 
 import type { PromptContentPart } from '@deepseek-ai/dsh-attachment/types'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { MessageId } from '@deepseek-ai/dsh-llm/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { KnownSubagentCatalogFields } from './projection-types.ts'
 // Type-only: the Workspace registry's archive-admission family map this runtime merges `subagent` into.
 import type {} from '@deepseek-ai/dsh-workspace/types'
 
@@ -21,39 +22,27 @@ import type {} from '@deepseek-ai/dsh-workspace/types'
  */
 export type SubagentPromptRequestId = Branded<'session-request-id'>
 
-/** Shared child fields for complete-descendant listing. */
+/** Shared child fields for recursive catalog listing. */
 export type SubagentCatalogRow =
   & {
     /** The durable child session id, stable across Activations. */
     readonly id: SessionId
     /**
-     * Whether complete-descendant listing observed a resident Session. This
+     * Whether recursive catalog listing observed a resident Session. This
      * does not encode a durable outcome or guarantee continuation delivery.
      */
     readonly activity: 'running' | 'inactive'
-  } & (
-    | {
-      /** A terminal one-shot child. */
-      readonly mode: 'one-shot'
-      /** Optional durable creation label from the owning catalog or child descriptor. */
-      readonly label?: string
-    }
-    | {
-      /** A resumable conversation. */
-      readonly mode: 'continuable'
-      /** Durable creation label from the owning catalog or child descriptor. */
-      readonly label: string
-    }
-  )
+  }
+  & KnownSubagentCatalogFields
 
 /**
- * One complete-descendant row. Enumeration may also return diagnostics for
- * child identity observations from the complete Session corpus.
+ * One recursive catalog row. Traversal may also return diagnostics for
+ * unknown catalog modes or unreadable child catalogs.
  */
 export type SubagentListEntry =
   | SubagentCatalogRow & {
     readonly kind: 'child'
-    /** Whether complete-corpus enumeration observed a direct child. */
+    /** Whether the child catalog contains a direct child. */
     readonly hasChildren: boolean
   }
   | {
@@ -61,14 +50,10 @@ export type SubagentListEntry =
     /** The candidate's session id. */
     readonly id: SessionId
     /**
-     * Why the candidate has no `child` row: `corrupt` for a settled candidate
-     * whose projection fold served no identity (a missing, malformed, or
-     * unrecognized-version descriptor — deliberately undistinguished), and
-     * for any candidate whose log makes a registered unit's fold or schema
-     * throw (deterministic data damage, contained per child); `unavailable`
-     * when the candidate's Session observation was absent or transiently
-     * unreadable (retried on the next listing). `unsupported` is never produced; it remains in the
-     * union for consumers that route on it.
+     * `corrupt` means the child catalog read found invalid or conflicting
+     * Session data; `unavailable` means it could not be read. Either failure
+     * stops that branch. `unsupported` means the parent catalog records an
+     * unknown child mode; its readable catalog is still traversed.
      */
     readonly reason: 'corrupt' | 'unsupported' | 'unavailable'
   }
@@ -85,16 +70,16 @@ export type SubagentAddress =
     | { readonly mode: 'unknown' }
   )
 
-/** One human message addressed to a continuable direct child. */
+/** One Agent inbox destination for a continuation message. */
+export type SubagentDelivery = 'queue' | 'steer'
+
+/** One human message addressed to a continuable subagent. */
 export interface SubagentPromptRequest {
   /** Identity persisted on the accepted message, minted before the call. */
   readonly requestId: SubagentPromptRequestId
-  readonly parentSessionId: SessionId
   readonly childSessionId: SessionId
-  /** Required discriminator retained from the browser control address. */
-  readonly mode: 'continuable'
   /** Whether this message queues a later turn or targets the nearest step. */
-  readonly delivery: 'queue' | 'steer'
+  readonly delivery: SubagentDelivery
   /**
    * Browser prompt parts delivered as the child's user message. The Host
    * admits and persists image parts before delivery, so the wire never
@@ -130,11 +115,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
     /** A browser-supplied zone is neither UTC nor a canonical IANA name. */
     'subagent/invalid-time-zone': { readonly value: string }
-    /** No live Agent carries the addressed parent session. */
-    'subagent/parent-unavailable': { readonly parentSessionId: SessionId }
     /** The addressed child cannot take a continuation. */
     'subagent/not-resumable': { readonly childSessionId: SessionId }
-    /** The claimed parent does not own the addressed child. */
+    /** The supplied address or live subagent-tree identity could not be verified. */
     'subagent/unauthorized': { readonly childSessionId: SessionId }
     /** Image admission or model image-capability refusal. */
     'subagent/attachment-invalid': { readonly reason: string }

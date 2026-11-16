@@ -50,7 +50,7 @@ type ApprovalPolicy = 'ask' | 'never'
 
 ## 审批请求
 
-`ApprovalRequest` 以足够精确的方式标识 agent 和工具操作，以便路由和审计该问题。它有意省略工具参数：应答者通过 `callId` 将提示附加到已流式输出的工具调用上，而非渲染另一份可能漂移的副本。
+`ApprovalRequest` 以足够精确的方式标识 agent 和工具操作，以便路由和审计该问题。它有意省略工具参数：应答者通过 `callId` 将提示附加到已流式输出的工具调用上，而非渲染另一份可能漂移的副本。可选的 `displayReason` 向界面传递请求方提供的本地化字符串；`reason` 仍是审计文本。
 
 ```ts type-equiv
 /**
@@ -132,7 +132,7 @@ setPolicy(agent: Agent, policy: ApprovalPolicy): void
 async request(req: ApprovalRequest): Promise<ApprovalOutcome>
 
 /**
- * The session's effective policy: its own `approval/policy` fold, else the
+ * The session's effective policy: its projected override, else the
  * configured default (the schema already defaulted an omitted policy to
  * `'ask'`; the `??` only narrows the optional-input TYPE).
  * @param session - the exact accepted session whose policy applies.

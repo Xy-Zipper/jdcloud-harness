@@ -2,7 +2,7 @@
  * Suggest the next build version for a product version, so the sequence number
  * is derived rather than remembered.
  *
- * `apps/desktop/README.md` gives the form as `<product version>.<date>.<index>`
+ * `apps/desktop/packaging/README.md#release-versions` gives the form as `<product version>.<date>.<index>`
  * for a prerelease base and `<product version>-test.<date>.<index>` for a
  * stable one. What makes an index correct is which ones are taken, and that is
  * recorded where the builds went: the update bucket for an uploaded build, the
@@ -20,8 +20,8 @@
 import { readdir } from 'node:fs/promises'
 import { parse } from 'semver'
 import { desktopBuildVersionPrefix, validateDesktopBuildVersion } from './desktop-build-version.mjs'
-import { DESKTOP_AUTO_UPDATE_ENV, resolveDesktopUploadConfig } from './desktop-auto-update-environment.mjs'
-import { createDesktopCos, DESKTOP_COS_REGION } from './desktop-cos.ts'
+import { DESKTOP_AUTO_UPDATE_ENV, resolveDesktopUploadConfig } from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
+import { createDesktopCos, DESKTOP_COS_REGION } from '@deepseek-ai/dsh-desktop-publisher/desktop-cos.ts'
 import type { DesktopPackageTargetName } from './package-target.ts'
 
 /** How long the whole bucket listing may take before the suggestion falls back to local artifacts. */
@@ -30,8 +30,8 @@ const LISTING_DEADLINE_MS = 8_000
 /** Objects one listing page may return. */
 const LISTING_PAGE_SIZE = 1000
 
-/** Artifact name electron-builder writes for one build, on either platform; unsigned Windows builds add a suffix. */
-const ARTIFACT = /(?:^|\/)deepseek-harness-(?<version>.+)-(?:mac|win)-(?:arm64|x64)(?:-unsigned)?\.(?:exe|dmg|zip)$/u
+/** Artifact name electron-builder writes for one build, on either platform; unsigned and unnotarized builds add a suffix. */
+const ARTIFACT = /(?:^|\/)deepseek-harness-(?<version>.+)-(?:mac|win)-(?:arm64|x64)(?:-unsigned|-unnotarized)?\.(?:exe|dmg|zip)$/u
 
 /** Inputs that decide which versions are already taken. */
 export interface DesktopBuildVersionSuggestionOptions {

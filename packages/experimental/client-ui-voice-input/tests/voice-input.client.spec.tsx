@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 /** Click capture preserves draft edits and Session ownership without composer banners. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { bindSnapshotSelector, makeTranslate, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { SpeechProviderId, Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
+import type { SpeechPreparationState, SpeechProviderId, Transcript } from '@deepseek-ai/dsh-experimental-speech-to-text/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { VoiceInput, type VoiceInputProps } from '../src/client/VoiceInput.tsx'
 import { RecordingError, Recording } from '../src/client/audio.ts'
@@ -18,11 +18,13 @@ beforeEach(() => { vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.st
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 const id = 'sensevoice-local' as SpeechProviderId
 const transcript: Transcript = { text: '检查 TypeScript 类型', audioSeconds: 2, inferenceSeconds: 0.4 }
-function fixture(recording?: Recording) {
+function fixture(recording?: Recording, navigable = true) {
   const capture = Object.assign(new Recording(() => {}), { start: vi.fn<Recording['start']>(async () => {}), stop: vi.fn(async () => new Uint8Array(48)),
     amplitude: () => 0, dispose: vi.fn(async () => {}) })
-  const inputActions = { notify: vi.fn(), captureInsertion: vi.fn(() => ({ start: 3, end: 3, draftRev: 1 })), insertText: vi.fn(() => true),
-    setDraft: vi.fn(), addAttachments: vi.fn(() => true), removeAttachment: vi.fn(), pruneAttachments: vi.fn(), submit: vi.fn() }
+  const inputActions = { notify: vi.fn(), insertQuote: () => false,
+    captureInsertion: vi.fn(() => ({ start: 3, end: 3, draftRev: 1 })), insertText: vi.fn(() => true),
+    setDraft: vi.fn(), persistDraft: vi.fn(), addAttachments: vi.fn(() => true), removeAttachment: vi.fn(),
+    pruneAttachments: vi.fn(), submit: vi.fn() }
   const readiness = createSnapshotStore<SpeechReadiness>({ connected: true, error: null, catalog: {
     providers: [{ id, name: 'SenseVoiceSmall', location: 'host-local', languages: ['auto', 'zh', 'en', 'ja'], preparation: { phase: 'ready' } }],
     selection: { providerId: id, language: 'auto' }, maxAudioBytes: 100, maxDurationSeconds: 120,
@@ -30,8 +32,10 @@ function fixture(recording?: Recording) {
   const transcribe = vi.fn<(request: unknown, signal: AbortSignal) => Promise<RemoteResult<Transcript>>>(
     async () => ({ ok: true, value: transcript }))
   const props: VoiceInputProps = { sessionId: 'one' as SessionId, inputActions, transcribe, locked: false, onActiveChange: vi.fn(),
-    prepare: vi.fn(async () => {}), cancelPreparation: vi.fn(async () => {}), configure: vi.fn(async () => {}),
+    openSettings: vi.fn(), prepare: vi.fn(async () => {}), cancelPreparation: vi.fn(async () => {}), configure: vi.fn(async () => {}),
+    selectMicrophone: vi.fn(), useMicrophoneDevice: bindSnapshotSelector(createSnapshotStore({ id: '', label: '' })),
     useSpeechReadiness: bindSnapshotSelector(readiness), createRecording: () => recording ?? capture,
+    usePluginNavigation: bindSnapshotSelector(createSnapshotStore(navigable)),
     t: makeTranslate(zh, commonZh) }
   const view = render(<VoiceInput {...props} />)
   return { props, capture, inputActions, readiness, transcribe, view }
@@ -44,8 +48,8 @@ function stop(): void { fireEvent.click(screen.getByRole('button', { name: zh.st
 
 it('clicks to record, shows measured audio, and stops to insert without sending or a popup', async () => {
   const b = fixture()
-  fireEvent.mouseEnter(screen.getByRole('button', { name: zh.start }).parentElement!)
-  expect(screen.getByRole('tooltip').textContent).toBe('听写')
+  fireEvent.pointerEnter(screen.getByRole('button', { name: zh.start }).parentElement!)
+  expect((await screen.findByRole('tooltip')).textContent).toBe('听写')
   fireEvent.mouseDown(screen.getByRole('button', { name: zh.start }))
   await start()
   expect(b.props.onActiveChange).toHaveBeenLastCalledWith(true)
@@ -155,7 +159,7 @@ it.each([new RecordingError('empty'), new Error('decode failed'), 'decode failed
 it('bounds recordings, indicates idle wake-up, and cancels an in-flight transcription', async () => {
   const b = fixture(), result = Promise.withResolvers<RemoteResult<Transcript>>()
   b.transcribe.mockReturnValueOnce(result.promise)
-  vi.useFakeTimers()
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   fireEvent.click(screen.getByRole('button', { name: zh.start })); await act(async () => {})
   await act(async () => { await vi.advanceTimersByTimeAsync(120000) })
   expect(b.capture.stop).toHaveBeenCalledWith(120)
@@ -172,15 +176,18 @@ it('bounds recordings, indicates idle wake-up, and cancels an in-flight transcri
   expect(b.inputActions.insertText).not.toHaveBeenCalled()
 })
 
-it('rejects excessive audio and disables unavailable or locked recognition', async () => {
+it('rejects excessive audio and keeps locked recognition disabled', async () => {
   const b = fixture(); b.capture.stop.mockResolvedValueOnce(new Uint8Array(101))
   await start(); stop(); await screen.findByText(zh.tooLarge)
   expect(b.transcribe).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: zh.cancel }))
   act(() => { b.readiness.set({ catalog: null, connected: false, error: null }) })
-  expect(screen.getByRole<HTMLButtonElement>('button', { name: zh.start }).disabled).toBe(true)
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: zh['setupPrompt.trigger'] }).disabled).toBe(false)
   b.view.rerender(<VoiceInput {...b.props} locked />)
-  fireEvent.click(screen.getByRole('button', { name: zh.start }))
+  const locked = screen.getByRole<HTMLButtonElement>('button', { name: zh['setupPrompt.trigger'] })
+  expect(locked.disabled).toBe(true)
+  fireEvent.click(locked)
+  expect(screen.queryByRole('dialog')).toBeNull()
   expect(b.capture.start).toHaveBeenCalledOnce()
 })
 
@@ -291,13 +298,101 @@ it.each(['escape', 'hidden', 'session'])('discards pending permission after %s',
   expect(b.transcribe).not.toHaveBeenCalled()
 })
 
-it('explains preparation on hover even when the microphone is disabled', () => {
+it('offers installation on click without a preparation tooltip', () => {
   const b = fixture(), state = b.readiness.getSnapshot()
   act(() => { b.readiness.set({ ...state, catalog: { ...state.catalog!, providers: [
     { ...state.catalog!.providers[0]!, preparation: { phase: 'unprepared' } },
   ] } }) })
-  const mic = screen.getByRole<HTMLButtonElement>('button', { name: zh.start })
-  expect(mic.disabled).toBe(true)
-  fireEvent.mouseEnter(mic.parentElement!)
-  expect(screen.getByRole('tooltip').textContent).toBe(zh.prepareRequired)
+  const mic = screen.getByRole<HTMLButtonElement>('button', { name: zh['setupPrompt.trigger'] })
+  expect(mic.disabled).toBe(false)
+  expect(mic.getAttribute('aria-haspopup')).toBe('dialog')
+  fireEvent.pointerEnter(mic.parentElement!)
+  expect(screen.queryByRole('tooltip')).toBeNull()
+  fireEvent.click(mic)
+  expect(screen.getByRole('dialog').textContent).toContain(zh['setupPrompt.body'])
+  expect(b.capture.start).not.toHaveBeenCalled()
+  expect(b.props.prepare).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: zh['setupPrompt.open'] }))
+  expect(b.props.openSettings).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it.each<SpeechPreparationState>([
+  { phase: 'checking', step: 'check', startedAt: 0 },
+  { phase: 'downloading', resource: 'model', completedBytes: 0 },
+  { phase: 'failed', message: 'download failed' },
+  { phase: 'cancelled' },
+])('guides $phase recognition to its status page without starting recording or preparation', (preparation) => {
+  const b = fixture(), state = b.readiness.getSnapshot()
+  act(() => { b.readiness.set({ ...state, catalog: { ...state.catalog!, providers: [
+    { ...state.catalog!.providers[0]!, preparation },
+  ] } }) })
+  fireEvent.click(screen.getByRole('button', { name: zh['setupPrompt.trigger'] }))
+  expect(screen.getByRole('dialog').textContent).toContain(zh['setupPrompt.unavailableBody'])
+  expect(screen.queryByText(zh['setupPrompt.body'])).toBeNull()
+  expect(b.capture.start).not.toHaveBeenCalled()
+  expect(b.props.prepare).not.toHaveBeenCalled()
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: zh['setupPrompt.details'] }))
+  expect(b.props.openSettings).toHaveBeenCalledOnce()
+})
+
+it('offers no plugin details from setup guidance while the Plugins page navigation is absent', () => {
+  const b = fixture(undefined, false), state = b.readiness.getSnapshot()
+  act(() => { b.readiness.set({ ...state, catalog: { ...state.catalog!, providers: [
+    { ...state.catalog!.providers[0]!, preparation: { phase: 'unprepared' } },
+  ] } }) })
+  fireEvent.click(screen.getByRole('button', { name: zh['setupPrompt.trigger'] }))
+  const dialog = within(screen.getByRole('dialog'))
+  expect(dialog.queryByRole('button', { name: zh['setupPrompt.open'] })).toBeNull()
+  expect(dialog.getByRole('button', { name: zh['setupPrompt.later'] })).toBeTruthy()
+  expect(b.props.openSettings).not.toHaveBeenCalled()
+})
+
+it('moves focus into setup guidance, contains Tab traversal, and restores the draft focus on dismissal', () => {
+  const b = fixture()
+  render(<textarea aria-label="draft" defaultValue="Keep this draft" />)
+  const draft = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'draft' })
+  act(() => { b.readiness.set({ catalog: null, connected: false, error: 'offline' }) })
+  draft.focus()
+  const mic = screen.getByRole('button', { name: zh['setupPrompt.trigger'] })
+  fireEvent.mouseDown(mic)
+  fireEvent.click(mic)
+  const dialog = screen.getByRole('dialog')
+  const details = within(dialog).getByRole('button', { name: zh['setupPrompt.details'] })
+  const close = within(dialog).getByRole('button', { name: zh.cancel })
+  expect(document.activeElement).toBe(details)
+  fireEvent.keyDown(details, { key: 'Tab' })
+  expect(document.activeElement).toBe(close)
+  fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+  expect(document.activeElement).toBe(details)
+  fireEvent.keyDown(details, { key: 'Escape' })
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(draft)
+  expect(draft.value).toBe('Keep this draft')
+  expect(b.inputActions.submit).not.toHaveBeenCalled()
+  expect(b.props.openSettings).not.toHaveBeenCalled()
+})
+
+it.each(['later', 'escape', 'ready', 'session'])('dismisses unavailable recognition guidance on %s without changing the draft', (reason) => {
+  const b = fixture(), ready = b.readiness.getSnapshot()
+  act(() => { b.readiness.set({ catalog: null, connected: false, error: 'offline' }) })
+  const open = () => { fireEvent.click(screen.getByRole('button', { name: zh['setupPrompt.trigger'] })) }
+  open()
+  expect(screen.getByRole('dialog').textContent).toContain(zh['setupPrompt.unavailableTitle'])
+  if (reason === 'later') fireEvent.click(screen.getByRole('button', { name: zh['setupPrompt.later'] }))
+  if (reason === 'escape') fireEvent.keyDown(document, { key: 'Escape' })
+  if (reason === 'ready') act(() => { b.readiness.set(ready) })
+  if (reason === 'session') b.view.rerender(<VoiceInput {...b.props} sessionId={'two' as SessionId} />)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(b.props.openSettings).not.toHaveBeenCalled()
+  expect(b.capture.start).not.toHaveBeenCalled()
+  expect(b.inputActions.setDraft).not.toHaveBeenCalled()
+  expect(b.inputActions.insertText).not.toHaveBeenCalled()
+  if (reason === 'ready') {
+    act(() => { b.readiness.set({ ...ready, connected: false }) })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  } else {
+    open()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+  }
 })

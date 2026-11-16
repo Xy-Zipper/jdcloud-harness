@@ -27,6 +27,7 @@ import { unzipSync } from 'fflate'
 
 export const name = 'external-api'
 export const inject = [
+  'connection',
   'sessionController',
   'sessionSkillCatalog',
   'webServer',
@@ -90,10 +91,12 @@ function register(ctx: Context, path: string): void {
   const route: WebRoute = {
     kind: 'exact',
     path,
+    auth: 'anonymous',
     handler: (request, response) => bridgeFetchRequest(
       request,
       response,
       fetchHandler,
+      ctx.connection.browserPeer,
       MAX_REQUEST_BODY_BYTES,
     ),
   }

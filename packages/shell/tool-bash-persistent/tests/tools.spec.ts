@@ -1,7 +1,11 @@
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { unsupportedModel, provideWorkingDirectoryFixture, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SESSION_FORMAT_VERSION, Session, type SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
@@ -18,7 +22,7 @@ import type {
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as ToolBashPersistent from '@deepseek-ai/dsh-tool-bash-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 const contexts: Context[] = []
 let callNumber = 0
@@ -29,7 +33,7 @@ afterEach(async () => {
 })
 
 async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
-  const id = SessionId(`persistent-bash-owner-${callNumber}`)
+  const id = brandString<SessionId>(`persistent-bash-owner-${callNumber}`)
   const scope = ctx.plugin(() => {})
   const session = Session.create(id, [], {
     version: SESSION_FORMAT_VERSION,
@@ -42,6 +46,7 @@ async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
     id,
     options: {},
     session,
+    model: unsupportedModel(),
     inbox: unsupportedInbox(),
     status: 'idle',
     ctx: scope.ctx,
@@ -67,9 +72,9 @@ function call(
   command: string,
   signal = new AbortController().signal,
 ) {
-  return ctx.tools.execute({
+  return executeToolFixture(ctx, {
     signal,
-    callId: ToolCallId(`persistent-bash-${++callNumber}`),
+    callId: brandString<ToolCallId>(`persistent-bash-${++callNumber}`),
     name: 'bash',
     arguments: { command },
     ...owner === undefined ? {} : { agent: owner },
@@ -114,6 +119,7 @@ class StubPtySession implements TerminalBackendSession {
   pendingText = ''
   historyTruncated = false
   throwOnSend = false
+  largeOutput = 'x'.repeat(100)
 
   constructor(mode: StubMode) {
     this.mode = mode
@@ -206,7 +212,7 @@ class StubPtySession implements TerminalBackendSession {
       return this.operation(Promise.resolve(this.result(output, 'stdin_read')))
     }
     const commandOutput = this.mode === 'large'
-      ? 'x'.repeat(100)
+      ? this.largeOutput
       : this.mode === 'nonzero' ? '' : 'hello from stub'
     const exitCode = this.mode === 'nonzero' ? 7 : 0
     const output = `${start ?? ''}\n${commandOutput}\n${end ?? ''}${exitCode}\n${this.motd}`
@@ -302,9 +308,12 @@ async function setup(
   initialMode: StubMode = 'normal',
 ) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   contexts.push(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(TerminalSessionService)
   const stub = stubBackend(initialMode)
@@ -402,6 +411,20 @@ describe('tool-bash-persistent', () => {
     await ctx.terminals.kill(owner, externallyClosed!, 'external cleanup')
     await fiber.dispose()
     expect(stub.sessions[2]?.closed).toEqual(['external cleanup'])
+  })
+
+  it('clips a split surrogate pair instead of leaving a lone half', async () => {
+    const { ctx, owner, stub } = await setup({ backendType: 'stub', maxOutputChars: 10 })
+    await call(ctx, owner, 'warm up')
+    const session = stub.sessions[0]!
+    session.mode = 'large'
+    // The tenth code unit is the emoji's high surrogate.
+    session.largeOutput = `${'x'.repeat(9)}😀tail`
+
+    const rendered = text(await call(ctx, owner, 'emoji'))
+
+    expect(rendered.startsWith(`${'x'.repeat(9)}<response clipped>`)).toBe(true)
+    expect(rendered).not.toContain('\uD83D')
   })
 
   it('waits for status digits after a torn completion marker', async () => {
@@ -672,7 +695,10 @@ describe('tool-bash-persistent', () => {
     'fails initialization and closes the unusable shell for %s',
     async (mode) => {
       const { ctx, owner, stub } = await setup({ backendType: 'stub' }, mode)
-      expect((await call(ctx, owner, 'pwd')).isError).toBe(true)
+      expect(await call(ctx, owner, 'pwd')).toMatchObject({
+        isError: true,
+        error: { info: { name: 'TerminalError', code: 'INIT_REJECTED' } },
+      })
       expect(stub.sessions[0]?.closed).toContain('persistent bash initialization failed')
     },
   )
@@ -695,9 +721,12 @@ describe('tool-bash-persistent', () => {
 
   it('cancels and awaits a pending shell spawn when the plugin is disposed', async () => {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     contexts.push(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(TerminalSessionService)
     const spawnStarted = Promise.withResolvers<undefined>()
@@ -727,8 +756,13 @@ describe('tool-bash-persistent', () => {
 
   it('rejects invalid config and invalid calls', async () => {
     const { ctx, owner, stub } = await setup()
-    expect((await call(ctx, undefined, 'pwd')).isError).toBe(true)
-    expect(text(await call(ctx, owner, ' '))).toContain('command must be a non-empty string')
+    expect(await call(ctx, undefined, 'pwd')).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ToolContextUnavailableError', code: 'TOOL_CONTEXT_UNAVAILABLE' } },
+    })
+    const blank = await call(ctx, owner, ' ')
+    expect(text(blank)).toContain('command must be a non-empty string')
+    expect(blank).toMatchObject({ isError: true, error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
 
     const controller = new AbortController()
     controller.abort(new Error('caller stopped'))

@@ -1,15 +1,19 @@
 /** Tool-category and live-detail interpretation owned by Chat grouping. */
-import type { ProcessActivity, ProcessActivitySummary } from '../contract/process-groups.ts'
+import { reasoningText } from '../reasoning-text.ts'
+import type { ToolArgs } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { ProcessActivity, ProcessActivitySummary, RunningProcessActivity } from '../contract/process-groups.ts'
 import type { ChatNode } from '../contract/chat-nodes.ts'
 import { isRunningTool } from '../contract/chat-nodes.ts'
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 
-function activity(name: string): ProcessActivity {
-  if (['read', 'read_image', 'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource'].includes(name)) return 'read'
+function activity(name: string): RunningProcessActivity {
+  if (name === 'read') return 'read'
+  if (name === 'read_image') return 'readImage'
   if (name === 'grep' || name === 'glob' || name.endsWith('_inspect')) return 'search'
-  if (['write', 'edit', 'apply_patch'].includes(name)) return 'edit'
+  if (name === 'write') return 'write'
+  if (name === 'edit' || name === 'apply_patch') return 'edit'
   if (['bash', 'pwsh', 'exec_command', 'write_stdin'].includes(name) || name.startsWith('terminal_')) return 'commands'
-  if (name === 'run_code') return 'code'
+  if (name === 'run_code' || name === 'cua_run_code') return 'code'
   if (name === 'web_search') return 'webSearch'
   if (name === 'web_fetch') return 'webFetch'
   if (name === 'subagent' || name.startsWith('subagent_')) return 'subagents'
@@ -19,11 +23,33 @@ function activity(name: string): ProcessActivity {
 }
 
 const LIVE_TOOL_DETAIL_MAX_CHARS = 160
+const LIVE_TOOL_DETAIL_PREFIX_CHARS = 512
 const LIVE_TOOL_DETAIL_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 const LIVE_TOOL_DETAIL_KEYS = [
   'title', 'description', 'objective', 'task', 'task_name', 'name', 'question', 'questions', 'prompt', 'message',
   'command', 'cmd', 'queries', 'query', 'pattern', 'url', 'uri', 'file_path', 'path', 'target', 'action', 'status',
 ] as const
+
+interface NormalizedDetail {
+  readonly text: string
+  readonly truncated: boolean
+}
+
+function normalizeLiveToolText(text: string): NormalizedDetail {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= LIVE_TOOL_DETAIL_MAX_CHARS) return { text: normalized, truncated: false }
+  const chars: string[] = []
+  for (const { segment } of LIVE_TOOL_DETAIL_SEGMENTER.segment(normalized)) {
+    if (chars.length === LIVE_TOOL_DETAIL_MAX_CHARS) {
+      return {
+        text: `${chars.slice(0, LIVE_TOOL_DETAIL_MAX_CHARS - 1).join('').trimEnd()}…`,
+        truncated: true,
+      }
+    }
+    chars.push(segment)
+  }
+  return { text: normalized, truncated: false }
+}
 
 function normalizeLiveToolDetail(value: unknown): string {
   const text = typeof value === 'string'
@@ -31,11 +57,30 @@ function normalizeLiveToolDetail(value: unknown): string {
     : Array.isArray(value) && value.every(item => typeof item === 'string')
       ? value.join(', ')
       : ''
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  const chars = Array.from(LIVE_TOOL_DETAIL_SEGMENTER.segment(normalized), part => part.segment)
-  return chars.length <= LIVE_TOOL_DETAIL_MAX_CHARS
-    ? normalized
-    : `${chars.slice(0, LIVE_TOOL_DETAIL_MAX_CHARS - 1).join('').trimEnd()}…`
+  return normalizeLiveToolText(text).text
+}
+
+function argumentTextDetail(args: ToolArgs, key: string): string | undefined {
+  let limit = LIVE_TOOL_DETAIL_PREFIX_CHARS
+  while (true) {
+    let prefix = args.textPrefix(key, limit)
+    if (prefix === undefined) return undefined
+    const last = prefix.charCodeAt(prefix.length - 1)
+    if (last >= 0xd800 && last <= 0xdbff) {
+      // The extra prefix read also observes a low surrogate arriving in a later delta.
+      const extended = args.textPrefix(key, limit + 1) as string
+      const next = extended.charCodeAt(prefix.length)
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        prefix = extended
+        limit++
+      } else if (extended.length === prefix.length && !args.isSealed && !args.complete(key)) {
+        prefix = prefix.slice(0, -1)
+      }
+    }
+    const detail = normalizeLiveToolText(prefix)
+    if (detail.truncated || !args.stringExceeds(key, limit)) return detail.text
+    limit *= 2
+  }
 }
 
 function questionDetail(value: unknown): string {
@@ -55,7 +100,7 @@ function liveReasoningDetail(nodes: readonly ChatNode[]): string {
     for (let blockIndex = node.data.blocks.length - 1; blockIndex >= 0; blockIndex--) {
       const block = node.data.blocks[blockIndex]
       if (block?.kind !== 'reasoning') continue
-      const paragraphs = block.text.split(/\r?\n[\t ]*\r?\n/)
+      const paragraphs = reasoningText(block.text).split(/\r?\n[\t ]*\r?\n/)
       for (let paragraphIndex = paragraphs.length - 1; paragraphIndex >= 0; paragraphIndex--) {
         const detail = normalizeLiveToolDetail(paragraphs[paragraphIndex]?.replaceAll('**', ''))
         if (detail !== '') return detail
@@ -65,36 +110,36 @@ function liveReasoningDetail(nodes: readonly ChatNode[]): string {
   return ''
 }
 
-function liveToolDetail(name: string, argsRaw: string): string {
-  let args: unknown
-  try {
-    args = JSON.parse(argsRaw)
-  } catch (_error: unknown) {
-    // Partial or free-form arguments have no safe one-line task detail.
-    return normalizeLiveToolDetail(name)
-  }
-  if (args === null || typeof args !== 'object') return normalizeLiveToolDetail(name)
+/**
+ * One-line task detail from the argument view, read the same way while the
+ * arguments stream and after dispatch: the first detail key present with text
+ * so far or a closed value. Without one, the tool name stands in once no further
+ * field can arrive; a field still to come is not named early.
+ */
+function liveToolDetail(name: string, args: ToolArgs): string {
   for (const key of LIVE_TOOL_DETAIL_KEYS) {
-    if (key in args) {
-      const value: unknown = Reflect.get(args, key)
-      const detail = key === 'questions' ? questionDetail(value) : normalizeLiveToolDetail(value)
-      if (detail !== '') return detail
-    }
+    if (!args.has(key)) continue
+    const detail = key === 'questions'
+      ? questionDetail(args.value(key))
+      : argumentTextDetail(args, key) ?? normalizeLiveToolDetail(args.value(key))
+    if (detail !== '') return detail
   }
-  return normalizeLiveToolDetail(name)
+  return args.closed() ? normalizeLiveToolDetail(name) : ''
 }
 
 /**
  * Rank categories by distinct call count, breaking ties by first appearance.
+ * A group whose members are all Context reports one `context` category counting those members; Context beside other members adds no count.
  * @param nodes - process members, including recursive tools.
  * @returns all ranked categories and the latest running tool category and bounded task detail.
  */
 export function processActivity(nodes: readonly ChatNode[]): ProcessActivitySummary {
   const counts = new Map<ProcessActivity, number>()
   const seen = new Set<string>()
-  let running: ProcessActivity | undefined
+  let running: RunningProcessActivity | undefined
   let runningDetail = ''
   let runningTime = -Infinity
+  let preparing: boolean | undefined
   const visit = (tool: ToolCallBlock): void => {
     if (seen.has(tool.callId)) return
     seen.add(tool.callId)
@@ -103,7 +148,8 @@ export function processActivity(nodes: readonly ChatNode[]): ProcessActivitySumm
       const kind = activity(call.name)
       if (isRunningTool(tool) && tool.time >= runningTime) {
         running = kind
-        runningDetail = liveToolDetail(tool.name, tool.argsRaw)
+        preparing = tool.phase === 'preparing'
+        runningDetail = liveToolDetail(tool.name, tool.args)
         runningTime = tool.time
       }
       counts.set(kind, (counts.get(kind) ?? 0) + 1)
@@ -114,9 +160,11 @@ export function processActivity(nodes: readonly ChatNode[]): ProcessActivitySumm
     if (node.kind === 'tool-call') visit(node.data.root)
   }
   if (running === undefined) runningDetail = liveReasoningDetail(nodes)
+  if (nodes.length > 0 && nodes.every(node => node.kind === 'context')) counts.set('context', nodes.length)
   return {
     counts: [...counts].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count),
     running,
     runningDetail,
+    ...preparing ? { preparing: true } : {},
   }
 }

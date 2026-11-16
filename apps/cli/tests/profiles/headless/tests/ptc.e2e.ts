@@ -1,23 +1,25 @@
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage, ToolCallId, HarnessError  } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { createUserMessage, type ToolCallId, HarnessError } from '@deepseek-ai/dsh-llm'
+import SessionStore, { type SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { RUN_CODE_NAME, defineTool } from '@deepseek-ai/dsh-tools'
+import { RUN_CODE_NAME, defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as ToolBash from '@deepseek-ai/dsh-tool-bash'
-import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import NodeRuntime from '@deepseek-ai/dsh-ptc-runtime-node'
 import Sandbox from '@deepseek-ai/dsh-sandbox-local'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
@@ -37,7 +39,7 @@ import * as CordisInspectProviders from '@deepseek-ai/dsh-tool-cordis/host'
  */
 
 const PERSONA = 'You are a coding agent. You work by writing TypeScript programs for run_code: '
-  + 'batch related tool work into one program and print or return ONLY the findings that matter.'
+  + 'batch related tool work into one program and inspect ONLY the findings that matter.'
 const WORKSPACE_PROBE = 'dragonfruit-8675309'
 
 let ctx: Context | undefined
@@ -55,12 +57,11 @@ afterEach(async () => {
 
 async function ptcModeHarness(cwd: string): Promise<Context> {
   const harness = new Context()
-  await harness.plugin(LlmRuntime)
-  await harness.plugin(SessionStore)
-  await harness.plugin(SessionProjectionRegistry)
-  await harness.plugin(SystemPrompt, { personaPrefix: PERSONA })
-  await harness.plugin(ToolRuntime, { mode: 'ptc' })
-  await harness.plugin(AgentRegistry)
+  await mountAgentLoopTestDependencies(harness, {
+    workingDirectory: true,
+    systemPrompt: { personaPrefix: PERSONA },
+    tools: { mode: 'ptc' },
+  })
   await harness.plugin(AgentLoop, { agents: [] })
   await harness.plugin(LlmDeepSeek)
   if (harness.get('subprocess') === undefined) await harness.plugin(LocalSubprocessRuntime)
@@ -73,13 +74,12 @@ async function ptcModeHarness(cwd: string): Promise<Context> {
 
 async function workspacePtcModeHarness(): Promise<Context> {
   const harness = new Context()
-  await harness.plugin(LlmRuntime)
-  await harness.plugin(SessionStore)
-  await harness.plugin(SessionProjectionRegistry)
-  await harness.plugin(SystemPrompt, { personaPrefix: PERSONA })
-  await harness.plugin(ToolRuntime, { mode: 'ptc' })
-  await harness.plugin(AgentRegistry)
   await harness.plugin(LocalFileSystem, { cwd: '/' })
+  await mountAgentLoopTestDependencies(harness, {
+    workingDirectory: true,
+    systemPrompt: { personaPrefix: PERSONA },
+    tools: { mode: 'ptc' },
+  })
   await harness.plugin(ToolFs)
   await harness.plugin(AgentInstructions, { maxBytes: 65536 })
   await harness.plugin(AgentLoop, { agents: [] })
@@ -98,8 +98,8 @@ function runCode(
   signal: AbortSignal = testToolSignal,
   agent?: Agent,
 ): Promise<ToolExecutionResult> {
-  return harness.tools.execute({
-    callId: ToolCallId(`keyless-code-${++keylessCall}`),
+  return executeModelToolFixture(harness, {
+    callId: brandString<ToolCallId>(`keyless-code-${++keylessCall}`),
     name: RUN_CODE_NAME,
     arguments: { code, description: 'Run the e2e program' },
     signal,
@@ -107,14 +107,17 @@ function runCode(
   })
 }
 
-/** Read the optional completion from a successful canonical `run_code` value. */
+/** Read a JSON value explicitly inspected by the program. */
 function completion(result: ToolExecutionResult): unknown {
   if (result.isError) {
     throw new Error(result.content.filter(block => block.type === 'text').map(block => block.text).join('\n'))
   }
   const value = result.value
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid run_code result')
-  return value.result
+  if (!Array.isArray(value.logs)) throw new Error('run_code result has no captured output')
+  const text = value.logs.at(-1)
+  if (typeof text !== 'string') throw new Error('run_code did not inspect a JSON value')
+  return JSON.parse(text)
 }
 
 async function mountRuntime(harness: Context): Promise<void> {
@@ -131,8 +134,7 @@ async function mountRuntime(harness: Context): Promise<void> {
 /** Keyless real-process harness for direct typed-binding acceptance tests. */
 async function typedPtcModeHarness(): Promise<Context> {
   const harness = new Context()
-  await harness.plugin(SystemPrompt)
-  await harness.plugin(ToolRuntime, { mode: 'ptc' })
+  await mountAgentLoopTestDependencies(harness, { workingDirectory: true, tools: { mode: 'ptc' } })
   await mountRuntime(harness)
   return harness
 }
@@ -186,7 +188,7 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
           exposesInfo: 'info' in error,
         };
       }
-      return { length: large.length, failure };
+      inspect(JSON.stringify({ length: large.length, failure }));
     `))
 
     expect(value).toEqual({
@@ -213,12 +215,12 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
         description: 'Run completion marker in background',
         run_in_background: true,
       });
-      return started.jobId;
+      inspect(JSON.stringify(started.jobId));
     `))
-    expect(jobId).toBe('bash-1')
+    expect(jobId).toMatch(/^bash-[0-9a-f]{16}$/)
 
     const polled = completion(await runCode(ctx, `
-      return await tools.job_output({ job_id: ${JSON.stringify(jobId)}, wait: true, timeout_ms: 5000 });
+      inspect(JSON.stringify(await tools.job_output({ job_id: ${JSON.stringify(jobId)}, wait: true, timeout_ms: 5000 })));
     `))
     if (typeof polled !== 'object' || polled === null || Array.isArray(polled)) throw new Error('invalid job_output completion')
     const taskOutput = polled as Record<string, unknown>
@@ -226,42 +228,55 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     expect(taskOutput.job).toMatchObject({ id: jobId, kind: 'bash', status: 'completed' })
   }, 15_000)
 
-  it('pre-abort spawns nothing; post-publication abort leaves job_kill as the cancellation owner', async () => {
+  it('pre-abort spawns nothing; post-publication abort leaves job_kill as the cancellation owner', { timeout: 15_000, retry: 0 }, async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-task-cancel-'))
     ctx = await backgroundPtcModeHarness(workdir)
 
     const pre = new AbortController()
     pre.abort('pre-aborted')
     const preResult = await runCode(ctx, `
-      return await tools.bash({ command: 'sleep 10', description: 'Must never start', run_in_background: true });
+      inspect(JSON.stringify(await tools.bash({ command: 'sleep 10', description: 'Must never start', run_in_background: true })));
     `, pre.signal)
     expect(preResult.isError).toBe(true)
     expect(ctx.jobs.list()).toEqual([])
 
+    const jobs = ctx.jobs
+    // Registration is announced after the job's ownership has committed.
+    const registered = new Promise<void>((resolve) => {
+      onTestFinished(jobs.events.subscribe({ owners: 'all' }, (event) => {
+        if (event.type === 'registered') resolve()
+      }))
+    })
     const afterPublication = new AbortController()
     const running = runCode(ctx, `
       const started = await tools.bash({ command: 'sleep 10', description: 'Wait for explicit task kill', run_in_background: true });
-      console.log(started.jobId);
+      inspect(started.jobId);
       await new Promise(() => {});
     `, afterPublication.signal)
-    for (let attempt = 0; attempt < 100 && ctx.jobs.list().length === 0; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
+    await Promise.race([
+      registered,
+      running.then((result) => {
+        // Promise.race handles a late rejection after registration, too.
+        completion(result)
+        throw new Error('run_code completed before background job registration')
+      }),
+    ])
     const job = ctx.jobs.list()[0]
-    expect(job).toMatchObject({ id: 'bash-1', status: 'running' })
+    expect(job).toMatchObject({ status: 'running' })
+    expect(job?.id).toMatch(/^bash-[0-9a-f]{16}$/)
     afterPublication.abort('outer-call-cancelled')
     expect((await running).isError).toBe(true)
     expect(ctx.jobs.list()[0]).toMatchObject({ id: job!.id, status: 'running' })
 
     const killed = completion(await runCode(ctx, `
-      return await tools.job_kill({ job_id: ${JSON.stringify(job!.id)}, reason: 'test owns cancellation' });
+      inspect(JSON.stringify(await tools.job_kill({ job_id: ${JSON.stringify(job!.id)}, reason: 'test owns cancellation' })));
     `))
     expect(killed).toMatchObject({ outcome: 'cancellation-requested', job: { id: job!.id } })
     const settled = completion(await runCode(ctx, `
-      return await tools.job_output({ job_id: ${JSON.stringify(job!.id)}, wait: true, timeout_ms: 5000 });
+      inspect(JSON.stringify(await tools.job_output({ job_id: ${JSON.stringify(job!.id)}, wait: true, timeout_ms: 5000 })));
     `))
     expect(settled).toMatchObject({ job: { id: job!.id, status: 'killed' } })
-  }, 15_000)
+  })
 
   it('keeps foreground bash coupled to the outer signal', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-foreground-cancel-'))
@@ -269,7 +284,7 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     const controller = new AbortController()
     const startedAt = Date.now()
     const pending = runCode(ctx, `
-      return await tools.bash({ command: 'sleep 10', description: 'Run cancellable foreground command' });
+      inspect(JSON.stringify(await tools.bash({ command: 'sleep 10', description: 'Run cancellable foreground command' })));
     `, controller.signal)
     setTimeout(() => { controller.abort('stop-foreground') }, 200)
     const result = await pending
@@ -284,9 +299,10 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
     await ctx.plugin(CordisInspectProviders)
     await ctx.plugin(ToolCordis)
     const agent = {
-      id: SessionId('ptc-cordis'),
-      session: ctx.sessions.create(SessionId('ptc-cordis'), { meta: { cwd: process.cwd() } }),
-    } as unknown as Agent
+      ctx,
+      id: brandString<SessionId>('ptc-cordis'),
+      session: ctx.sessions.create(brandString<SessionId>('ptc-cordis'), { meta: { cwd: process.cwd() } }),
+    } as Agent
 
     const value = completion(await runCode(ctx, `
       const listed = await tools.cordis_inspect_list({});
@@ -294,10 +310,10 @@ describe('PTC mode typed values: keyless real-process contracts', () => {
       const inspected = await tools.cordis_inspect_query({
         platform: provider.platform, provider: provider.id, method: provider.methods[0].name,
       });
-      return { provider: provider.id, names: inspected.data.tools.map(tool => tool.name) };
+      inspect(JSON.stringify({ provider: provider.id, names: inspected.data.tools.map(tool => tool.name) }));
     `, testToolSignal, agent))
 
-    expect(value).toEqual({ provider: 'Tool', names: ['cordis_inspect_list', 'cordis_inspect_query', 'run_code'] })
+    expect(value).toEqual({ provider: 'Tool', names: ['cordis_inspect_list', 'cordis_inspect_query'] })
   })
 })
 
@@ -316,14 +332,14 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC mode: real model writes a pr
   it('collapses the wire tool list to [run_code], bridges sub-calls, and returns curated output', async () => {
     workdir = await mkdtemp(join(tmpdir(), 'dsh-ptc-e2e-'))
     ctx = await ptcModeHarness(workdir)
-    const agent = await ctx.agentLoop.create(SessionId('e2e-ptc'), { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    const agent = await ctx.agentLoop.create(brandString<SessionId>('e2e-ptc'), { provider: 'deepseek-official', model: 'deepseek-v4-flash' }, { cwd: workdir })
 
     agent.followup(createUserMessage({
       content: [{
         type: 'text',
         text: 'Using one run_code program: run `echo alpha-7` with the bash tool, run `echo beta-9` with the bash tool, '
         + 'then write both outputs joined by a plus sign into combined.txt (bash heredoc or redirect), '
-        + 'and return only the joined string.',
+        + 'and inspect the joined string. Reply with that string only.',
       }], source: { kind: 'user' } }))
     await waitForIdle(ctx, agent)
     const events: readonly SessionEvent[] = agent.session.snapshotEvents()
@@ -366,7 +382,7 @@ describe.skipIf(!process.env.DEEPSEEK_API_KEY)('PTC mode: real model writes a pr
     await writeFile(join(workdir, 'pkg/deep/task.txt'), 'Touch this file to discover the nested instructions.\n')
     ctx = await workspacePtcModeHarness()
     const handle = await ctx.agents.create({
-      sessionId: SessionId('e2e-ptc-workspace-session'),
+      sessionId: brandString<SessionId>('e2e-ptc-workspace-session'),
       meta: { cwd: workdir },
       agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
     })

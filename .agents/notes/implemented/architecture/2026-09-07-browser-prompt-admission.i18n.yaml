@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-07-browser-prompt-admission.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-07-browser-prompt-admission.md
-2026-09-07-browser-prompt-admission.md: 574cbb8a6aac1f74b5048d7df36de85789b5a976
-2026-09-07-browser-prompt-admission.zh.md: daf5338d9a32d4c5f9f12e87ce858ce8b2bf807a
+/agent-note-browser-prompt-admission-before-session-mutation:
+  en: 1cee8b9659f0f220
+  zh: cb27c039b2303ab5
+/agent-note-browser-prompt-admission-before-session-mutation/problem:
+  en: 61f1da436bbda64f
+  zh: bdb89f966bc5d602
+/agent-note-browser-prompt-admission-before-session-mutation/decision:
+  en: ffc21af859e6a0dd
+  zh: a3a094700cf4fbc0
+/agent-note-browser-prompt-admission-before-session-mutation/alternatives-considered:
+  en: 0212f8c8dee71924
+  zh: 9d36dd0cf06c9fec
+/agent-note-browser-prompt-admission-before-session-mutation/consequences:
+  en: 87782a387329da1c
+  zh: 39118cc71c458b5b

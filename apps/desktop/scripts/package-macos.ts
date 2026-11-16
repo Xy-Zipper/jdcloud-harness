@@ -13,7 +13,7 @@ import {
 import {
   desktopUpdateMetadataFilename,
   resolveDesktopAutoUpdateConfig,
-} from './desktop-auto-update-environment.mjs'
+} from '@deepseek-ai/dsh-desktop-publisher/desktop-auto-update-environment.mjs'
 import { verifyMacOSAppUpdateConfig } from './macos-app-update-config.mjs'
 import { verifyMacOSNotarizedApplication, verifyMacOSSignature } from './verify-macos-signature.mjs'
 
@@ -115,7 +115,7 @@ export async function packageMacOSArtifacts(
       [dmgOutput, `${base}.dmg`],
       [zipOutput, `${base}.zip`],
       [zipOutput, `${base}.zip.blockmap`],
-      [zipOutput, desktopUpdateMetadataFilename(version, 'darwin')],
+      [zipOutput, desktopUpdateMetadataFilename(version, 'darwin', update.channel)],
     ] as const
     for (const [output, filename] of artifacts) {
       const file = join(output, filename)

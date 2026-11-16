@@ -49,7 +49,7 @@ User workspaces and account-managed Skills default to `$DSH_HOME/account-workspa
 
 ### What you get
 
-The layer replaces the Connection row with `browserAuthentication: false`, `browserSession: true`, and `browserSessionTransport: bearer`. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
+The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-connection/browser-session` as the Connection authentication provider. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
 
 -----
 
@@ -79,7 +79,7 @@ The layer replaces the Connection row with `browserAuthentication: false`, `brow
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, nine tool schemas, and validated Runtime results.
+Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, thirteen tool schemas, and validated Runtime results.
 
 #### KV Cache effect
 

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import Include, { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
+import Include, { applyEntryPatches, parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader, { type ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import * as ExternalApi from '@deepseek-ai/dsh-api-external'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -15,7 +15,9 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
-import * as yaml from 'js-yaml'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import * as Connection from '@deepseek-ai/dsh-client-connection'
 import OntologyAuthController from '../../../api/ontology-auth-controller/src/index.ts'
 import { BrowserSessionService } from '../../../client/connection/src/browser-session.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
@@ -50,6 +52,8 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     "- name: '@fixture/memory-credentials'",
     "- name: '@fixture/browser-session'",
     "- name: '@fixture/external-services'",
+    "- name: '@deepseek-ai/dsh-client-connection'",
+    "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-host-webserver'",
     '  config:',
     "    host: '127.0.0.1'",
@@ -97,6 +101,8 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     ['@fixture/external-services', externalServicesModule],
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
+    ['@deepseek-ai/dsh-client-connection', Connection],
+    ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-user-approval', ApprovalService],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-api-ontology-auth-controller', OntologyAuthController],
@@ -144,22 +150,15 @@ function browserCookie(browserSession: BrowserSessionService): string {
 
 describe('Ontology login through a real Loader composition', () => {
   it('adds an independent browser session and the Ontology packages', () => {
-    const web = yaml.load(
+    const web = parseEntryYaml(
       readFileSync(join(import.meta.dirname, '../../web-app/cordis.patch.yml'), 'utf8'),
-      { schema: entryListSchema },
     ) as PatchOptions[]
-    const ontology = yaml.load(
+    const ontology = parseEntryYaml(
       readFileSync(join(import.meta.dirname, '../cordis.patch.yml'), 'utf8'),
-      { schema: entryListSchema },
     ) as PatchOptions[]
     const rows = applyEntryPatches([], [...web, ...ontology], () => {})
-    expect(rows.find(row => row.id === 'connection')).toMatchObject({
-      config: {
-        browserAuthentication: false,
-        browserSession: true,
-        browserSessionTransport: 'bearer',
-      },
-    })
+    expect(rows.find(row => row.id === 'authentication-token')).toMatchObject({ disabled: true })
+    expect(rows.find(row => row.id === 'browser-session')?.name).toBe('@deepseek-ai/dsh-client-connection/browser-session')
     expect(rows.find(row => row.id === 'directory-picker')).toMatchObject({ disabled: true })
     expect(rows.find(row => row.id === 'directory-picker-browse')?.name)
       .toBe('@deepseek-ai/dsh-host-directory-picker-browse')
@@ -223,6 +222,10 @@ describe('Ontology login through a real Loader composition', () => {
       'ontology_traverse_link',
       'ontology_prepare_action',
       'ontology_execute_action',
+      'ontology_get_draft',
+      'ontology_add_draft_resources',
+      'ontology_inspect_data_source',
+      'ontology_update_draft_bindings',
     ])
     const externalResponse = await socketFetch(
       `http://127.0.0.1:${String(context.webServer.port)}/api/external/v1/skills`,
@@ -235,8 +238,11 @@ describe('Ontology login through a real Loader composition', () => {
     )
     expect(externalResponse.status).toBe(200)
     await expect(externalResponse.json()).resolves.toEqual({
-      skills: [{ name: 'global-skill', scope: 'built-in' }],
-      canManageBuiltIn: true,
+      code: 200,
+      data: {
+        skills: [{ name: 'global-skill', scope: 'built-in' }],
+        canManageBuiltIn: true,
+      },
     })
     const cookie = browserCookie(browserSession)
     const request = { headers: { host: 'harness.example', cookie } }
@@ -327,7 +333,7 @@ describe('Ontology login through a real Loader composition', () => {
     }, AbortSignal.timeout(1_000)))
 
     let call = 0
-    const listProjects = (request: typeof aliceRequest) => browserSession.run(request, () => context.tools.execute({
+    const listProjects = (request: typeof aliceRequest) => browserSession.run(request, () => executeToolFixture(context, {
       name: 'ontology_list_projects',
       arguments: {},
       callId: ToolCallId(`loader-ontology-${String(++call)}`),
@@ -403,7 +409,7 @@ describe('Ontology login through a real Loader composition', () => {
     session.append('turn/start', { turn: 1 })
     const agent = { session } as never
 
-    await expect(browserSession.run(request, () => context.tools.execute({
+    await expect(browserSession.run(request, () => executeToolFixture(context, {
       name: 'ontology_execute_action',
       arguments: { invocation_id: 'invocation-loader' },
       callId: ToolCallId('loader-ontology-action'),

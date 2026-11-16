@@ -1,7 +1,10 @@
 /**
  * Register a DeepSeek-backed provider in `ctx.web`. It calls the Anthropic-compatible Messages API
- * with native `web_search_20250305`. The provider reuses `DEEPSEEK_API_KEY` but not
- * `DEEPSEEK_BASE_URL`; auxiliary search has its own endpoint configuration.
+ * with native `web_search_20250305`. A search initiated by a Session on the DeepSeek account route
+ * authenticates with the account token when the account service allows the search endpoint;
+ * every other search reuses `DEEPSEEK_API_KEY`. The provider does not reuse `DEEPSEEK_BASE_URL`;
+ * auxiliary search has its own endpoint configuration. The provider reports itself not ready for a
+ * model request whose search would have no credential.
  * @module @deepseek-ai/dsh-web-search-deepseek
  */
 import type { Volatile } from '@deepseek-ai/cordis'
@@ -10,7 +13,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-deepseek-account'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
+import {
+  deepSeekApiKeyConfigured, rejectDeepSeekAccountToken, resolveDeepSeekAccountToken, resolveDeepSeekApiKey,
+} from '@deepseek-ai/dsh-llm-deepseek'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-web'
 import {
@@ -79,8 +87,14 @@ export const Config = z.object({
  */
 const SEARCH_BASE_URL_ENV = 'DEEPSEEK_SEARCH_BASE_URL'
 
+/** Provider route id `dsh-llm-deepseek-account` registers; `request/context` events record it per Session. */
+const ACCOUNT_PROVIDER = 'deepseek-account'
+
 /** Settings namespace carrying this provider's endpoint, model, and key reference. */
 export const WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE = 'web-search-deepseek'
+
+/** Options for one search, with the key reference the readiness check reads. */
+type SearchOptions = DeepSeekSearchProviderOptions & { readonly apiKeyEnv: CredentialRef }
 
 /**
  * Project one resolved section into the options the provider serves its next
@@ -92,20 +106,22 @@ export const WEB_SEARCH_DEEPSEEK_SETTINGS_NAMESPACE = 'web-search-deepseek'
  */
 function resolveOptions(
   ctx: Context, config: { [K in keyof Config]: ReturnType<Config[K]['get']> },
-): DeepSeekSearchProviderOptions {
+): SearchOptions {
   const apiKeyEnv = credentialRef(config.apiKeyEnv)
   const literalApiKey = config.apiKey !== undefined && config.apiKey.length > 0
     ? config.apiKey
     : undefined
   return {
     ...literalApiKey === undefined ? {} : { apiKey: literalApiKey },
-    resolveApiKey: async () => {
-      const credentials = ctx.get('credentials')
-      if (credentials !== undefined) return (await credentials.resolve(apiKeyEnv))?.value
-      // Without the seam the environment is the whole credential plane.
-      const ambient = launchEnvironmentOf(ctx).get(apiKeyEnv)
-      return ambient !== undefined && ambient.value.length > 0 ? ambient.value : undefined
+    resolveAccountToken: async (endpoint) => {
+      // The latest request context names the route that served the model
+      // request which called this search, as account sign-out reads it.
+      const provider = ctx.get('agents')?.currentInitiator()?.session.requestContext()?.provider
+      if (provider !== ACCOUNT_PROVIDER) return undefined
+      return await resolveDeepSeekAccountToken(ctx, endpoint)
     },
+    rejectAccountToken: token => rejectDeepSeekAccountToken(ctx, token),
+    resolveApiKey: () => resolveDeepSeekApiKey(ctx, apiKeyEnv),
     apiKeyEnv,
     baseURL: config.baseURL
       ?? launchEnvironmentOf(ctx).get(SEARCH_BASE_URL_ENV)?.value
@@ -123,10 +139,47 @@ function resolveOptions(
   }
 }
 
-/** Register the DeepSeek search provider with `ctx.web`. */
+/**
+ * Whether the search a model request on `route` would make has a credential, checked in the order
+ * the search resolves them: the account token first on the account route, then the API key. A failed
+ * read answers false, because the search fails on that read instead of trying the next credential.
+ * Only presence is checked: the API key's value is not read and the endpoint is not contacted, so a
+ * wrong key or an endpoint without native search still counts as configured.
+ * @param ctx - plugin context supplying the account, credential, and environment planes.
+ * @param options - options the next search would use.
+ * @param route - provider route of the model request being assembled.
+ * @returns whether the account token or an API key is available to that search.
+ */
+async function searchConfigured(
+  ctx: Context, options: SearchOptions, route: string | undefined,
+): Promise<boolean> {
+  const account = ctx.get('deepseekAccount')
+  if (route === ACCOUNT_PROVIDER && account !== undefined) {
+    let token: string | undefined
+    try { token = await account.resolveToken(`${options.baseURL}/messages`) }
+    catch (_unreadableGrant) { return false /* The search fails on this read before it tries the API key. */ }
+    if (token !== undefined && token.length > 0) return true
+  }
+  if (options.apiKey !== undefined) return true
+  try { return await deepSeekApiKeyConfigured(ctx, options.apiKeyEnv) }
+  catch (_unreadableStore) { return false /* A store that cannot be read supplies no key to the search either. */ }
+}
+
+/**
+ * Register the DeepSeek search provider with `ctx.web`. Its `ready()` answers whether a
+ * search for a model request on the given route would have a credential to send.
+ */
 export function apply(ctx: Context, config: Config): void {
-  ctx.web.registerSearchProvider(new DeepSeekSearchProvider(() => resolveOptions(ctx, {
+  const options = () => resolveOptions(ctx, {
     apiKey: config.apiKey.get(), apiKeyEnv: config.apiKeyEnv.get(), baseURL: config.baseURL.get(), model: config.model.get(),
     apiVersion: config.apiVersion.get(), maxTokens: config.maxTokens.get(), maxUses: config.maxUses.get(),
-  })))
+  })
+  const provider = new DeepSeekSearchProvider(options)
+  ctx.web.registerSearchProvider({
+    id: provider.id,
+    description: provider.description,
+    available: () => provider.available(),
+    ready: llmProvider => searchConfigured(ctx, options(), llmProvider),
+    search: (request, signal) => provider.search(request, signal),
+  })
 }

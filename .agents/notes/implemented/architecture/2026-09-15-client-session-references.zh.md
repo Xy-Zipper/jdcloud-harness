@@ -21,7 +21,8 @@ Client Session 对象、Agent 作用域的 Client Context、引用、使用方�
 | 所有者 | 职责 |
 | --- | --- |
 | Client Session Controller | 目录、活跃代、引用、来源计数、binding、历史窗口与既有 Session 控制状态 |
-| `ui-session` | 显式 Session Provider 集成与统一 UI 状态来源 |
+| `ui-session` | 显式 Session Provider 集成与有效待处理交互来源 |
+| `ui-session-status` | 统一 UI 状态来源 |
 | 视图或操作 | 自己的引用、目标、来源标识与释放时机 |
 | Workspace UI | 主区域目标与引用、导航、持久目标及创建流程 |
 | UI 组合边界 | 将所有者提供的引用交给一个明确的 `SessionProvider` |
@@ -30,7 +31,7 @@ Client Session 对象、Agent 作用域的 Client Context、引用、使用方�
 
 [Client 分层设计](../../implemented/architecture/2026-08-20-client-session-conversation-ownership.zh.md)定义数据、适配器、渲染器与展示层的单向依赖。引用来源统计不会使 Controller 依赖 UI 包。
 
-本决策部分取代 [Web Client Session scope 与 provide channel 决策](2026-07-25-web-client-session-scope-and-provide-channel.zh.md)中由 list 选择驱动的 scope 生命周期；后者保留显式 Provider 所有权下的 blank Session 与收养语义理由。
+[空白 Session 决策](2026-09-17-process-local-blank-sessions.zh.md)负责创建与复用；本决策负责显式 Provider 引用与收养。
 
 ### 地址、binding 与引用
 
@@ -89,28 +90,22 @@ Controller 将来源计数与每个活跃代的引用共同管理。每个来源
 
 ### 统一的 UI Session 状态
 
-`ui-session` 拥有不依赖 React 的 `sessionStatus` 来源，通过标准 `useSessionStatus` 钩子公开。快照按 Session 身份索引，为每个已知 Session 提供一条 UI 状态记录。它组合下列独立事实，不将它们压缩成互斥的单一阶段：
+`ui-session-status` 拥有不依赖 React 的 `uiSession.sessionStatus` 服务，以 `ctx.uiSession.sessionStatus` 读取，并通过标准 `useSessionStatus` 钩子公开。快照按 Session 身份索引，为每个已知 Session 提供一条 UI 状态记录。它组合下列独立事实，不将它们压缩成互斥的单一阶段：
 
 | 字段 | 取值 | 含义与所有者 |
 | --- | --- | --- |
 | `running` | `boolean` 或 `undefined` | 最新已知的 Session 运行事实；缺少基线不表示已确认 idle |
 | `pendingInteraction` | `SessionPendingInteraction` 或 `undefined` | 领域拥有的有效请求；没有待处理请求时缺失 |
-| `completionUnread` | `boolean` | 已观察到停止、但尚未确认的 UI 提醒 |
+| `completionUnread` | `boolean` | 宿主阅读记录带有手动未读标记或尚未确认的完成轮次 |
+| `completionFailed` | `boolean` | Session 未读，且最近完成的轮次以执行错误结束 |
 
 来源计数以 `SessionListState.byId[id].retainedBy` 为准；UI 状态读取它以执行确认策略，不维护另一套引用注册表。标题、Workspace 关联、历史、队列和投影数据保留在各自的既有所有者中。
 
-待处理领域保留 `SessionPendingInteractionMap`、请求身份、优先级、发布清理函数与卸载委托。统一状态包含同一个有效请求对象，不复制请求，也不创建第二套待处理注册表。Workspace 状态指示器与 Conversation composer 选择读取 `useSessionStatus`，不再分别读取 `useSessionPendingInteraction` 和 `useCompletedSessionIds` 钩子。
+待处理领域在 `ui-session` 中保留 `SessionPendingInteractionMap`、请求身份、优先级、发布清理函数与卸载委托，`ui-session` 以只读的 `ctx.uiSession.pendingInteractions` 发布每个 Session 的有效请求。统一状态包含同一个有效请求对象，不复制请求，也不创建第二套待处理注册表。Workspace 状态指示器与 Conversation composer 选择读取 `useSessionStatus`，不再分别读取 `useSessionPendingInteraction` 和 `useCompletedSessionIds` 钩子。
 
-完成跟踪订阅已有 `api-session/status` 事件，避免 running 到 idle 的变化在合批目录快照中丢失。Host 列表行（`ids`）建立初始与重连的 running 基线；目录合成行与 retained 行保留独立观察到的状态。pending 状态下的空目录不能证明 Session 已消失。更新规则如下：
+运行跟踪订阅已有 `api-session/status` 事件，避免 running 到 idle 的变化在合批目录快照中丢失。Host 列表行（`ids`）建立初始与重连的 running 基线；目录合成行与 retained 行保留独立观察到的状态。pending 状态下的空目录不能证明 Session 已消失；移除 Session 时清除其运行基线，待处理请求的清理仍属于请求领域。
 
-- 初始 idle 基线不产生完成提醒。
-- 观察到 running 时清除旧提醒，并记录运行基线。
-- 从已知 running 变为 idle 时，仅在 Session 没有主视图持有的情况下设置 `completionUnread`。
-- 获得主视图持有时清除提醒；无关来源的 retain 不清除提醒。
-- 释放主视图持有不会为更早的一次停止补造提醒。
-- 移除 Session 时清除其完成提醒与运行基线；待处理请求的清理仍属于请求领域。
-
-提醒表示观察到的一次停止，不代表任务成功，也不代表某条排队消息完成。即使全局面板暂时隐藏 Conversation，主视图所有权仍保持基于选择的确认语义。本设计不提供 `ui-session/view-presence` 事件、已挂载 Provider 索引或 Provider 挂载时的隐式确认。
+完成提醒跟随[宿主内存中的会话阅读状态](../feature/2026-10-23-session-reading-memory.zh.md)所述的宿主阅读记录，该记录取代本记录早先的前端本地提醒规则：运行变化和主视图持有都不会设置或清除提醒，可见的主视图只在正文到达后确认完成的轮次。提醒表示完成的一个轮次，不代表任务成功，也不代表某条排队消息完成。即使全局面板暂时隐藏 Conversation，主视图所有权仍保持基于选择的确认语义。本设计不提供 `ui-session/view-presence` 事件、已挂载 Provider 索引或 Provider 挂载时的隐式确认。
 
 Session Controller 发布运行与引用来源事实，但不拥有完成提醒集合、`consumeCompletion` 方法或待处理交互展示。引用获取不执行完成提醒业务逻辑。
 
@@ -156,7 +151,7 @@ Conversation 的引用属于其视图所有者，不属于 Chat、Trajectory 或
 | Chat/Trajectory 恢复 | 为显式选中的主目标恢复视图；独立绑定的视图保留自己的状态 |
 | Cordis inventory 面板 | 使用不区分 current/other 的单一列表；runner 不提供主区域选择的公开 getter |
 
-DOM 焦点移动或全局面板隐藏仍被持有的视图时，来源元数据不变。[全局主面板设计](../../implemented/architecture/2026-09-08-global-main-panels.zh.md)拥有面板选择与布局；Session 引用所有权不替代它。
+DOM 焦点移动或全局面板隐藏仍被持有的视图时，来源元数据不变。[全局主面板设计](../../../../packages/client/ui-layout/README.zh.md)拥有面板选择与布局；Session 引用所有权不替代它。
 
 Conversation 保留 `hero`、`settling`、`active` 组合与既有历史加载和 `openError` 处理。获取引用不增加外层 loading/error 阶段展示、额外隐藏 composer 的条件、Retry 按钮或替换 Sidebar 内容的恢复面板。已有错误处理方继续处理自己的错误；没有错误展示的调用点不增加展示。Promise 拒绝与正确释放引用不意味着额外增加 UI 处理方。
 
@@ -166,7 +161,7 @@ Workspace 连接保持既有导航检查与面板切换失效规则。侧边栏 
 
 预设目录与部署默认值可以共享。已绑定 Session 的预设通过 Provider 的 binding 读取或修改；预设控制器按 `SessionBinding` 缓存，不由根级 current-Session 跟随器管理。Hero 的 preset seat 使用 `session-maybe` Provider：没有 Session 时显示创建流程选择，绑定空白 Session 后操作该确切 Session。标题标签读取同一 Provider 绑定 Session 的投影。
 
-Session 创建前选择的 preset 保留在主 Conversation 的 `session-maybe` preset surface 中。Workspace 创建或复用空白 Session 并建立主 Provider 后，该 surface 将选择应用到 Provider 绑定的 Session。设置页修改默认 preset 或 picker 设置时，preset 服务从 Provider 已建立的 binding 缓存中选择带 `mainView` 所有权标记的空白 Session，并更新该 Session。非空白主 Session、Sidebar 的独立 Provider 与其他后台引用均不受该设置动作影响；preset 子树不读取主引用，也不通过全局 current follower 寻找目标。
+Session 创建前选择的 preset 保留在主 Conversation 的 `session-maybe` preset surface 中。Workspace 创建或复用空白 Session 并建立主 Provider 后，该 surface 将选择应用到 Provider 绑定的 Session。设置页修改默认 preset 时，preset 服务从 Provider 已建立的 binding 缓存中选择带 `mainView` 所有权标记的空白 Session，并更新该 Session。非空白主 Session、Sidebar 的独立 Provider 与其他后台引用均不受该设置动作影响；preset 子树不读取主引用，也不通过全局 current follower 寻找目标。
 
 ### Host 事件 Context 所有权与 Typert
 

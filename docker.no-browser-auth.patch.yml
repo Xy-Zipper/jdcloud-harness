@@ -1,6 +1,3 @@
-# The deployment delegates user identity to Ontology and keeps only the Host/Origin fence.
-- id: connection
-  config:
-    browserAuthentication: false
-    browserSession: true
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+# The Ontology bundle supplies tab identity; this overlay disables the launch-token provider.
+- id: authentication-token
+  disabled: true

@@ -6,7 +6,7 @@
 
 import { describe, expect, onTestFinished, vi } from 'vitest'
 import { RemoteStreamCarrierError, type ClientRemote } from '@deepseek-ai/dsh-api-gateway/client'
-import { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { frames, openStream, type RemoteMock, type StreamScript } from '@deepseek-ai/dsh-remote-mock'
 import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
@@ -20,6 +20,7 @@ import {
 } from '../src/client/index.ts'
 import type { WorkspaceFollowFrame, WorkspaceId } from '../src/types.ts'
 import { FOLLOW, baseline, err, followGenerations, workspace, workspaceWorld } from './remote/workspace.client.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 const SELF = '@deepseek-ai/dsh-api-workspace-controller'
 /** The plugin as the web bundle composes it: itself plus the Gateway client, the Connection, and the Typert registry. */
@@ -32,7 +33,7 @@ const it = createClientTest({ roster: API_ROSTER })
 const COLD_BOOT_TIMEOUT_MS = 60_000
 
 const wid = (id: string): WorkspaceId => id as WorkspaceId
-const sid = (id: string): SessionId => SessionId(id)
+const sid = (id: string): SessionId => brandString<SessionId>(id)
 
 /** Boot the plugin with `follow` answering its state stream. */
 async function pluginClient(mock: RemoteMock, start: () => Promise<TestClient>, follow: StreamScript): Promise<TestClient> {
@@ -183,6 +184,38 @@ describe('Workspace state stream', () => {
     expect(streamStates(mock)).toEqual(['cancelled'])
   })
 
+  it('applies a replace increment in place, so a Workspace hidden and shown again never errors or reconnects', async ({ mock, start }) => {
+    const { remote } = await gatewayClient(mock, start)
+    mock.stream(FOLLOW, openStream([baseline('one', 'two')]))
+    const model = new ClientWorkspaceModel(remote.workspace)
+    const carrierFailed = vi.fn(() => { model.handleCarrierFailure() })
+    const failed = vi.fn((error: unknown) => { model.handleStreamFailure(error) })
+    const stream = createWorkspaceStateStream(remote, { accept: model, carrierFailed, failed })
+    const states = new Set<string>()
+    model.subscribe(() => { states.add(model.getSnapshot().state) })
+    const ids = (): string[] => model.getSnapshot().items.map(item => item.workspaceId).sort()
+    const replace = (...workspaceIds: string[]): WorkspaceFollowFrame => ({ type: 'replace', value: baseline(...workspaceIds).value })
+
+    stream.start()
+    await vi.waitFor(() => { expect(ids()).toEqual(['one', 'two']) })
+    // Access to `two` is revoked, restored through a replace, revoked again, and restored through an upsert.
+    mock.streams.push(FOLLOW, replace('one'))
+    await vi.waitFor(() => { expect(ids()).toEqual(['one']) })
+    mock.streams.push(FOLLOW, replace('one', 'two'))
+    await vi.waitFor(() => { expect(ids()).toEqual(['one', 'two']) })
+    mock.streams.push(FOLLOW, replace('one'))
+    await vi.waitFor(() => { expect(ids()).toEqual(['one']) })
+    mock.streams.push(FOLLOW, { type: 'upsert', workspace: workspace('two') })
+    await vi.waitFor(() => { expect(ids()).toEqual(['one', 'two']) })
+
+    expect(states).not.toContain('error')
+    expect(model.getSnapshot()).toMatchObject({ phase: 'ready', state: 'idle', error: null })
+    expect(carrierFailed).not.toHaveBeenCalled()
+    expect(failed).not.toHaveBeenCalled()
+    expect(streamStates(mock)).toEqual(['open'])
+    await stream.dispose()
+  })
+
   it('retains the old state across carrier loss and applies the replacement baseline', async ({ mock, start }) => {
     const { remote } = await gatewayClient(mock, start)
     const carrier = new RemoteStreamCarrierError('socket lost')
@@ -318,8 +351,7 @@ describe('WorkspaceController', () => {
     const controller = new WorkspaceController(client.ctx, model)
     const before = model.getSnapshot()
     mock.remote.workspace.initializeDefault.mockResolvedValueOnce({ ok: true, value: undefined })
-    await expect(controller.initializeDefault({ directoryName: 'Default workspace', title: 'Default workspace' }))
-      .resolves.toBeUndefined()
+    await expect(controller.initializeDefault()).resolves.toBeUndefined()
     expect(model.getSnapshot()).toBe(before)
   })
 
@@ -331,7 +363,7 @@ describe('WorkspaceController', () => {
 
     expect(controller.list).toBe(model)
     expect(client.ctx.workspaces.list).toBe(model)
-    await expect(controller.initializeDefault({ directoryName: '默认工作区', title: '默认工作区' }, new AbortController().signal)).resolves.toMatchObject({ workspaceId: 'default' })
+    await expect(controller.initializeDefault(new AbortController().signal)).resolves.toMatchObject({ workspaceId: 'default' })
     await expect(controller.create({ path: '/work/created' })).resolves.toMatchObject({ workspaceId: 'created' })
     await expect(controller.rename(wid('one'), 'renamed')).resolves.toMatchObject({ title: 'renamed' })
     await expect(controller.insertBefore(wid('one'))).resolves.toBeUndefined()
@@ -344,7 +376,6 @@ describe('WorkspaceController', () => {
     await expect(controller.unpinSession(sid('session'))).resolves.toBeUndefined()
     await expect(controller.delete(wid('one'))).resolves.toBeUndefined()
     // Each command crosses the wire as one positional request object.
-    expect(mock.log.requests('workspace/initializeDefault')).toEqual([{ directoryName: '默认工作区', title: '默认工作区' }])
     expect(mock.log.requests('workspace/create')).toEqual([{ path: '/work/created' }])
     expect(mock.log.requests('workspace/rename')).toEqual([{ workspaceId: 'one', title: 'renamed' }])
     expect(mock.log.requests('workspace/insertBefore')).toEqual([{ workspaceId: 'one' }])
@@ -364,7 +395,7 @@ describe('WorkspaceController', () => {
     const missingSession = new RemoteError('session/not-found', 'missing session', { sessionId: sid('session') })
 
     mock.remote.workspace.initializeDefault.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'directory denied', {})))
-    await expect(controller.initializeDefault({ directoryName: 'Default workspace', title: 'Default workspace' })).rejects.toBeInstanceOf(WorkspaceCreateError)
+    await expect(controller.initializeDefault()).rejects.toBeInstanceOf(WorkspaceCreateError)
 
     mock.remote.workspace.create.mockResolvedValueOnce(err(new RemoteError('workspace/invalid-path', 'missing path', { path: '/missing' })))
     const create = controller.create({ path: '/missing' })

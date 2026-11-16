@@ -1,5 +1,5 @@
 ---
-description: "dsh Web 客户端的 skill 发现、账号感知的 skill 管理、引用与专属 skill 工具行。"
+description: "dsh Web 客户端的 skill 引用与专属 skill 工具行：/ 触发的 skill source 与 skill 调用卡片。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-client-ui-skill` 为 Web 编辑器提供独立的可搜索 skill（技能）选择面板与账号感知的 skill 管理，同时保留 `/` 建议和直接输入 `/name` 的方式。用户可以为自己导入私有 skill，管理员可以为所有用户导入内置 skill。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。
+`dsh-client-ui-skill` 让用户通过 `/` 建议选择或直接键入 `/name` 来调用 skill（技能）。同一条字面命令可以从 Web 编辑器、TUI 和 ACP（Agent Client Protocol）一致地加载 skill；如果名称与宿主命令相同，它仍会解析为该命令。skill 调用在对话中显示为可展开的 `Instructions` 卡片；即使已安装的 skill 目录发生变化，卡片落定后的内容仍保持稳定。
 
 ## 目录
 
@@ -25,21 +25,21 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-点击编辑器中的 skill 按钮可打开搜索面板，也可以输入 `/` 后从建议中选择 skill，或直接键入 `/name`。所有路径都插入字面文本 `/name`，宿主以同一方式加载它。与宿主命令同名的名称仍解析为命令——裁决在客户端把该行认领走，它根本不会成为提示词。
+在编辑器中输入 `/` 并从建议中选择 skill，或直接键入 `/name`；发出的消息携带字面文本，宿主对菜单 pick 与手动键入的 token 以同样方式加载 skill。与宿主命令同名的名称仍解析为命令——裁决在客户端把该行认领走，它根本不会成为提示词。
 
 ### source 提供什么
 
-普通会话的候选来自 `skills/list` Remote；宿主提供每一个用户可调用的 skill，`modelInvocable: false` 的条目（即 `disable-model-invocation` skill，此路径是其唯一入口）会以当前语言把仅限用户标记作为描述前缀带上。结果经 `/` 菜单共享的名字排序器（ui-primitives 的 `rankByName`）排名：查询作为不区分大小写的有序子序列匹配 skill 名，前缀命中排最前，同分保持宿主顺序（[排名决策](../../../.agents/notes/archived/feature/2026-08-04-web-slash-command-fuzzy-discovery.md)）。`skills/list` 调用失败时会被记录并静默丢弃该菜单组——菜单只显示 pending／ready 状态。
-
-### skill 管理
-
-选择面板中的管理弹框与设置中的“技能”页面打开同一个管理器。管理器会按账号受管范围列出已安装 skill，并可导入根目录含 `SKILL.md` 的完整本机文件夹，包括配套脚本、参考资料、资源、模板与二进制文件。已认证用户可以选择“我的技能”，把文件夹保存到自己的私有工作区，在自己的所有项目中使用并自行删除；管理员还会看到“内置技能”Tab，可以把文件夹保存到所有用户共享的受管目录并由管理员删除。每次删除都必须通过独立的确认弹框。没有账号级 Skill 访问能力的组合只提供“当前项目”安装。Host 会在安装前校验授权、元数据、路径与限制，绝不覆盖同名 skill，并在安装或删除后立即更新当前 Session 的缓存目录。
+普通会话的候选来自 `skills/list` Remote；宿主提供每一个用户可调用的 skill，`modelInvocable: false` 的条目（即 `disable-model-invocation` skill，此路径是其唯一入口）会以当前语言把仅限用户标记作为描述前缀带上。结果与命令组使用同一套[文本搜索](../../util/text-search/README.zh.md)筛选：skill 名称按模糊匹配，得分相同的结果保持宿主给出的顺序。描述不参与匹配，因为 `/` 菜单高亮的是所有分组合在一起的第一行；如果较前分组中有描述命中，Enter 会选中这一行，而不是用户输入名称对应的 skill。`skills/list` 调用失败时会被记录并静默丢弃该菜单组——菜单只显示 pending／ready 状态。
 
 ### skill 工具行
 
-收起的行显示 skill 图标、`Skill` 标题与请求加载的 skill 名称，并与普通工具行使用相同的 secondary 字号轴、行高、行高度和图标缩放。所有生命周期状态都保留普通 skill 图标；运行中的调用带有 transcript（文本记录）的扫光效果，失败时以错误首行替换名称，中断则保留明确状态文本。已结算的行展开为一个尺寸受限的 `Instructions` 卡片，其中原样呈现持久化的工具输出；可用时还会提供标准轨迹的 `Inspect` 入口，展开卡片保留自身排版。该行的名称、生命周期与正文只派生自 ui-tool 提供的冻结调用／结果切片，绝不读取当前目录，因此即使已安装的 skill 或其描述发生变化，回放仍保持稳定。
+编辑器的技能按钮打开可搜索目录，并在已保存的光标位置插入 `/name`。管理器把一个完整技能文件夹导入 Host 授权的项目、个人或内置范围；只有管理员可以修改内置技能。设置中的技能分区使用同一套账号权限，并要求打开一个普通会话。管理器允许删除个人和内置技能；项目技能仍通过工作区文件管理。
 
-鼠标移入 `/name` 时，背景覆盖整个引用。点击已知 skill 会在右侧栏打开提供方给出的 `SKILL.md` 路径，同时保留文本的可编辑性。缓存未就绪时，点击复用该 Session 的目录请求，在完成后按点击时的 Session 地址打开预览。切换预设、重置连接和插件释放会取消待处理的预览；后续点击重新获取当前目录。没有文件路径的 skill 仍可调用，但没有文件预览。
+`preparing` 阶段只显示技能图标与标题，不显示请求加载的技能名称，也不能展开。`start` 和 `result` 阶段使用下述记录参数与输出；准备阶段不查询已安装目录。
+
+收起的行显示 skill 图标、`Skill` 标题与请求加载的 skill 名称，并与普通工具行使用相同的 secondary 字号轴、行高、行高度和图标缩放。所有生命周期状态都保留普通 skill 图标；运行中的调用以同一道高光从左到右扫过标题、分隔符与 skill 名称，失败时以错误首行替换名称，中断则保留明确状态文本。已结算的行展开为一个尺寸受限的 `Instructions` 卡片，其中原样呈现持久化的工具输出；可用时还会提供标准轨迹的 `Inspect` 入口，展开卡片保留自身排版。该行的名称、生命周期与正文只派生自 ui-tool 提供的冻结调用／结果切片，绝不读取当前目录，因此即使已安装的 skill 或其描述发生变化，回放仍保持稳定。 文字和图标默认使用 tertiary 色，悬停使用 secondary 色；错误和中断文字保留各自的语义色。
+
+鼠标移入 `/name` 时，背景覆盖整个引用。点击已知 skill 会在右侧栏打开提供方给出的 `SKILL.md` 路径，同时保留文本的可编辑性。缓存未就绪时，点击复用该 Session 的目录请求，在完成后按点击时的 Session 地址打开预览。切换预设、插件管理操作、重置连接和插件释放会取消待处理的预览；后续点击重新获取当前目录。没有文件路径的 skill 仍可调用，但没有文件预览。
 
 -----
 
@@ -53,13 +53,15 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 
 ### 候选流程
 
-目录按普通会话缓存，拉取走 single-flight；scope 创建时的 `warm` 钩子预热该会话的缓存项，转发的 owner 事件 `agent-preset/selected` 丢弃该会话这一项（目录属于 preset，而空会话可能在预热之后才切换），`connection/reset` 清空全部缓存。由目录寻址的可继续 subagent 在客户端解析为没有 skill 候选，因为现有 skill RPC 要求会话已挂载；查看其持久化历史不得激活它。列表 RPC 使用插件注册时捕获的根上下文连接；草稿 chip 视觉由 `lexicon` 扫描派生。
+目录按普通会话缓存，拉取走 single-flight；scope 创建时的 `warm` 钩子预热该会话的缓存项，转发的 owner 事件 `agent-preset/selected` 丢弃该会话这一项（目录属于 preset，而空会话可能在预热之后才切换），转发的 `plugin-manager/changed` 事件清空全部缓存（插件管理操作可能增删每个会话都会读取的 skill provider），`connection/reset` 清空全部缓存。由目录寻址的可继续 subagent 在客户端解析为没有 skill 候选，因为现有 skill RPC 要求会话已挂载；查看其持久化历史不得激活它。列表 RPC 使用插件注册时捕获的根上下文连接；草稿 chip 视觉由 `lexicon` 扫描派生。
 
-每次目录拉取都要求客户端已持有该会话，并等待首次历史打开成功后才发送 `skills/list`。临时的 `skillCatalog` 引用持续持有会话，直到拉取结束。未被持有的会话或打开失败会直接拒绝，不发送 RPC；预设失效、连接重置和插件释放也会取消正在等待的历史打开。
+每次目录拉取都要求客户端已持有该会话，并等待首次历史打开成功后才发送 `skills/list`。临时的 `skillCatalog` 引用持续持有会话，直到拉取结束。未被持有的会话或打开失败会直接拒绝，不发送 RPC；预设失效、插件管理操作、连接重置和插件释放也会取消正在等待的历史打开。
 
 ### 注册
 
-`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。选择面板注册进 `conversation.input.left`，设置页面注册进 `settings.section`，两者都从插件取得按 Session 绑定的目录、安装与删除操作；按地址访问的 subagent Session 不显示选择面板。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。
+`/client` 导出接口只有插件主体（`apply`／`inject`）；source 对象是注册 effect 的内部实现。工具行把 `skill` wire 名称注册进 ui-tool 的 keyed `tool.call.toolview` slot。
+
+对于已发送文本，插件注册使用调用方已确认 `skillNames`、返回原文中下一个候选的 UserText 匹配器，并拥有 `conversation.user.text.node` 中的 `skill` 条目。renderer 从自身绑定 Session 的 Injection 接收 `openSkill`，委托本 source 的预览操作，而非 Chat owner props。不可交互的预览仍为标签。[UserText](../ui-conversation/README.zh.md#sent-user-text) 拥有求值与节点分发。
 
 </details>
 
@@ -104,7 +106,8 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 - **仅含工具结果的 history 页使用通用行**：键控分派要求配对的工具调用位于运行时窗口内；分页将工具调用留在窗口外时，工具结果没有工具身份。这项客户端呈现功能不会为了恢复该身份而扩展 history 协议约定。
 - **文本是唯一依据**：引用是普通的草稿文本；手动键入的相同 token 就是同一个引用，宿主手势边界评判的是发出的文本，而不是菜单交互。chip 视觉由 lexicon 扫描派生；提示词协议上没有 occurrence 身份、位置跟踪或结构化引用载荷。
 - **预热落定之前打开的菜单**：在那次击键下不显示 skill 候选；下一次击键会重新轮询已落定的缓存。
-- **导入要求浏览器选择文件夹**：管理弹框导入所选目录树，不接受 ZIP 压缩包或单独的 `SKILL.md` 文件。
+- **没有转发事件的目录变更保留已缓存的目录**：CLI 或手动编辑后由 HMR 应用的重载不发出 `plugin-manager/changed` 事件，在磁盘上增删 `SKILL.md` 也不会转发任何事件，已打开的会话会继续列出之前的 skill，直到切换预设、执行插件管理操作或重置连接。
+- **草稿中的 skill 高亮等待下一次目录拉取**：切换预设、插件管理操作或重置连接会清空该会话的 lexicon；菜单关闭时，草稿里已有的 `/name` 会失去 skill 高亮，直到 `/` 菜单重新拉取目录；菜单打开时会立即重新拉取。
 
 <a id="dev-note"></a>
 ### 开发备注
@@ -115,5 +118,3 @@ source 不实现任何裁决钩子，也没有引用 codec：pick 落下字面�
 无。
 
 </details>
-
-**运行时不变式：** 不发布伴生入口。slash source、选择面板、locale dictionary 与 keyed toolview 都是由注册表持有的注册项，其释放行为已由 HMR（热模块替换）安全规范证明；它们不发出 Cordis 事件或持有跨插件可变状态。

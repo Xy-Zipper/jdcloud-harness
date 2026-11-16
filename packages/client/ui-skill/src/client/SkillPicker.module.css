@@ -33,6 +33,9 @@
 
 .panel {
   position: fixed;
+  bottom: max(12px, calc(anchor(top) + 8px));
+  left: max(12px, anchor(left));
+  position-try-fallbacks: flip-inline;
   z-index: 1100;
   box-sizing: border-box;
   display: flex;

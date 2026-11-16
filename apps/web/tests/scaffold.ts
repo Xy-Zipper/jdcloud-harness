@@ -33,8 +33,7 @@ import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import yaml from 'js-yaml'
+import { stringifyEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import {
   captureExpectedWorkspaceSnapshot,
   captureWorkspaceSnapshot,
@@ -48,6 +47,7 @@ import {
   redactSessionSnapshotIds,
   normalizeSessionSnapshots,
   parseSessionFixtureName,
+  REPLAY_CREDENTIAL_ENV,
   scrubModelRequestBulk,
   scrubSessionSnapshot,
   sessionFixtureFiles,
@@ -58,6 +58,7 @@ import {
   type NormalizeContext,
 } from '@deepseek-ai/dsh-session-snapshot'
 import type { Profile, ProfileContext } from '@deepseek-ai/dsh-app-boot'
+import type { PresetDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type {
@@ -73,18 +74,19 @@ import type { SessionFormatEvent } from '@deepseek-ai/dsh-session-format'
 import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
 import {
   SESSION_FORMAT_VERSION,
-  SessionId,
+  type SessionId,
   type Session,
   type SessionEvent,
   type SessionHeader,
 } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 // Empty type imports carry the webServer/agents/sessionPersistence Context merges.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-agent'
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { startPrefixProxy, type PrefixProxy } from './prefix-proxy.ts'
 import { REPO_ROOT, requireBuilt, requireDist } from './support.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 type AppBoot = typeof import('@deepseek-ai/dsh-app-boot')
 let builtAppBoot: AppBoot | undefined
@@ -113,11 +115,11 @@ export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'ui-settings-general'
 /** The installed bundle carrying the scaffold's deployment defaults; the plugin manager lists it beside fixture bundles. */
 export const SCAFFOLD_DEFAULTS_BUNDLE = 'dsh-web-scaffold-defaults'
 export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
-export const WELCOME_NOTICE_VERSION = '2026-08-13.1'
+export const WELCOME_NOTICE_VERSION = '2026-09-28.1'
 export const WELCOME_NOTICE_COPY = {
   zh: {
-    title: '内测声明',
-    body: 'DeepSeek Harness 目前的 0.1 版本仍处在面向 Harness 开发者进行测试的阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者的反馈建议。预计 DeepSeek Harness 的核心插件以及基础 API 都会在接下来的一段时间内快速迭代、持续演化。\n\n我们期待与全球开发者一起，在开源、开放、可复用、可组合的基础设施之上，共同探索智能上限。欢迎全球 Harness 开发者加入 DSH 插件生态。',
+    title: '预览版说明',
+    body: 'DeepSeek Harness 目前的 0.2 版本仍处于预览阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者和用户的反馈建议。现在，新的桌面端面向广泛用户，开发者相关的进阶功能可在配置中开启使用。预计 DeepSeek Harness 的产品功能以及插件 API 都会继续快速迭代、持续演化，并逐渐趋于稳定。\n\n我们期待与全球用户和开发者一起，在开源、可复用、可组合的基础设施之上，共同探索智能上限。欢迎大家用 DeepSeek Harness 将想法变成现实，与社区一起丰富插件生态。',
     continueLabel: '继续',
   },
 } as const
@@ -304,14 +306,14 @@ export interface WebScaffold {
 
 /** Options for {@link launchWebScaffold}. */
 export interface LaunchOptions {
-  /** Match a deployment overlay whose independent browser identity uses Bearer transport. */
-  browserSessionTransport?: 'bearer'
   /** Override the developer-tools preference; omitted uses the shipped default. */
   developerTools?: boolean
   /** Enable the real Open In rows with deterministic launch-environment facts. */
   openInAppEnvironment?: LaunchEnvironmentSnapshot
   /** Compare the replayed root Session; `read-only` also forbids refresh writes to a borrowed fixture. */
   compareReplaySession?: boolean | 'read-only'
+  /** Fixed JSON-quoted workspace path length for compaction estimates; omitted values use the ordinary prefix. */
+  workspacePathLength?: number
   /**
    * Optional product overlay applied after the shipped Web surface and before
    * the scaffold's hermetic test patches, matching the launcher's `--patch`
@@ -336,6 +338,8 @@ export interface LaunchOptions {
    */
   profile?: {
     hmr?: boolean
+    /** Launcher-owned invocation and environment for profile package operations. */
+    packageManager?: ProfileContext['packageManager']
     packages: { dir: string; enabled?: boolean }[]
     /** Additional selected names, including bundles unavailable after an upgrade. */
     bundles?: readonly string[]
@@ -383,13 +387,6 @@ export interface LaunchOptions {
   /** Synthetic model capacity for UI scenarios whose seeded history must remain uncompacted. */
   replayContextWindow?: number
   /**
-   * Tool presentation mode patched onto the shipped `tools` row (`code`
-   * collapses the wire to run_code + the SDK prompt section). Omit for the
-   * yml default. The PTC runtime row is always in the tree, so no extra
-   * insertion is needed.
-   */
-  toolsMode?: 'native' | 'ptc' | 'both'
-  /**
    * Keep the shipped DeepSeek adapter mounted while masking the process
    * environment's DEEPSEEK_API_KEY for this scaffold lifetime. This is the
    * keyless first-run configuration lane; the default disables the adapter.
@@ -399,15 +396,24 @@ export interface LaunchOptions {
   welcomeNoticePending?: boolean
   /** Leave first-use Workspace initialization eligible; ordinary scenarios start after the default was removed. */
   firstUse?: boolean
-  /**
-   * Patch the shipped DeepSeek search row to a deterministic endpoint and
-   * credential reference. Browser search scenarios keep the real provider and
-   * credentials seam while avoiding external search traffic and ambient keys.
-   */
+  /** Pin the legacy Messages search endpoint and credential reference. */
   deepSeekSearch?: {
-    /** Anthropic-compatible base URL; the provider appends `/messages`. */
-    baseURL: string
-    /** Credential reference resolved by the shipped search provider. */
+    /** Anthropic-compatible base URL; `/messages` is appended. */
+    baseURL?: string
+    /** Credential reference read for each search. */
+    apiKeyEnv: string
+  }
+  /**
+   * Give both sections of the shipped DeepSeek Search and Fetch API row their
+   * own credential reference and, when given, endpoint, so neither follows the
+   * conversation's DeepSeek credential. Browser search scenarios keep the real
+   * providers and credentials seam while avoiding external search traffic and
+   * ambient keys.
+   */
+  deepSeekWebApi?: {
+    /** Base URL of both sections; omitted uses the official base. The providers append `/search` or `/fetch`. */
+    baseURL?: string
+    /** Credential reference of both sections. */
     apiKeyEnv: string
   }
   /** Preset selection default and additional declarative definitions for this scenario. */
@@ -491,10 +497,15 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     throw new Error('deepSeekMissingCredential is a keyless replay/refresh option')
   }
   const maskDeepSeekCredential = mode !== 'record' && options.deepSeekMissingCredential === true
+  // A keyless run that replays recorded model calls pins the snapshot replay placeholder: shipped
+  // compositions offer web_search only while a DeepSeek search key is configured, and recordings
+  // ran with a real key. Other runs keep the launching environment, as their goldens do.
+  const pinDeepSeekCredential = mode !== 'record' && !maskDeepSeekCredential
+    && options.replayFixture !== undefined && options.replayProvidersOnly !== true
   const originalDeepSeekCredential = process.env.DEEPSEEK_API_KEY
   let credentialEnvironmentRestored = false
   const restoreCredentialEnvironment = (): void => {
-    if (credentialEnvironmentRestored || !maskDeepSeekCredential) return
+    if (credentialEnvironmentRestored || (!maskDeepSeekCredential && !pinDeepSeekCredential)) return
     credentialEnvironmentRestored = true
     if (originalDeepSeekCredential === undefined) {
       Reflect.deleteProperty(process.env, 'DEEPSEEK_API_KEY')
@@ -502,7 +513,15 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       process.env.DEEPSEEK_API_KEY = originalDeepSeekCredential
     }
   }
-  const workspaceCwd = await realpath(await mkdtemp(join(tmpdir(), 'dsh-web-e2e-ws-')))
+  const workspaceParent = await realpath(tmpdir())
+  let workspacePrefix = 'dsh-web-e2e-ws-'
+  if (options.workspacePathLength !== undefined) {
+    // mkdtemp appends six characters; JSON quoting is part of the runtime-context text.
+    const paddingLength = options.workspacePathLength - JSON.stringify(join(workspaceParent, `${workspacePrefix}XXXXXX`)).length
+    if (paddingLength < 0) throw new Error('compaction snapshot temporary root exceeds its fixed cwd text length')
+    workspacePrefix += '-'.repeat(paddingLength)
+  }
+  const workspaceCwd = await realpath(await mkdtemp(join(workspaceParent, workspacePrefix)))
   // Isolated harness home: the settings/credentials rows resolve $DSH_HOME
   // paths at load, and an in-process boot must NEVER touch the developer's
   // real ~/.dsh document or credential file.
@@ -546,6 +565,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     throw error
   }
   if (maskDeepSeekCredential) Reflect.deleteProperty(process.env, 'DEEPSEEK_API_KEY')
+  if (pinDeepSeekCredential) Object.assign(process.env, REPLAY_CREDENTIAL_ENV)
 
   // The include patch set — the same layer stack the profile boot composes
   // (bundle patches in dsh.profile.bundles order), applied over the SAME empty root (a
@@ -630,11 +650,11 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       },
     },
     // The bundle's web-runtime row resolves the same built dist under test
-    // (apps/web IS @deepseek-ai/dsh-web-frontend); native browser opening and the
-    // URL line are disabled because this scaffold owns its Playwright browser.
+    // (apps/web IS @deepseek-ai/dsh-web-frontend). The scaffold captures the real
+    // WebApp-published login URL; Playwright owns browser opening.
     // Preserve the composed surface-context choice because a patch replaces
     // the row's complete config.
-    { id: 'web-runtime', config: { openBrowser: false, printUrl: false, surfaceContext } },
+    { id: 'web-runtime', config: { surfaceContext, openBrowser: false, printUrl: true } },
     ...publicHost === undefined && options.remoteAuthority === undefined
       ? []
       : [{
@@ -666,23 +686,46 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       { id: 'agent-preset-registry', config: { default: options.agentPresets.default } },
       { insert: (options.agentPresets.definitions ?? []).map(config => ({ id: `preset-${config.id}`, name: '@deepseek-ai/dsh-agent-preset', config })) },
     ],
-    ...options.toolsMode === undefined ? [] : [{ id: 'tools', config: { mode: options.toolsMode } }],
-    ...options.deepSeekSearch === undefined
-      ? []
-      : [{
-        id: 'web-search-deepseek',
+    ...options.deepSeekWebApi === undefined ? [] : [
+      {
+        id: 'web-deepseek-api',
         config: {
-          apiKeyEnv: options.deepSeekSearch.apiKeyEnv,
-          baseURL: options.deepSeekSearch.baseURL,
+          searchApiKeyEnv: options.deepSeekWebApi.apiKeyEnv,
+          fetchApiKeyEnv: options.deepSeekWebApi.apiKeyEnv,
+          ...options.deepSeekWebApi.baseURL === undefined ? {} : {
+            searchBaseURL: options.deepSeekWebApi.baseURL, fetchBaseURL: options.deepSeekWebApi.baseURL,
+          },
         },
-      }],
+      },
+    ],
+    ...options.deepSeekSearch === undefined ? [] : [{
+      id: 'web-search-deepseek',
+      config: {
+        apiKeyEnv: options.deepSeekSearch.apiKeyEnv,
+        ...options.deepSeekSearch.baseURL === undefined ? {} : { baseURL: options.deepSeekSearch.baseURL },
+      },
+    }],
     { id: 'llm-deepseek', disabled: mode !== 'record' && !maskDeepSeekCredential },
   ]
 
+  // Recorded standard sessions pin the optional patch tool in their request headers.
+  if (options.replayFixture !== undefined || options.compareReplaySession === true) {
+    const config = composedRows.find(row => row.id === 'preset-standard')!.config as PresetDefinition
+    overlayPatches.push({
+      id: 'preset-standard',
+      config: {
+        ...config,
+        plugins: config.plugins.map(plugin => plugin.id === 'tool-fs'
+          ? { ...plugin, config: { ...plugin.config, applyPatch: true } }
+          : plugin),
+      },
+    })
+  }
+
   // Live fields use a shared deployment layer; process-specific ports and roots stay in CLI overlays.
   const formEntries = new Set(['agent-default-model', 'agent-preset-registry', 'llm-deepseek', 'llm-pi-ai',
-    'web-search-deepseek', 'agent-loop', 'subagent', 'bash-sandbox', 'pwsh-sandbox',
-    'ui-theme', 'locale', 'ui-chat', 'ui-conversation', 'ui-settings', 'ui-settings-general', 'permission'])
+    'web', 'web-search-deepseek', 'web-deepseek-api', 'agent-loop', 'subagent', 'bash-sandbox', 'pwsh-sandbox',
+    'session-log-deepseek', 'ui-theme', 'locale', 'ui-chat', 'ui-conversation', 'ui-settings', 'ui-settings-general', 'permission'])
   const formDefaults: PatchOptions[] = []
   const processOverlays = overlayPatches.map((patch) => {
     if (patch.id === undefined || !formEntries.has(patch.id) || patch.config === undefined) return patch
@@ -706,7 +749,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
   let baseUrl = ''
   let authenticatedUrl = ''
   let cookieHeader = ''
-  let browserBearer: string | undefined
+  let bearerHeader: string | undefined
   let publicProxy: PrefixProxy | undefined
   let replayHandle: ReplayHandle | undefined
   try {
@@ -735,7 +778,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
         patches: [],
       }
     }))
-    const profile: Profile = {
+    const profile: Profile = { skippedBundles: [],
       name: 'scaffold',
       dir: profileDir,
       layers: extraLayers,
@@ -743,7 +786,6 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       patches: [],
     }
     const resolutionOptions = { installAnchor: INSTALL_ANCHOR, home: harnessHome, profile }
-    const resolution = await createRuntimeResolution(resolutionOptions)
     await mkdir(profileDir, { recursive: true })
     const rootConfig = join(profileDir, 'cordis.yml')
     await writeFile(rootConfig, '[]\n')
@@ -766,7 +808,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       const fixtureDir = join(profileDir, 'node_modules', SCAFFOLD_DEFAULTS_BUNDLE)
       await mkdir(fixtureDir, { recursive: true })
       await writeFile(join(fixtureDir, 'package.json'), JSON.stringify({ name: SCAFFOLD_DEFAULTS_BUNDLE, version: '1.0.0', dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
-      await writeFile(join(fixtureDir, 'cordis.patch.yml'), yaml.dump(formDefaults, { schema: entryListSchema }))
+      await writeFile(join(fixtureDir, 'cordis.patch.yml'), stringifyEntryYaml(formDefaults))
       bundles.push(SCAFFOLD_DEFAULTS_BUNDLE)
       dependencies[SCAFFOLD_DEFAULTS_BUNDLE] = `file:${fixtureDir}`
       initProfile(profileDir, bundles)
@@ -775,6 +817,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       await writeFile(join(profileDir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
       profileContext = {
         name: 'scaffold', dir: profileDir, patchPath: profile.patchPath, installAnchor: INSTALL_ANCHOR,
+        ...options.profile?.packageManager === undefined ? {} : { packageManager: options.profile.packageManager },
         cwd: workspaceCwd, home: harnessHome,
         startedBundles: loadProfileDirectory('dsh', profileDir, INSTALL_ANCHOR).layers.map(layer => layer.packageName),
         overlays: processOverlays, telemetryDisabledEnv: undefined,
@@ -796,13 +839,49 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
         throw new Error(`web e2e scaffold: the web app requested exit ${String(code)} with no arguments to reject`)
       },
     })
+    const resolution = await createRuntimeResolution(resolutionOptions)
     await ctx.plugin(PluginPackages, {
       resolution,
     })
     await ctx.plugin(Loader)
-    await mountRootInclude(ctx, rootConfig, readProfilePatches('dsh', profileContext))
-    await ctx.loader.await()
-    await auditStartupEntries(ctx, 'web e2e scaffold')
+    // Scaffold boots already own process.cwd() exclusively within their test worker.
+    // Capture only this listener's login line, and restore console on failed boot too.
+    const startupLogin = Promise.withResolvers<URL>()
+    let startupLoginUrl: URL
+    const originalLog = console.log
+    console.log = (...args: unknown[]) => {
+      const line = args.length === 1 && typeof args[0] === 'string' ? args[0] : ''
+      const match = /^dsh web: (http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+)$/u.exec(line)
+      if (match !== null) {
+        const url = new URL(match[1]!)
+        const boundPort = ctx.get('webServer')?.port
+        if (boundPort !== undefined && url.port === String(boundPort)) {
+          startupLogin.resolve(url)
+          return
+        }
+      }
+      originalLog(...args)
+    }
+    let startupTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await mountRootInclude(ctx, rootConfig, readProfilePatches('dsh', profileContext))
+      await ctx.loader.await()
+      await auditStartupEntries(ctx, 'web e2e scaffold')
+      // Ontology's tab provider serves the login document before an account is authenticated.
+      if (ctx.get('browserSession') !== undefined) {
+        const port = ctx.get('webServer')?.port
+        if (port === undefined) throw new Error('web e2e scaffold: browser session requires WebServer')
+        startupLoginUrl = new URL(`http://127.0.0.1:${String(port)}/`)
+      } else {
+        startupTimer = setTimeout(() => {
+          startupLogin.reject(new Error('web e2e scaffold: token plugin did not publish its login URL'))
+        }, 10_000)
+        startupLoginUrl = await startupLogin.promise
+      }
+    } finally {
+      clearTimeout(startupTimer)
+      console.log = originalLog
+    }
     if (options.developerTools !== undefined) {
       await ctx.settings.update('ui-settings', { enabled: options.developerTools })
     }
@@ -812,7 +891,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       }])
     }
     if (options.firstUse !== true && ctx.workspaceRegistry.list().length === 0) {
-      const initial = await ctx.workspaceRegistry.initializeDefault(async () => ({ path: workspaceCwd, title: 'Workspace' }))
+      const initial = await ctx.workspaceRegistry.initializeDefault(async () => workspaceCwd)
       if (initial !== undefined) await ctx.workspaceRegistry.delete(initial.id)
     }
     const boundPort = ctx.get('webServer')?.port
@@ -886,27 +965,21 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       publicProxy.setTarget(port)
       baseUrl = `http://${publicHost}:${String(publicProxy.port)}${publicPrefix}`
     }
-    authenticatedUrl = ctx.connection.authenticatedUrl(baseUrl)
-    // Chromium resolves *.localhost itself; Node may not, so a mounted scaffold
-    // posts the exchange to loopback, the authority the Host fence always trusts.
+    const browserLoginUrl = new URL(baseUrl)
+    browserLoginUrl.search = startupLoginUrl.search
+    authenticatedUrl = browserLoginUrl.href
+    // Chromium resolves *.localhost itself; Node may not. Both scaffold
+    // listeners bind loopback, including the optional prefix proxy.
     const loginUrl = new URL(authenticatedUrl)
-    if (publicPrefix !== undefined) loginUrl.hostname = '127.0.0.1'
-    if (options.browserSessionTransport === 'bearer') {
-      const bootstrapUrl = new URL('api/browser-session', loginUrl)
-      const bootstrap = await fetch(bootstrapUrl, { method: 'POST', headers: { origin: bootstrapUrl.origin } })
-      const value: unknown = await bootstrap.json()
-      if (!bootstrap.ok || typeof value !== 'object' || value === null
-        || typeof Reflect.get(value, 'token') !== 'string') {
-        throw new Error('web e2e scaffold: browser Bearer bootstrap did not return its session token')
-      }
-      browserBearer = Reflect.get(value, 'token') as string
+    loginUrl.hostname = '127.0.0.1'
+    if (ctx.get('browserSession') !== undefined) {
+      const browserSession = ctx.get('browserSession')!
+      const session = browserSession.issueBearer({ headers: { host: loginUrl.host } })
+      bearerHeader = `Bearer ${session.token}`
     } else {
       const login = await fetch(loginUrl, { redirect: 'manual' })
       const setCookie = login.headers.get('set-cookie')
-      // Launch-token authentication redirects relative to the mounted app, while
-      // BrowserSession-only profiles redirect to the root that issued the cookie.
-      const loginLocation = login.headers.get('location')
-      if (login.status !== 303 || (loginLocation !== './' && loginLocation !== '/') || setCookie === null) {
+      if (login.status !== 303 || login.headers.get('location') !== './' || setCookie === null) {
         throw new Error('web e2e scaffold: browser token exchange did not return its session cookie')
       }
       cookieHeader = setCookie.split(';', 1)[0] ?? ''
@@ -940,8 +1013,8 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     persistenceRoot,
     hostFetch(path: string, init: RequestInit = {}): Promise<Response> {
       const headers = new Headers(init.headers)
-      if (browserBearer === undefined) headers.set('cookie', cookieHeader)
-      else headers.set('authorization', `Bearer ${browserBearer}`)
+      if (bearerHeader === undefined) headers.set('cookie', cookieHeader)
+      else headers.set('authorization', bearerHeader)
       return fetch(new URL(path, baseUrl), { ...init, headers })
     },
     // Barrier stack: the in-process turn/end identifies the session, its
@@ -1013,8 +1086,10 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
 /**
  * Serialize a live session to the canonical raw session-JSONL layout — the
  * in-memory record-mode harvest, so the on-disk zstd default never matters.
+ * @param session - Captured live Session, including any inherited fork prefix.
+ * @returns Current-writer Session JSONL.
  */
-function rawSessionLog(session: Session): string {
+export function rawSessionLog(session: Session): string {
   const encodedEvents = (session.snapshotEvents() as unknown as readonly SessionFormatEvent[])
     .map(event => sessionFormatCatalog.encodeCurrentEvent(event))
   const header = sessionFormatCatalog.encodeCurrentHeader({
@@ -1038,6 +1113,27 @@ function mapJsonStringValues(value: unknown, map: (value: string) => string): un
     ]))
   }
   return value
+}
+
+/** Volatile fields inside one durable time-context reading, each replaced by a fixed token. */
+const TIME_CONTEXT_READING_FIELDS: readonly (readonly [RegExp, string])[] = [
+  [/(Time sampled while preparing turn \d+, step \d+: )[^\n]*/, '$1{{timeContextTimestamp}}'],
+  [/(Browser time zone for this request: )[^.]*\./, '$1{{clientTimeZone}}.'],
+  [/(Elapsed since the preceding [^:]*: )[^\n]*/, '$1{{elapsed}}'],
+]
+
+/** Replace the sampled instant, browser zone, and elapsed duration a time-context reading carries. */
+function tokenizeTimeContextReading(text: string): string {
+  let normalized = text
+  for (const [pattern, replacement] of TIME_CONTEXT_READING_FIELDS) normalized = normalized.replace(pattern, replacement)
+  return normalized
+}
+
+/** Whether one parsed Session record is a durable time-context reading. */
+function isTimeContextReading(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false
+  const record = value as { type?: unknown; data?: { source?: { kind?: unknown } } }
+  return record.type === 'user/message' && record.data?.source?.kind === 'time-context'
 }
 
 /** Tokenize the browser timezone carried by user message sources. */
@@ -1117,14 +1213,20 @@ export function normalizeWebSessionVolatiles(log: string, workspaceCwd?: string)
     }))].sort((left, right) => right.length - left.length)
   return log.split(/\r?\n/).map((line) => {
     if (line.trim() === '') return line
-    const record = normalizeClientTimeZones(mapJsonStringValues(JSON.parse(line), (value) => {
+    let record = normalizeClientTimeZones(mapJsonStringValues(JSON.parse(line), (value) => {
       let normalized = value
         .replace(/Anonymous user: [0-9a-f-]{36}(?=\.$)/gi, 'Anonymous user: {{anonymousUserId}}')
+        // The checkout path and listener port differ per machine and run.
+        .replace(/Current DeepSeek Harness implementation checkout: "(?:[^"\\]|\\.)*"\./g, 'Current DeepSeek Harness implementation checkout: "{{sourceRoot}}".')
+        .replace(/Current DeepSeek Harness Web GUI URL: "(?:[^"\\]|\\.)*"\./g, 'Current DeepSeek Harness Web GUI URL: "{{webUrl}}".')
       for (const cwd of cwdSpellings) normalized = replaceWebCwd(normalized, cwd)
       return normalized
     })) as { type?: unknown; data?: { endpoint?: unknown } }
     if (record.type === 'web/deepseek-search-llm-request' && typeof record.data?.endpoint === 'string') {
       record.data.endpoint = '{{webSearchEndpoint}}'
+    }
+    if (isTimeContextReading(record)) {
+      record = mapJsonStringValues(record, tokenizeTimeContextReading) as typeof record
     }
     return JSON.stringify(record)
   }).join('\n')
@@ -1167,7 +1269,7 @@ async function assertReplaySession(
   let expectedPath = fixturePath
   const userPrompts = fixtureUserPrompts(expected)
   const candidates = sessions.filter((session) => {
-    if (session.header.parentSession !== undefined) return false
+    if (session.header.origin === 'subagent' || session.header.isSeeded) return false
     const actual = session.snapshotEvents().flatMap((event) => {
       if (event.type !== 'user/message' || event.data.source.kind !== 'user') return []
       const text = event.data.content.filter(block => block.type === 'text').map(block => block.text).join('')
@@ -1426,7 +1528,7 @@ export async function seedSession(
   const createdAt = options.createdAt ?? Date.now() - 60_000
   const meta: SessionHeader = {
     version: SESSION_FORMAT_VERSION,
-    id: SessionId(id),
+    id: brandString<SessionId>(id),
     createdAt,
     isSeeded: false,
     cwd: scaffold.workspaceCwd,
@@ -1536,6 +1638,7 @@ function normalizeAria(snapshot: string, workspaceCwd: string, age: boolean): st
     .split(workspaceCwd).join('{{cwd}}')
     .split(base).join('{{workspace}}')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '{{uuid}}')
+    .replace(/(?<=-)[0-9a-f]{16}(?![0-9a-f])/gi, '{{uuid}}')
     // The optional space in `\d+m ?\d+s` covers both minute spellings: the
     // stats line's compact `2m42s` and the message-chrome template's `2m 42s`.
     .replace(
@@ -1712,10 +1815,12 @@ export async function assertFixtureInventory(dir: string, expected: string[]): P
 
 /**
  * Console tripwires: reconnect/gap-repair self-healing or a pageerror must
- * fail the scenario, not mask a dead wire behind eventual consistency.
+ * fail the scenario, not mask a dead wire behind eventual consistency. A boot
+ * audit warning fails it too: the product boot tolerates inactive optional
+ * entries, but every e2e composition must activate completely.
  */
 export interface WebConsoleTripwire {
-  /** Console warnings matching reconnect/gap-repair/discontinuity copy. */
+  /** Console warnings matching reconnect/gap-repair/discontinuity copy or the boot audit's inactive-entry warning. */
   warnings: string[]
   /** Uncaught page errors. */
   pageErrors: string[]
@@ -1731,7 +1836,7 @@ export function watchConsole(page: Page): WebConsoleTripwire {
   const pageErrors: string[] = []
   page.on('console', (message) => {
     const text = message.text()
-    if (/connection lost|gap repair|discontinuous/i.test(text)) warnings.push(text)
+    if (/connection lost|gap repair|discontinuous|web boot: warning/i.test(text)) warnings.push(text)
   })
   page.on('pageerror', (error) => { pageErrors.push(String(error)) })
   return { warnings, pageErrors }

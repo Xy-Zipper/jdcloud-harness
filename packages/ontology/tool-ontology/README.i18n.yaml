@@ -1,6 +1,82 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/ontology/tool-ontology/README.md
-README.md: 5cfc31214d5054fc2c338d24a3a912e8c8cec407
-README.zh.md: 09004596f90a80de0cd3ee0a137704cdbd466a00
+/:
+  en: fdc85ba77404a067
+  zh: bb78b8515183a387
+/deepseek-ai-dsh-tool-ontology:
+  en: c61aeb57f3596139
+  zh: 58e35ceb5e876f99
+/deepseek-ai-dsh-tool-ontology/summary:
+  en: 8bc1c11711ed05e9
+  zh: e6061e1c7f68add8
+/deepseek-ai-dsh-tool-ontology/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: de4a2a92773d135e
+/deepseek-ai-dsh-tool-ontology/use-this-package:
+  en: ad1a5925488b0e2c
+  zh: 764538057caeb3f0
+/deepseek-ai-dsh-tool-ontology/use-this-package/operation-order:
+  en: 79d4a2cd2471beee
+  zh: 1ddf00c2e1a7ebc9
+/deepseek-ai-dsh-tool-ontology/use-this-package/draft-modeling:
+  en: abdb6ec6b8b9bf9a
+  zh: 3b2fbc0afbcf1ae8
+/deepseek-ai-dsh-tool-ontology/use-this-package/failures-and-recovery:
+  en: dcc52396983d35fd
+  zh: 36dff8a88d5ba7bb
+/deepseek-ai-dsh-tool-ontology/understand-the-implementation:
+  en: b4f2a017a30d3caa
+  zh: 9aa809b00deb92f9
+/deepseek-ai-dsh-tool-ontology/further-exploration:
+  en: c3903343e339f037
+  zh: e2a8a2160f8e3722
+/deepseek-ai-dsh-tool-ontology/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-tool-ontology/model-experience/system-prompt:
+  en: cf78b9dd5596495f
+  zh: bd44560f8c2435e8
+/deepseek-ai-dsh-tool-ontology/model-experience/system-prompt/what-the-model-sees:
+  en: 3f339466c82cf240
+  zh: f7139f60db4a0df8
+/deepseek-ai-dsh-tool-ontology/model-experience/system-prompt/what-the-model-sees/ontology-guidance:
+  en: db355d0263699988
+  zh: f19731aa07f79285
+/deepseek-ai-dsh-tool-ontology/model-experience/system-prompt/token-effect:
+  en: 6ee4d42e6b3b56c1
+  zh: c539162217f0bfbd
+/deepseek-ai-dsh-tool-ontology/model-experience/system-prompt/kv-cache-effect:
+  en: 584fb381b3efd479
+  zh: 3efafddfe4d58450
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-schemas:
+  en: 3039bc5e7a796b21
+  zh: 6b7a9eaf69c9ea53
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-schemas/what-the-model-sees:
+  en: a97cc3e1faef0fa3
+  zh: 80d0d4e1603af324
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-schemas/token-effect:
+  en: a83d7b33958b242d
+  zh: 772c96e316f3c49f
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-schemas/kv-cache-effect:
+  en: b0f8b37e6f77f80f
+  zh: 5ab8a8fde361054e
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-results:
+  en: beaabb79f229692a
+  zh: 8573891441963be4
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-results/what-the-model-sees:
+  en: 69d9daeeceff0c6b
+  zh: 22ecb1c5c7e9583c
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-results/token-effect:
+  en: 309233263eb79f94
+  zh: 172480609a72b8ea
+/deepseek-ai-dsh-tool-ontology/model-experience/tool-results/kv-cache-effect:
+  en: 725d2b6537e45392
+  zh: d0c640efb5d761a6
+/deepseek-ai-dsh-tool-ontology/known-limitations-and-deferred-work:
+  en: 67aa4181fdcbd42f
+  zh: 7e86148610d7f301
+/deepseek-ai-dsh-tool-ontology/known-limitations-and-deferred-work/dev-note:
+  en: f892ebe3701d2e69
+  zh: 3374b1f772a684ba

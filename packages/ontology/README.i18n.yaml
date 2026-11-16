@@ -1,6 +1,25 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/ontology/README.md
-README.md: 7a2d4ba340490905f14730b39f7c3054bf2213a1
-README.zh.md: 06bc0b2ea1237d70a75f37154dc5863ad0817a75
+/:
+  en: defc0fc355b97344
+  zh: f0064bcd334a786a
+/ontology-model-facing-ontology-runtime-access:
+  en: cf82cb9a5f5ed47b
+  zh: b855a8412b01e52e
+/ontology-model-facing-ontology-runtime-access/summary:
+  en: 4462f45d24cf27ba
+  zh: b4c32e6e919d1839
+/ontology-model-facing-ontology-runtime-access/table-of-contents:
+  en: 1eb35b015a6c423f
+  zh: a8a3dceee2c9e943
+/ontology-model-facing-ontology-runtime-access/packages:
+  en: 11883fe28a9576ee
+  zh: 7c83c4c306e70986
+/ontology-model-facing-ontology-runtime-access/related-documentation:
+  en: 4fee62338e711735
+  zh: cf6f78a28c79f56b
+/ontology-model-facing-ontology-runtime-access/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

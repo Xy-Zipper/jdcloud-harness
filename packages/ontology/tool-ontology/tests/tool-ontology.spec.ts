@@ -1,4 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -125,6 +127,7 @@ async function fixture(options: FixtureOptions = {}) {
       ? undefined : { projectId: options.modelingProjectId, projectName: '销售', mode: 'modeling' },
   } as never)
   await ctx.plugin(SystemPrompt)
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(ApprovalService)
   const approvalRequests = vi.fn<(approval: ApprovalRequest) => Promise<ApprovalOutcome>>(
@@ -136,7 +139,7 @@ async function fixture(options: FixtureOptions = {}) {
   session.append('turn/start', { turn: 1 })
   const agent = { session } as never
   let call = 0
-  const execute = (name: string, argumentsValue: unknown) => ctx.tools.execute({
+  const execute = (name: string, argumentsValue: unknown) => executeToolFixture(ctx, {
     name,
     arguments: argumentsValue,
     callId: ToolCallId(`ontology-call-${String(++call)}`),

@@ -33,6 +33,8 @@ A `sidebar.footer.action` seat shows a badge counting what runs plus what waits;
 
 ### What the tool cards show
 
+Preparing calls show their ordinary Cordis icon and title in one non-expandable row. This stage does not derive a package identity, read its live inventory, or mount its business view; those operations require the start/result props.
+
 The `cordis_define` card is a record: the name and purpose the model wrote, the source it wrote, and whether the definition is running — no switch, no approval, and a pointer to the panel. The `cordis_run` card shows the mode, the plugin, package, and run ids, the outcome, and offers the package's own business view through the `tool.view.cordis` slot when the package registered one. Define, run, stop, and undefine cards retain their ordinary business glyph when they fail or are interrupted, including a correlated activation failure after a successful run receipt. All cards render from the recorded call and result, so replay shows the same card.
 
 ### Boundaries to plan around
@@ -122,5 +124,3 @@ These limits define where the surfaces need special care. They are current packa
 None.
 
 </details>
-
-**Runtime invariant:** No companion is published. A single keyed toolview registration whose disposal is proven by the HMR-safety spec. The one mutable relation this package owns — the per-definition run-state observable — lives in the browser process, out of reach of the host invariant service, and the node half emits no cordis events and holds no cross-plugin state.

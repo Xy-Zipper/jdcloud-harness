@@ -1,7 +1,7 @@
 /** Durable composition of historical chunk collapse and V3 system/reference migration. */
 
 import { Context } from '@deepseek-ai/cordis'
-import { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, type SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import { createSessionFormatCatalog } from '@deepseek-ai/dsh-session-format'
 import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from '@deepseek-ai/dsh-session-format-v0-to-v1'
@@ -10,7 +10,7 @@ import {
   restoreReleasedV2Artifact, sessionFormatV1ToV2,
 } from '@deepseek-ai/dsh-session-format-v1-to-v2'
 import { SessionFormatUnsupportedError } from '@deepseek-ai/dsh-session-persistence'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
@@ -19,8 +19,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { JsonlGenerationSourceChangedError } from '../src/generation.ts'
 import { generationLogPath, type JsonlCompression } from '../src/format.ts'
 import { compressZstdFrame, decompressZstdFrame, scanZstdFrames } from '../src/zstd.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
-const id = SessionId('multi-edge-seeded')
+const id = brandString<SessionId>('multi-edge-seeded')
 const config = { provider: 'mock', model: 'mock' }
 const roots: string[] = []
 const contexts: Context[] = []

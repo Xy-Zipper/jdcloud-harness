@@ -1,4 +1,6 @@
+import type {} from '@deepseek-ai/dsh-client-ui-context-menu/client'
 /** Registers the target-neutral Conversation assembly, shell, input, and docks. */
+import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { ISessions, SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -10,12 +12,17 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session-status/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ShortcutCommandId, ShortcutFixedCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { UiConversation } from './conversation/assembly.ts'
+import { UserText, PlainUserText, SessionReference } from './user-text/UserText.tsx'
+import { sessionReferenceRule } from './user-text/session-reference-rule.ts'
+import { collapseWhitespaceRule, trimWhitespaceRule } from './user-text/whitespace-rules.ts'
 import type { ViewTab } from './contract/views.ts'
 import type {
   ComposerBarInjected, ConversationInjected, ConversationSessionHeaderInjected,
-  ConversationSessionInjected, DraftFileUploads,
+  ConversationSessionInjected, DraftFileUploads, UserTextInjected,
 } from './contract/slots.ts'
 import type { InputNotice } from './contract/input.ts'
 import type { ReferenceInsert } from './contract/draft-editor.ts'
@@ -27,6 +34,7 @@ import type { IConversation } from './service.ts'
 import { ComposerBlockRegistry } from './input/blocks.ts'
 import type { ComposerBlock } from './contract/composer-blocks.ts'
 import { InputHub } from './input/hub.ts'
+import { createComposerFileIntake } from './input/file-intake.ts'
 import { ComposerSubmissionPolicy } from './input/submission-policy.ts'
 import { queueDockEntry } from './queue/QueueDock.tsx'
 import { EnterBehaviorRow } from './settings/EnterBehaviorRow.tsx'
@@ -38,8 +46,10 @@ import { ConversationHeader } from './skeleton/ConversationHeader.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { InputBar } from './skeleton/InputBar.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
-import { DEVELOPER_TOOLS_VIEW_ID, resolveActiveView } from './view-selection.ts'
-import { en, NS, zh, type ConversationKey } from './locales.ts'
+import { installStopShortcut } from './stop-shortcut.ts'
+import { TRAJECTORY_VIEW_ID, resolveActiveView } from './view-selection.ts'
+import { createViewPins } from './view-pins.ts'
+import { en, ja, es, fr, de, ru, pt, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -49,9 +59,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Services required by the Conversation plugin. */
+/**
+ * Services required by the Conversation plugin. `uiSession.sessionStatus` provides the `useSessionStatus` hook the
+ * Conversation shell renders with, so the plugin unloads and reloads with it.
+ */
 export const inject = [
-  'slots', 'sessions', 'fileUpload', 'uiSession', 'uiWorkspace', 'locale', 'configForms',
+  'slots', 'sessions', 'fileUpload', 'uiSession', 'uiSession.sessionStatus', 'uiWorkspace', 'locale', 'configForms',
 ]
 
 /** Conversation runtime configuration. */
@@ -151,10 +164,34 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const slots = ctx.slots
   // Schemastery's field default is materialized before Cordis calls apply.
   const maxConcurrentFileUploads = config.maxConcurrentFileUploads as number
-  const workspaceNavigation = ctx.get('uiWorkspace') as unknown as WorkspaceNavigation
+  const workspaceNavigation = ctx.get('uiWorkspace') as WorkspaceNavigation
   const uiConversation = new UiConversation(ctx, sessions)
+  uiConversation.userText.register(sessionReferenceRule)
+  uiConversation.userText.register(collapseWhitespaceRule)
+  uiConversation.userText.register(trimWhitespaceRule)
+  slots.registerFactory({
+    name: 'conversation.user.text',
+    scope: 'session',
+    children: {
+      'conversation.user.text.node': { kind: 'keyed', scope: 'session', inline: true },
+    },
+    inject: (): UserTextInjected => ({
+      hooks: {
+        userTextRevision: {
+          getSnapshot: () => uiConversation.userText.getSnapshot(),
+          subscribe: listener => uiConversation.userText.subscribe(listener),
+        },
+      },
+      createUserTextEvaluator: () => uiConversation.userText.createEvaluator(),
+      reportTransformFailure: (error) => { console.error('[ui-conversation] user-text transformation failed:', error) },
+    }),
+  }, UserText)
+  slots.inject('conversation.user.text.node', function* () {
+    yield slots.register({ name: 'conversation.user.text.node', key: 'text', priority: 100 }, PlainUserText)
+    yield slots.register({ name: 'conversation.user.text.node', key: 'session', priority: 100 }, SessionReference)
+  })
 
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-conversation: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-conversation: dictionaries')
   const t = ctx.locale.bind(NS)
   const conversationStore = createConversationStore()
   const submissionPolicy = new ComposerSubmissionPolicy(
@@ -179,7 +216,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     for (const entry of slots.entries('conversation.view')) {
       /* v8 ignore next -- list registration validates id at load. */
       if (entry.options.id === undefined) continue
-      if (!ctx.configForms.developerTools.enabled.getSnapshot() && entry.options.id === DEVELOPER_TOOLS_VIEW_ID) continue
+      if (!ctx.configForms.developerTools.enabled.getSnapshot() && entry.options.id === TRAJECTORY_VIEW_ID) continue
       tabs.push({
         id: entry.options.id,
         label: resolveSlotLabel(entry.options.label) ?? entry.options.id,
@@ -195,6 +232,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     activateView(sessionId, readConversationViewPreference(sessionId))
   }
   const conversationViews = createSnapshotStore<readonly ViewTab[]>(viewTabs())
+  const viewPins = createViewPins()
+  const viewActions = {
+    getSnapshot: () => slots.entriesOfSlot('conversation.session.header.views.actions').length > 0,
+    subscribe: (listener: () => void) => slots.subscribe('conversation.session.header.views.actions', listener),
+  }
   const bindings = new Set<SessionBinding>()
   const trackedBindings = new WeakSet<SessionBinding>()
   const trackBinding = (binding: SessionBinding): void => {
@@ -224,6 +266,43 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       disposeViews()
     }
   }, 'ui-conversation: View selection')
+
+  const stop = (sessionId: SessionId): void => {
+    scopedConversation(sessions, sessionId).cancel().catch((_error: unknown) => {
+      // Stop failure is published through Session promptError.
+    })
+  }
+  const stopShortcut = createSnapshotStore<readonly string[]>([])
+  ctx.inject(['shortcuts'], (scope) => {
+    const fixedInputs: readonly ShortcutFixedCommand[] = [
+      { id: 'fixed.send' as ShortcutCommandId, label: () => t('input.send'), keys: ['Enter'],
+        bindings: [{ code: 'Enter', modifiers: [] }], group: 'input' },
+      { id: 'fixed.newline' as ShortcutCommandId, label: () => t('shortcut.newline'),
+        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['shift'] }).keys,
+        bindings: [{ code: 'Enter', modifiers: ['shift'] }], group: 'input' },
+      { id: 'fixed.complementary' as ShortcutCommandId, label: () => t('shortcut.complementary'),
+        keys: scope.shortcuts.describeBinding({ code: 'Enter', modifiers: ['primary'] }).keys,
+        bindings: [{ code: 'Enter', modifiers: ['control'] }, { code: 'Enter', modifiers: ['meta'] }], group: 'input' },
+      { id: 'fixed.slash' as ShortcutCommandId, label: () => t('shortcut.slash'), keys: ['/'],
+        bindings: [{ code: 'Slash', modifiers: [] }], group: 'input' },
+      { id: 'fixed.mention' as ShortcutCommandId, label: () => t('shortcut.mention'), keys: ['@'],
+        bindings: [{ code: 'Digit2', modifiers: ['shift'] }], group: 'input' },
+    ]
+    for (const command of fixedInputs) {
+      scope.effect(() => scope.shortcuts.registerFixed(command), `ui-conversation: ${command.id}`)
+    }
+    scope.effect(() => installStopShortcut(
+      scope.shortcuts, sessions, binding => uiConversation.binding(binding).openTurn, ctx.uiSession, stop,
+    ), 'ui-conversation: fixed stop input')
+    scope.effect(() => {
+      const command: ShortcutFixedCommand = {
+        id: 'response.stop' as ShortcutCommandId, label: () => t('input.stop'), keys: ['Esc', 'Esc'], bindings: [{ code: 'Escape', modifiers: [] }], group: 'input',
+      }
+      const dispose = scope.shortcuts.registerFixed(command)
+      stopShortcut.set(command.keys)
+      return () => { stopShortcut.set([]); dispose() }
+    }, 'ui-conversation: fixed stop reference')
+  })
 
   const inputHub = new InputHub(ctx, t)
   const composerBlocks = new ComposerBlockRegistry()
@@ -275,9 +354,11 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.composer': { kind: 'chain', scope: 'session' },
       'conversation.composer.bar': { kind: 'single', scope: 'session-maybe' },
       'conversation.input.dock': { kind: 'list', scope: 'session' },
+      'conversation.hero.frame': { kind: 'hoc', scope: 'root' },
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
       'conversation.hero.agentPreset': { kind: 'single', scope: 'session-maybe' },
+      'conversation.hero.options': { kind: 'list', scope: 'session' },
     },
     slots: {
       views: { scope: 'session' },
@@ -290,15 +371,20 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       selectWorkspace: workspaceId => workspaceNavigation.openWorkspace(workspaceId, (nextId) => {
         if (sessionId !== undefined && nextId !== sessionId) {
           const from = inputHub.shell(sessionId)
-          const draft = from.snapshot.draft
+          // A draft with a submission in flight stays with the Session that is admitting it.
+          if (from.snapshot.phase !== 'plain' && from.snapshot.phase !== 'claimed') return
+          const draft = from.draftSnapshot
           const attachmentIds = from.snapshot.attachmentIds
           const next = inputHub.shell(nextId)
           if (attachmentIds.length === 0 || next.addAttachments(attachmentIds)) {
-            if (sessions.binding(nextId) === undefined) {
+            const binding = sessions.binding(nextId)
+            if (binding === undefined) {
               throw new Error(`ui-conversation: session "${nextId}" resolved no binding`)
             }
-            concreteConversation(ctx).rebindDraftFiles(nextId, attachmentIds)
-            if (draft !== '') {
+            // The same rule as intake: only an ordinary Session stages image uploads.
+            const ordinary = binding.session.getSnapshot().subagent === null
+            concreteConversation(ctx).rebindDraftFiles(nextId, attachmentIds, ordinary)
+            if (draft.text !== '') {
               next.setDraft(draft)
               from.setDraft('')
             }
@@ -343,7 +429,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             },
           },
         },
-        bindDraftMirror: write => inputHub.shell(sessionId).bindMirror(write),
+        bindDraftPersistence: write => inputHub.shell(sessionId).bindDraftPersistence(write),
         openView,
       }
     },
@@ -365,10 +451,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.session.header.actions': { kind: 'list', scope: 'session' },
       'conversation.session.header.utilities': { kind: 'list', scope: 'session' },
       'conversation.session.header.corner': { kind: 'single', scope: 'session' },
+      'conversation.session.header.views.actions': { kind: 'list', scope: 'root' },
     },
     store: conversationStore,
     inject: (sessionId: SessionId, actions: BoundActions<typeof conversationStore>): ConversationSessionHeaderInjected => ({
-      hooks: { conversationViews },
+      hooks: { conversationViews, entryPins: viewPins.unpinned, entryActions: viewActions },
+      setPinned: viewPins.setPinned,
       open: (id) => { workspaceNavigation.openSession(id) },
       selectView: (view) => {
         activateView(sessionId, view)
@@ -377,6 +465,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }),
   }, ConversationSessionHeader)
 
+  const fileIntake = createComposerFileIntake()
   const registerComposerBar = () => slots.register({
     name: 'conversation.composer.bar',
     locale: NS,
@@ -394,6 +483,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     inject: (sessionId: SessionId | undefined): ComposerBarInjected => {
       if (sessionId === undefined) {
         return {
+          registerFileIntake: fileIntake,
           keyboard: undefined,
           addFiles: undefined,
           removeAttachment: undefined,
@@ -401,7 +491,9 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           retryFileUpload: undefined,
           toggleCommandMenu: undefined,
           stop: undefined,
+          retry: undefined,
           hooks: {
+            stopShortcut,
             busyEnter: submissionPolicy.busyEnter,
             fileUploads: ABSENT_FILE_UPLOADS,
             notices: ABSENT_NOTICES,
@@ -415,10 +507,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       const inputTriggers = inputHub.inputTriggers(sessionId)
       const bridge = hostPathBridge()
       return {
+        registerFileIntake: fileIntake,
         keyboard: shell,
         addFiles: (files, directories = new Set()) => {
           if (sessions.binding(sessionId) === undefined) return t('file.sessionUnavailable')
-          if (shell.snapshot.phase === 'adjudicating' || shell.snapshot.phase === 'submitting') {
+          const { phase } = shell.snapshot
+          if (phase === 'adjudicating' || phase === 'submitting' || phase === 'sending') {
             return t('attachment.dropBlocked')
           }
           const uploads: File[] = []
@@ -444,7 +538,9 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             })
           }
           try {
-            const drafts = conversation.createDrafts(sessionId, uploads)
+            // The Host stages uploads for ordinary Sessions only; a subagent continuation's images travel inline.
+            const ordinary = sessions.binding(sessionId)?.session.getSnapshot().subagent === null
+            const drafts = conversation.createDrafts(sessionId, uploads, ordinary)
             if (!shell.addFiles(references, drafts.map(draft => draft.id))) {
               conversation.releaseDraftAttachments(drafts)
               return t('attachment.dropBlocked')
@@ -475,12 +571,10 @@ export function apply(ctx: Context, config: Config = Config({})): void {
               span: { ...selection, draftRev: snapshot.draftRev },
             })
           },
-        stop: () => {
-          scopedConversation(sessions, sessionId).cancel().catch(() => {
-            // Stop failure is published through Session promptError.
-          })
-        },
+        stop: () => { stop(sessionId) },
+        retry: (failureSeq) => { inputHub.retry(sessionId, failureSeq) },
         hooks: {
+          stopShortcut,
           busyEnter: submissionPolicy.busyEnter,
           fileUploads: conversation.fileUploads,
           notices: shell.notices,

@@ -25,9 +25,10 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import BrowserUse from '@deepseek-ai/dsh-browser-use'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mountSessionMcp } from '../src/mcp.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 const FIXTURE = fileURLToPath(new URL('./mcp-fixture.mjs', import.meta.url))
 const TOOL = 'mcp__browser-fixture__visit'
@@ -45,7 +46,7 @@ async function load(): Promise<{ ctx: Context; root: string }> {
   roots.push(root)
   const ctx = new Context()
   contexts.push(ctx)
-  await mountAgentLoopTestDependencies(ctx)
+  await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
   await mountAgentLoopTestHarness(ctx)
   await ctx.plugin(BrowserUse)
   return { ctx, root }
@@ -53,6 +54,15 @@ async function load(): Promise<{ ctx: Context; root: string }> {
 
 const toolNames = (ctx: Context, agent?: Agent): string[] =>
   ctx.tools.schemas(agent).map(schema => schema.name)
+
+it('rejects a missing working-directory provider before mounting browser resources', () => {
+  const ctx = new Context()
+  contexts.push(ctx)
+  expect(() => { mountSessionMcp(ctx, {
+    name: 'browser-fixture', exclusive: false, command: process.execPath, args: [FIXTURE],
+  }) }).toThrow('browser-fixture: browser MCP requires a working-directory provider')
+  expect(ctx.get('browserUse')).toBeUndefined()
+})
 
 it('reproduces the second-Agent failure a profile install causes', async () => {
   const { ctx, root } = await load()
@@ -68,9 +78,9 @@ it('reproduces the second-Agent failure a profile install causes', async () => {
     }))
   }, { prepend: true })
 
-  await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+  await ctx.agents.create({ sessionId: brandString<SessionId>('first'), meta: { cwd: root } })
   expect(toolNames(ctx)).toContain(TOOL)
-  await expect(ctx.agents.create({ sessionId: SessionId('second'), meta: { cwd: root } }))
+  await expect(ctx.agents.create({ sessionId: brandString<SessionId>('second'), meta: { cwd: root } }))
     .rejects.toThrow('mcp-client(browser-fixture): initial connection or tool synchronization failed')
 })
 
@@ -85,8 +95,8 @@ it('keeps every Agent browser tool in that Agent scope under the shipped layout'
     },
   })
 
-  const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
-  const second = await ctx.agents.create({ sessionId: SessionId('second'), meta: { cwd: root } })
+  const first = await ctx.agents.create({ sessionId: brandString<SessionId>('first'), meta: { cwd: root } })
+  const second = await ctx.agents.create({ sessionId: brandString<SessionId>('second'), meta: { cwd: root } })
   expect(toolNames(ctx)).toEqual([])
   for (const agent of [first.agent, second.agent]) {
     expect(toolNames(ctx, agent)).toContain(TOOL)

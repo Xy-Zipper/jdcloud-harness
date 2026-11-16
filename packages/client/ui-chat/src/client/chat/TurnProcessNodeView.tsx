@@ -1,47 +1,36 @@
-import { memo, useEffect, useState } from 'react'
+import { memo } from 'react'
 import { IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeViewProps } from '../contract/slots.ts'
 import { turnProcessAlwaysOpen } from '../contract/turn-process.ts'
-import { formatLiveRunDuration, formatRunDuration, LIVE_RUN_CLOCK_INTERVAL_MS } from './message-chrome.ts'
+import { formatRunDuration } from './message-chrome.ts'
 import a11yCss from './accessibility.module.css'
 import css from './TurnProcessNodeView.module.css'
 
-/** Turn-level process disclosure controller. */
+/** Settled Turn duration and process disclosure above its content. */
 export const TurnProcessNodeView = memo(function TurnProcessNodeView({
   node, turnProcess, t,
 }: ChatNodeViewProps<'turn-process'>) {
   if (turnProcess === undefined) throw new Error('turn-process node requires Turn process owner state')
-  const open = turnProcess.open
+  const open = !turnProcess.foldable || turnProcess.open
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
     ? node.location.turn
     : undefined
-  const [now, setNow] = useState(Date.now)
-  const ticking = turnProcess.foldable && turn?.status === 'open'
-  useEffect(() => {
-    if (!ticking) return
-    setNow(Date.now())
-    const timer = setInterval(() => { setNow(Date.now()) }, LIVE_RUN_CLOCK_INTERVAL_MS)
-    return () => { clearInterval(timer) }
-  }, [ticking])
-  if (!turnProcess.foldable) return null
-  const canCollapse = turnProcess.hasContent && !turnProcessAlwaysOpen(node)
-  const running = turn?.status === 'open'
-  const reason = turn?.end?.data.reason.kind
-  const elapsedMs = turn?.start === undefined ? undefined
-    : Math.max(1000, (turn.end?.time ?? now) - turn.start.time)
-  const duration = elapsedMs === undefined ? undefined
-    : running ? formatLiveRunDuration(elapsedMs, t) : formatRunDuration(elapsedMs, t)
-  // Other end reasons retain elapsed time; only cancellation and failure replace it.
-  const label = running
-    ? duration === undefined ? t('chat.deepDiving') : t('message.turnProcess.deepDivingFor', { duration })
-    : reason === 'aborted' ? t('message.stopped')
-      : reason === 'error' ? t('message.turnProcess.failed')
-        : duration === undefined ? t('message.turnProcess.worked')
-          : t('message.turnProcess.took', { duration })
-  const announcement = running ? t('chat.deepDiving')
-    : reason === 'aborted' ? t('message.stopped')
-      : reason === 'error' ? t('message.turnProcess.failed')
-        : t('message.turnProcess.worked')
+  if (turn?.status !== 'closed') return null
+  const canCollapse = turnProcess.foldable && turnProcess.hasContent && !turnProcessAlwaysOpen(node)
+  const reason = turn.end?.data.reason.kind
+  const stopped = reason === 'aborted' || reason === 'interrupted'
+  const elapsedMs = turn.start === undefined || turn.end === undefined ? undefined
+    : Math.max(1000, turn.end.time - turn.start.time)
+  const duration = elapsedMs === undefined || stopped || reason === 'error' ? undefined
+    : formatRunDuration(elapsedMs, t)
+  // Other end reasons retain elapsed time; only stops and failure replace it.
+  const label = stopped ? t('message.stopped')
+    : reason === 'error' ? t('message.turnProcess.failed')
+      : duration === undefined ? t('message.turnProcess.worked')
+        : t('message.turnProcess.took')
+  const announcement = stopped ? t('message.stopped')
+    : reason === 'error' ? t('message.turnProcess.failed')
+      : t('message.turnProcess.worked')
   return (
     <>
       <span className={a11yCss.visuallyHidden} role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
@@ -60,7 +49,12 @@ export const TurnProcessNodeView = memo(function TurnProcessNodeView({
           turnProcess.setOpen(!open)
         }}
       >
-        <span className={css.label}>{label}</span>
+        <span className={css.label}>
+          {label}
+          {duration?.map((part, index) => (
+            <span key={index} className={part.numeric ? css.durationNumber : undefined}>{part.text}</span>
+          ))}
+        </span>
         {canCollapse && <IconChevronDownOutlineRegular className={css.chevron} />}
       </button>
     </>

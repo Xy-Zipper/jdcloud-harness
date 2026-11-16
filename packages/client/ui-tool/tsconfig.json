@@ -12,6 +12,9 @@
       "path": "../../spill/spill-policy"
     },
     {
+      "path": "../../fs/fs-patch"
+    },
+    {
       "path": "../../attachment/attachment"
     },
     {
@@ -51,7 +54,13 @@
       "path": "../../core/tools"
     },
     {
+      "path": "../../interaction/user-questions"
+    },
+    {
       "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../../core/tool-executor-ptc"
     }
   ]
 }

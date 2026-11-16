@@ -9,12 +9,13 @@ import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vites
 import type {} from '@deepseek-ai/dsh-workspace-changes'
 import type { ChangesSummary } from '@deepseek-ai/dsh-client-ui-deliverables/src/changes.ts'
 import { deriveReplayScript, parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
+import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import {
   assertFinalWorkspaceSnapshot, captureExpandedTurnProcessAria, compareOrRefreshGolden,
   fixtureUserPrompts, launchWebScaffold, recordFixture, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
-import { openSettings, connectFreshWorkspaceZh, ZH_BROWSER_LOCALE } from './support.ts'
+import { openSettings, connectFreshWorkspaceZh, expandOwningTurnProcess, ZH_BROWSER_LOCALE } from './support.ts'
 
 const DIR = fileURLToPath(new URL('../../../snapshots/web/changed-files-turn', import.meta.url))
 const FIXTURE = join(DIR, 'session.v3.jsonl')
@@ -62,6 +63,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
   let tripwire: ReturnType<typeof watchConsole>
   let cwd: string
   let replayRoot: string | undefined
+  let releasePreparations: (() => void) | undefined
 
   beforeAll(async () => {
     let replayOverride: string | undefined
@@ -70,12 +72,12 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       replayOverride = join(replayRoot, 'replay.override.json')
       const script = deriveReplayScript(parseSessionLog(await readFile(FIXTURE, 'utf8')))
       // Recorded absolute paths must follow each isolated Session's working directory.
-      const cwdToken = '{{fromRequest:Your working directory is ([^\\n]+)\\.}}'
+      const cwdToken = '{{fromRequest:Current working directory: "([^"]+)"}}'
       await writeFile(replayOverride, JSON.stringify(script).replaceAll('{{cwd}}', JSON.stringify(cwdToken).slice(1, -1)))
     }
     scaffold = await launchWebScaffold({
       developerTools: false,
-      compareReplaySession: true,
+      compareReplaySession: MODE === 'refresh' ? true : 'read-only',
       extraOverlayPath: fileURLToPath(new URL('./changed-files-turn.overlay.yml', import.meta.url)),
       ...(replayOverride === undefined ? {} : { replayFixture: FIXTURE, replayOverride }),
     })
@@ -92,6 +94,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
   })
 
   afterAll(async () => {
+    releasePreparations?.()
     try {
       await browser?.close()
     } finally {
@@ -106,10 +109,76 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
   it('records the edited, created, and shell-appended files with their line counts', async () => {
     if (MODE !== 'record') expect(fixtureUserPrompts(await readFile(FIXTURE, 'utf8'))).toEqual([PROMPT])
     const settled = scaffold.whenTurnSettled()
+    const preparations = ['edit', 'write'].map(name => ({
+      name, callId: '', args: new PartialArguments(), ready: Promise.withResolvers<{ callId: string }>(),
+      release: Promise.withResolvers<undefined>(), held: false,
+      contentField: name === 'write' ? 'content' : 'old_string',
+      contentReady: Promise.withResolvers<undefined>(), contentRelease: Promise.withResolvers<undefined>(),
+      contentHeld: false,
+    }))
+    const names = new Map<string, string>()
+    const dispose = scaffold.ctx.on('llm/stream', async function* (_options, next) {
+      for await (const chunk of next()) {
+        yield chunk
+        if (chunk.type !== 'tool-call-delta') continue
+        if (chunk.name !== undefined) names.set(chunk.id, chunk.name)
+        const preparation = preparations.find(value => value.name === names.get(chunk.id))
+        if (preparation === undefined || preparation.contentHeld || chunk.argumentsDelta.length === 0) continue
+        if (preparation.callId === '') preparation.callId = chunk.id
+        if (preparation.callId !== chunk.id) continue
+        preparation.args.append(chunk.argumentsDelta)
+        if (!preparation.held) {
+          if (!preparation.args.complete('file_path')) continue
+          preparation.held = true
+          preparation.ready.resolve({ callId: chunk.id })
+          await preparation.release.promise
+        }
+        if (!preparation.args.has(preparation.contentField) || preparation.args.complete(preparation.contentField)) continue
+        const length = preparation.args.stringLength(preparation.contentField)
+        if (length === undefined || length === 0) continue
+        preparation.contentHeld = true
+        preparation.contentReady.resolve(undefined)
+        await preparation.contentRelease.promise
+      }
+    }, { prepend: true })
+    releasePreparations = () => {
+      for (const preparation of preparations) {
+        preparation.release.resolve(undefined)
+        preparation.contentRelease.resolve(undefined)
+      }
+      dispose()
+    }
     const input = page.locator('[data-composer-input]').first()
     await input.fill(PROMPT)
     await input.press('Enter')
-    const sessionId = await settled
+    const observations = preparations.map(async (preparation) => {
+      const { callId } = await Promise.race([
+        preparation.ready.promise,
+        settled.then(() => { throw new Error(`No ${preparation.name} argument prefix was streamed`) }),
+      ])
+      const row = page.locator(`[data-chat-call-id="${callId}"] [data-state="preparing"]`)
+      await row.waitFor({ state: 'attached' })
+      await expandOwningTurnProcess(page, row)
+      const argumentPath = preparation.args.text('file_path')
+      if (argumentPath === undefined) throw new Error('held preparation has no string file_path')
+      await row.getByText(argumentPath, { exact: true }).waitFor()
+      expect(await row.getByRole('button').count()).toBe(0)
+      expect(await row.locator('[aria-expanded]').count()).toBe(0)
+      expect(await row.locator('pre').count()).toBe(0)
+      expect(await row.getByText(/^\d+KB$/).count()).toBe(0)
+      await compareOrRefreshGolden(join(DIR, `preparing-${preparation.name}.expected.md`), await row.ariaSnapshot(), MODE)
+      preparation.release.resolve(undefined)
+      await Promise.race([
+        preparation.contentReady.promise,
+        settled.then(() => { throw new Error(`No open ${preparation.name} content prefix was streamed`) }),
+      ])
+      await row.getByText('1KB', { exact: true }).waitFor()
+      expect(await row.locator('[aria-expanded]').count()).toBe(0)
+      expect(await row.locator('pre').count()).toBe(0)
+      await compareOrRefreshGolden(join(DIR, `preparing-${preparation.name}-content.expected.md`), await row.ariaSnapshot(), MODE)
+      preparation.contentRelease.resolve(undefined)
+    })
+    const [sessionId] = await Promise.all([settled, ...observations]).finally(() => { releasePreparations?.() })
     const session = scaffold.ctx.agents.get(sessionId)?.session
     if (session?.header.cwd === undefined) throw new Error('changed-files Session has no workspace')
     cwd = session.header.cwd
@@ -138,8 +207,8 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     expect(compactHeight).toBeLessThan(60)
     await openSettings(page, 'zh')
     const settings = page.getByRole('dialog', { name: '设置' })
-    await settings.getByRole('switch', { name: '开发者工具' }).click()
-    await expect.poll(() => settings.getByRole('switch', { name: '开发者工具' }).getAttribute('aria-checked')).toBe('true')
+    await settings.getByRole('switch', { name: '显示代码工作视图' }).click()
+    await expect.poll(() => settings.getByRole('switch', { name: '显示代码工作视图' }).getAttribute('aria-checked')).toBe('true')
     await settings.getByRole('button', { name: '关闭', exact: true }).click()
     await header.getByRole('tablist').waitFor({ state: 'visible' })
     expect(await header.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(compactHeight)
@@ -157,8 +226,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       }
       const header = requiredElement(element.children[0] as HTMLElement | undefined, 'header')
       const tile = requiredElement(header.children[0] as HTMLElement | undefined, 'tile')
-      const tileMark = requiredElement(tile.children[0] as HTMLElement | undefined, 'tile mark')
-      const icon = requiredElement(tileMark.querySelector('svg'), 'icon')
+      const icon = requiredElement(tile.querySelector('svg'), 'icon')
       const titles = requiredElement(header.children[1] as HTMLElement | undefined, 'titles')
       const title = requiredElement(titles.children[0] as HTMLElement | undefined, 'title')
       const stat = requiredElement(titles.children[1] as HTMLElement | undefined, 'stat')
@@ -171,8 +239,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
         headerPadding: getComputedStyle(header).padding,
         tileSize: `${tile.getBoundingClientRect().width}x${tile.getBoundingClientRect().height}`,
         tileBorder: getComputedStyle(tile).borderTopWidth,
-        tileMarkSize: `${tileMark.getBoundingClientRect().width}x${tileMark.getBoundingClientRect().height}`,
-        tileMarkRadius: getComputedStyle(tileMark).borderRadius,
+        iconViewBox: icon.getAttribute('viewBox'),
         iconWidth: icon.getAttribute('width'),
         titleFontSize: getComputedStyle(title).fontSize,
         statFontSize: getComputedStyle(stat).fontSize,
@@ -184,14 +251,13 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       }
     })
     expect(geometry).toEqual({
-      radius: '18px',
+      radius: '16px',
       headerHeight: 60,
       headerPadding: '8px 10px',
       tileSize: '40x40',
       tileBorder: '1px',
-      tileMarkSize: '20x20',
-      tileMarkRadius: '8px',
-      iconWidth: '10',
+      iconViewBox: '0 0 28 28',
+      iconWidth: '20',
       titleFontSize: '13px',
       statFontSize: '10px',
       listPadding: '0px',
@@ -248,7 +314,7 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     await preview.waitFor({ state: 'detached' })
     const review = page.locator('[data-changes-review]')
     await review.locator('[data-review-file="notes.txt"]').waitFor({ state: 'visible' })
-    await review.locator('[data-review-view="split"]').waitFor({ state: 'visible' })
+    await review.locator('[data-review-view="unified"]').waitFor({ state: 'visible' })
     await card.getByRole('button', { name: '查看 src/util.ts 的改动' }).hover()
     await preview.locator('[data-diff-code]').first().waitFor({ state: 'visible' })
     expect(await preview.locator('[data-review-view="unified"]').count()).toBe(1)
@@ -286,14 +352,18 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     await card.getByRole('button', { name: '查看 notes.txt 的改动' }).click()
     await review.locator('[data-review-file="notes.txt"]').waitFor({ state: 'visible' })
     expect(await column.locator('[data-dockkit-tab]').filter({ hasText: '第 1 轮改动' }).count()).toBe(1)
-    await review.locator('[data-review-view="split"]').waitFor({ state: 'visible' })
+    await review.locator('[data-review-view="unified"]').waitFor({ state: 'visible' })
     const compareTool = review.locator('[data-review-tool="split"]')
     const wrapTool = review.locator('[data-review-tool="wrap"]')
     expect(await compareTool.evaluate(button => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
     expect(await wrapTool.evaluate(button => getComputedStyle(button).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
     expect(await compareTool.locator('svg').evaluate(icon => getComputedStyle(icon).transform)).toBe('matrix(0, 1, -1, 0, 0, 0)')
-    await expect.poll(() => drawn(review.locator('[data-diff-side="left"]'))).toEqual(['context:1start', 'add:'])
-    expect(await drawn(review.locator('[data-diff-side="right"]'))).toEqual(['context:1start', 'add:2done'])
+    expect(await compareTool.getAttribute('aria-pressed')).toBe('true')
+    await expect.poll(() => drawn(review)).toEqual(['context:11 start', 'add:2+done'])
+    await wrapTool.click()
+    await review.locator('[data-review-view="unified"][data-review-wrap]').waitFor({ state: 'visible' })
+    expect(await compareTool.getAttribute('aria-pressed')).toBe('true')
+    await wrapTool.click()
     const headerAlignment = await review.locator('[data-review-file="notes.txt"]').evaluate((button) => {
       const center = (element: Element) => {
         const rect = element.getBoundingClientRect()
@@ -309,20 +379,19 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       return [center(text), center(caret), center(counts)].map(value => Math.abs(value - buttonCenter))
     })
     for (const offset of headerAlignment) expect(offset).toBeLessThanOrEqual(0.5)
-    // The appended row has no old-side text; constrain the columns so the hunk header overflows it.
+    // The hunk header overflows the appended row when the comparison is narrow.
     const emptyRowLayout = await page.addStyleTag({ content: `
-      [data-diff-side="left"] { width: 90px; }
-      [data-diff-side="right"] { width: 120px; }
+      [data-review-view="unified"] { width: 90px; }
     ` })
     try {
-      const left = review.locator('[data-diff-side="left"]')
+      const left = review.locator('[data-review-view="unified"]')
       const emptyRow = left.locator('[data-diff-line="add"]')
       const maximum = await left.evaluate(element => element.scrollWidth - element.clientWidth)
       expect(maximum).toBeGreaterThan(0)
       await left.evaluate((element) => { element.scrollLeft = element.scrollWidth })
       await expect.poll(() => left.evaluate(element => element.scrollLeft)).toBe(maximum)
       const fill = await emptyRow.evaluate((row) => {
-        const column = row.closest('[data-diff-side]')!
+        const column = row.closest('[data-review-view]')!
         const columnBox = column.getBoundingClientRect()
         const rowBox = row.getBoundingClientRect()
         const y = rowBox.top + rowBox.height / 2
@@ -339,19 +408,21 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       expect(fill.coversViewport).toBe(true)
     } finally {
       await emptyRowLayout.evaluate(element => element.parentNode!.removeChild(element))
-      await review.locator('[data-diff-side]').evaluateAll((elements) => {
+      await review.locator('[data-review-view]').evaluateAll((elements) => {
         for (const element of elements) element.scrollLeft = 0
       })
     }
-    const addedLine = review.locator('[data-diff-side="right"] [data-diff-line="add"]')
-    const rightContextLine = review.locator('[data-diff-side="right"] [data-diff-line="context"]')
+    const primaryTextColour = await review.evaluate(element => getComputedStyle(element).color)
+    const addedLine = review.locator('[data-diff-line="add"]')
+    const rightContextLine = review.locator('[data-diff-line="context"]')
     const addedRule = await addedLine.evaluate((line) => {
       const number = line.children[0]
       const text = line.querySelector<HTMLElement>('span:last-child')
       if (number === undefined || text === null) throw new Error('added diff line is incomplete')
       const left = line.getBoundingClientRect().left
       return {
-        shadow: getComputedStyle(line).boxShadow,
+        shadow: getComputedStyle(number).boxShadow,
+        markerColour: getComputedStyle(number).color,
         textColour: getComputedStyle(text).color,
         numberLeft: number.getBoundingClientRect().left - left,
         textLeft: text.getBoundingClientRect().left - left,
@@ -359,15 +430,16 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     })
     const rightContextRule = await rightContextLine.evaluate((line) => {
       const number = line.children[0]
-      const text = line.children[1]
-      if (number === undefined || text === undefined) throw new Error('context diff line is incomplete')
+      const text = line.querySelector('span:last-child')
+      if (number === undefined || text === null) throw new Error('context diff line is incomplete')
       const left = line.getBoundingClientRect().left
       return {
         numberLeft: number.getBoundingClientRect().left - left,
         textLeft: text.getBoundingClientRect().left - left,
       }
     })
-    expect(addedRule.shadow).toContain(addedRule.textColour)
+    expect(addedRule.shadow).toContain(addedRule.markerColour)
+    expect(addedRule.textColour).toBe(primaryTextColour)
     expect(addedRule.numberLeft).toBeCloseTo(rightContextRule.numberLeft, 1)
     expect(addedRule.textLeft).toBeCloseTo(rightContextRule.textLeft, 1)
     // The ignored file has no snapshot; its comparison comes from the copies captured around the write call.
@@ -388,12 +460,15 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     for (const offset of selectedAlignment) expect(offset).toBeLessThanOrEqual(0.5)
     await page.getByRole('menuitem').filter({ hasText: 'app.local' }).click()
     await review.locator('[data-review-file="app.local"]').waitFor({ state: 'visible' })
-    await expect.poll(() => drawn(review.locator('[data-diff-side="right"]'))).toEqual(['add:1mode=demo'])
+    await expect.poll(() => drawn(review)).toEqual(['add:1+mode=demo'])
+    expect(await compareTool.getAttribute('aria-pressed')).toBe('true')
     expect(await review.getByText('本轮新建的文件').count()).toBe(1)
-    // A card row opens the same tab on another file; split is the initial view and wrap changes its drawing.
+    // A mixed comparison uses the tab's retained split preference.
     await card.getByRole('button', { name: '查看 intro.md 的改动' }).click()
     await review.locator('[data-review-file="intro.md"]').waitFor({ state: 'visible' })
     expect(await column.locator('[data-dockkit-tab]').filter({ hasText: '第 1 轮改动' }).count()).toBe(1)
+    await review.locator('[data-review-view="split"]').waitFor({ state: 'visible' })
+    expect(await compareTool.getAttribute('aria-pressed')).toBe('true')
     const deletedLine = review.locator('[data-diff-side="left"] [data-diff-line="del"]').first()
     await expect.poll(() => deletedLine.evaluate(line => line.querySelector('[data-diff-code] span[style]') !== null)).toBe(true)
     const deletedRule = await deletedLine.evaluate((line) => {
@@ -402,7 +477,8 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       if (number === undefined || text === null) throw new Error('deleted diff line is incomplete')
       const left = line.getBoundingClientRect().left
       return {
-        shadow: getComputedStyle(line).boxShadow,
+        shadow: getComputedStyle(number).boxShadow,
+        markerColour: getComputedStyle(number).color,
         textColour: getComputedStyle(text).color,
         numberLeft: number.getBoundingClientRect().left - left,
         textLeft: text.getBoundingClientRect().left - left,
@@ -418,7 +494,8 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
         textLeft: text.getBoundingClientRect().left - left,
       }
     })
-    expect(deletedRule.shadow).toContain(deletedRule.textColour)
+    expect(deletedRule.shadow).toContain(deletedRule.markerColour)
+    expect(deletedRule.textColour).toBe(primaryTextColour)
     expect(deletedRule.numberLeft).toBeCloseTo(leftContextRule.numberLeft, 1)
     expect(deletedRule.textLeft).toBeCloseTo(leftContextRule.textLeft, 1)
     await compareTool.click()
@@ -470,11 +547,17 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
     await expect.poll(() => drawn(review)).toEqual(['del:1# 示例项目1# 项目说明', 'context:22', 'context:3一个用于演示的仓库。3一个用于演示的仓库。'])
     const wrappedAddition = review.locator('[data-diff-line="del"] > span').nth(1)
     const wrappedAdditionRule = await wrappedAddition.evaluate((cell) => {
+      const number = cell.children[0]
       const text = cell.querySelector<HTMLElement>('[data-diff-code]')
-      if (text === null) throw new Error('wrapped addition has no text')
-      return { shadow: getComputedStyle(cell).boxShadow, textColour: getComputedStyle(text).color }
+      if (number === undefined || text === null) throw new Error('wrapped addition is incomplete')
+      return {
+        shadow: getComputedStyle(number).boxShadow,
+        markerColour: getComputedStyle(number).color,
+        textColour: getComputedStyle(text).color,
+      }
     })
-    expect(wrappedAdditionRule.shadow).toContain(wrappedAdditionRule.textColour)
+    expect(wrappedAdditionRule.shadow).toContain(wrappedAdditionRule.markerColour)
+    expect(wrappedAdditionRule.textColour).toBe(primaryTextColour)
     // No desktop, so the tools offer the sidebar file but no native open.
     expect(await review.locator('[data-review-tool="open-file"]').count()).toBe(1)
     expect(await review.locator('[data-review-tool="open-native"]').count()).toBe(0)
@@ -589,6 +672,52 @@ describe('web e2e: a git workspace turn ends with its changed files', () => {
       }
     } finally {
       await input.detach()
+    }
+  })
+
+  it('fills empty alignment rows across a mixed comparison’s scrollable columns', async () => {
+    const preview = await page.context().newPage()
+    onTestFinished(async () => { await preview.close() })
+    await preview.route('**/api/changes.diff?*', route => route.fulfill({ json: {
+      kind: 'text', path: 'notes.txt', display: 'notes.txt', before: true, after: true, coarse: false,
+      hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: ['-before', '+after', '+extra'] }],
+    } }))
+    await preview.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+    await preview.locator('[data-changed-files]').getByRole('button', { name: '查看 notes.txt 的改动' }).click()
+    const review = preview.locator('[data-changes-review]')
+    await review.locator('[data-review-view="split"]').waitFor({ state: 'visible' })
+    const emptyRowLayout = await preview.addStyleTag({ content: `
+      [data-diff-side="left"] { width: 90px; }
+      [data-diff-side="right"] { width: 120px; }
+    ` })
+    try {
+      const left = review.locator('[data-diff-side="left"]')
+      const emptyRow = left.locator('[data-diff-line="add"]')
+      const maximum = await left.evaluate(element => element.scrollWidth - element.clientWidth)
+      expect(maximum).toBeGreaterThan(0)
+      await left.evaluate((element) => { element.scrollLeft = element.scrollWidth })
+      await expect.poll(() => left.evaluate(element => element.scrollLeft)).toBe(maximum)
+      const fill = await emptyRow.evaluate((row) => {
+        const column = row.closest('[data-diff-side]')!
+        const columnBox = column.getBoundingClientRect()
+        const rowBox = row.getBoundingClientRect()
+        const y = rowBox.top + rowBox.height / 2
+        return {
+          rowWidth: rowBox.width,
+          contentWidth: column.scrollWidth,
+          background: getComputedStyle(row).backgroundColor,
+          coversViewport: [columnBox.left + 4, columnBox.right - 4].every(x =>
+            document.elementFromPoint(x, y)?.closest('[data-diff-line]') === row),
+        }
+      })
+      expect(fill.background).not.toBe('rgba(0, 0, 0, 0)')
+      expect(fill.rowWidth).toBeGreaterThanOrEqual(fill.contentWidth - 0.5)
+      expect(fill.coversViewport).toBe(true)
+    } finally {
+      await emptyRowLayout.evaluate(element => element.parentNode!.removeChild(element))
+      await review.locator('[data-diff-side]').evaluateAll((elements) => {
+        for (const element of elements) element.scrollLeft = 0
+      })
     }
   })
 

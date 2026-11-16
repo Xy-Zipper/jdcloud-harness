@@ -89,6 +89,42 @@ describe('TerminalBlock prompt label', () => {
 })
 
 describe('TerminalBlock states', () => {
+  it.each([
+    { output: undefined, running: false, exitCode: undefined },
+    { output: 'launch acknowledgement', running: false, exitCode: 7, signal: 'SIGTERM' },
+    { output: 'launch acknowledgement', running: false, exitCode: 0 },
+    { output: '', running: false, exitCode: 0 },
+  ])('background suppresses execution presentation for %j', (execution) => {
+    const view = render(<TerminalBlock command={'worker --watch\nprintf ready\n'} cwd="/workspace/app" background {...execution} />)
+    expect(promptRows(view.container)).toEqual(['appworker --watch', '$printf ready'])
+    expect(runStateOf(view.container)).toEqual({ state: null, label: undefined })
+    expect(outputLines(view.container)).toEqual([])
+    expect(view.queryByText('launch acknowledgement')).toBeNull()
+    expect(view.queryByText('无输出')).toBeNull()
+    expect(view.queryByText('信号 SIGTERM')).toBeNull()
+    expect(view.queryByRole('button')).toBeNull()
+    expect(view.container.firstElementChild?.hasAttribute('data-running')).toBe(false)
+    expect(view.container.firstElementChild?.hasAttribute('data-body')).toBe(false)
+  })
+
+  it('keeps command and prompt DOM when a background launch returns', () => {
+    const view = render(<TerminalBlock command="worker --watch" cwd="/workspace/app" background running />)
+    const command = view.container.querySelector('[data-command-text]')
+    expect(runStateOf(view.container).state).toBe('ongoing')
+    view.rerender(<TerminalBlock command="worker --watch" cwd="/workspace/app" background />)
+    expect(view.container.querySelector('[data-command-text]')).toBe(command)
+    expect(runStateOf(view.container)).toEqual({ state: null, label: undefined })
+    expect(view.queryByText('无输出')).toBeNull()
+    expect(view.queryByRole('button')).toBeNull()
+  })
+
+  it('keeps an explicit copyText override available in background mode', () => {
+    const view = render(<TerminalBlock command="worker" background copyText="explicit copy" />)
+    expect(view.getByRole('button', { name: '复制' })).toBeTruthy()
+    expect(view.queryByText('无输出')).toBeNull()
+    expect(runStateOf(view.container)).toEqual({ state: null, label: undefined })
+  })
+
   it('running with no output shows the command line only: no output box, no placeholder, no copy', () => {
     const view = render(<TerminalBlock command="sleep 5" running />)
     expect(view.getByText('sleep 5')).toBeTruthy()
@@ -412,12 +448,30 @@ describe('writeClipboard', () => {
     expect(writeText).toHaveBeenCalledWith('payload')
   })
 
-  it('reports false when the Clipboard API rejects', async () => {
+  it('reports false when the Clipboard API rejects and no fallback exists', async () => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
     })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: undefined })
     await expect(writeClipboard('payload')).resolves.toBe(false)
+  })
+
+  it('falls back to execCommand when the Clipboard API rejects', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+    })
+    let selected: string | undefined
+    const exec = vi.fn(() => {
+      selected = document.querySelector<HTMLTextAreaElement>('textarea[readonly]')?.value
+      return true
+    })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: exec })
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    expect(exec).toHaveBeenCalledWith('copy')
+    expect(selected).toBe('payload')
+    expect(document.querySelector('textarea')).toBeNull()
   })
 
   it('selects a detached textarea for the execCommand fallback and removes it after', async () => {
@@ -432,6 +486,25 @@ describe('writeClipboard', () => {
     expect(exec).toHaveBeenCalledWith('copy')
     expect(selected).toBe('payload')
     expect(document.querySelector('textarea')).toBeNull()
+  })
+
+  it('returns focus to the copy control after the execCommand fallback', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) })
+    const button = document.createElement('button')
+    document.body.appendChild(button)
+    button.focus()
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    expect(document.activeElement).toBe(button)
+    button.remove()
+  })
+
+  it('copies through the fallback when nothing had focus', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: vi.fn(() => true) })
+    const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(null)
+    await expect(writeClipboard('payload')).resolves.toBe(true)
+    activeElement.mockRestore()
   })
 
   it('reports execCommand\'s own refusal verbatim', async () => {

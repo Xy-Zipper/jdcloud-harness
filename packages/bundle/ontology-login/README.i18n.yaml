@@ -1,6 +1,43 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/bundle/ontology-login/README.md
-README.md: 51c636c7993de5adebc219fa868f5f68722e080d
-README.zh.md: 1861360895f28508af74cea79dbfcb3c31442531
+/:
+  en: 891ffa974d466014
+  zh: 558659d47ce65d3e
+/dsh-ontology-login:
+  en: fffcee6d61728a37
+  zh: dfdb6f194e6a4785
+/dsh-ontology-login/summary:
+  en: 90513f6e600182b3
+  zh: 214d053c3ff45b97
+/dsh-ontology-login/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: de4a2a92773d135e
+/dsh-ontology-login/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/dsh-ontology-login/use-this-package/install-into-a-profile:
+  en: 1fe05e31f85880fa
+  zh: fee0a57d441fae53
+/dsh-ontology-login/use-this-package/what-you-get:
+  en: 258ba4a011bc6f8a
+  zh: f096dfa31302c66e
+/dsh-ontology-login/understand-the-implementation:
+  en: 9f40d48ddb70dd58
+  zh: 94735ee2c932932a
+/dsh-ontology-login/further-exploration:
+  en: 5b73cc4fe67f8279
+  zh: fc3cfedcd3944bac
+/dsh-ontology-login/model-experience:
+  en: 4fc222398bad4f09
+  zh: 312b8bac47611003
+/dsh-ontology-login/model-experience/kv-cache-effect:
+  en: c208c476ff834867
+  zh: bbf24e1e049adcec
+/dsh-ontology-login/known-limitations-and-deferred-work:
+  en: ae2f3c95f89160ef
+  zh: d51c75ff4793a984
+/dsh-ontology-login/known-limitations-and-deferred-work/dev-note:
+  en: ddbfb76b73f3dd18
+  zh: 17a1cb1b5a6bd2e6

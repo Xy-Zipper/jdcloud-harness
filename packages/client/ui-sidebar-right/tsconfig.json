@@ -43,6 +43,15 @@
     },
     {
       "path": "../ui-slots"
+    },
+    {
+      "path": "../shortcuts/tsconfig.client.json"
+    },
+    {
+      "path": "../../util/brand"
+    },
+    {
+      "path": "../ui-context-menu"
     }
   ]
 }

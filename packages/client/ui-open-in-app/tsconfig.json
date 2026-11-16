@@ -36,6 +36,9 @@
       "path": "../ui-conversation/tsconfig.client.json"
     },
     {
+      "path": "../ui-layout"
+    },
+    {
       "path": "../ui-primitives"
     },
     {
@@ -48,6 +51,9 @@
       "path": "../ui-sidebar-documentpreview/tsconfig.client.json"
     },
     {
+      "path": "../ui-sidebar-files"
+    },
+    {
       "path": "../ui-slots"
     },
     {
@@ -55,6 +61,27 @@
     },
     {
       "path": "../../util/native-command"
+    },
+    {
+      "path": "../shortcuts/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-context-menu"
+    },
+    {
+      "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../ui-sidebar-right"
+    },
+    {
+      "path": "../../api/workspace-files/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-sidebar-browser/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-workspace"
     }
   ]
 }

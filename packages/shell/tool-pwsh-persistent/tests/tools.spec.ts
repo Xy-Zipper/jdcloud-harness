@@ -1,7 +1,11 @@
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { unsupportedModel, provideWorkingDirectoryFixture, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import { SESSION_FORMAT_VERSION, Session, type SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import TerminalSessionService from '@deepseek-ai/dsh-terminal'
@@ -18,7 +22,7 @@ import type {
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRegistry from '@deepseek-ai/dsh-tools'
 import * as ToolPwshPersistent from '@deepseek-ai/dsh-tool-pwsh-persistent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 const contexts: Context[] = []
 let callNumber = 0
@@ -29,7 +33,7 @@ afterEach(async () => {
 })
 
 async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
-  const id = SessionId(`persistent-pwsh-owner-${callNumber}`)
+  const id = brandString<SessionId>(`persistent-pwsh-owner-${callNumber}`)
   const scope = ctx.plugin(() => {})
   const session = Session.create(id, [], {
     version: SESSION_FORMAT_VERSION,
@@ -42,6 +46,7 @@ async function agent(ctx: Context, cwd: string | undefined): Promise<Agent> {
     id,
     options: {},
     session,
+    model: unsupportedModel(),
     inbox: unsupportedInbox(),
     status: 'idle',
     ctx: scope.ctx,
@@ -67,9 +72,9 @@ function call(
   command: string,
   signal = new AbortController().signal,
 ) {
-  return ctx.tools.execute({
+  return executeToolFixture(ctx, {
     signal,
-    callId: ToolCallId(`persistent-pwsh-${++callNumber}`),
+    callId: brandString<ToolCallId>(`persistent-pwsh-${++callNumber}`),
     name: 'pwsh',
     arguments: { command },
     ...owner === undefined ? {} : { agent: owner },
@@ -92,6 +97,8 @@ type StubMode =
   | 'nonzero'
   | 'torn-status'
   | 'finish-torn-status'
+  | 'status-tail'
+  | 'continue-status-tail'
   | 'end-only'
   | 'spawn-error'
   | 'send-error'
@@ -117,6 +124,8 @@ class StubTerminalSession implements TerminalBackendSession {
   pendingText = ''
   historyTruncated = false
   throwOnSend = false
+  largeOutput = 'x'.repeat(100)
+  statusChunks: string[] = []
 
   constructor(mode: StubMode) {
     this.mode = mode
@@ -189,6 +198,15 @@ class StubTerminalSession implements TerminalBackendSession {
       const incremental = `${start ?? ''}\nincrement\n${this.motd}`
       return this.operation(Promise.resolve(this.result(this.motd, 'stdin_read')), incremental)
     }
+    if (this.mode === 'status-tail' || this.mode === 'continue-status-tail') {
+      const prefix = this.mode === 'status-tail' ? `${start ?? ''}\nkept  \ndsh> \n${end ?? ''}` : ''
+      const fragment = this.statusChunks.shift()
+      if (fragment === undefined) throw new Error('missing scripted completion fragment')
+      const output = prefix + fragment
+      this.mode = this.statusChunks.length > 0 ? 'continue-status-tail' : 'send-error'
+      this.scrollback += output
+      return this.operation(Promise.resolve(this.result(output, 'inferred_idle')))
+    }
     if (this.mode === 'torn-status') {
       const output = `${start ?? ''}\nhello from stub\n${end ?? ''}`
       this.scrollback += output
@@ -206,7 +224,7 @@ class StubTerminalSession implements TerminalBackendSession {
       return this.operation(Promise.resolve(this.result(output, 'stdin_read')))
     }
     const commandOutput = this.mode === 'large'
-      ? 'x'.repeat(100)
+      ? this.largeOutput
       : this.mode === 'nonzero' ? ''
         : this.mode === 'prompt-collision' ? this.motd
           : 'hello from stub'
@@ -304,9 +322,12 @@ async function setup(
   initialMode: StubMode = 'normal',
 ) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   contexts.push(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRegistry)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(TerminalSessionService)
   const stub = stubBackend(initialMode)
@@ -364,6 +385,53 @@ describe('tool-pwsh-persistent', () => {
     session.mode = 'prompt-collision'
     expect(text(await call(ctx, owner, 'complete prompt collision'))).toBe(session.motd)
   })
+
+  it.each([
+    ['0  \r\n', 0],
+    ['7  \r\n', 7],
+    ['0 \n', 0],
+    ['7    \n', 7],
+  ] as const)('accepts ASCII-padded completion status %j without changing output', async (tail, exitCode) => {
+    const { ctx, owner, stub } = await setup({ backendType: 'stub' })
+    await call(ctx, owner, 'warm up')
+    const session = stub.sessions[0]!
+    session.mode = 'status-tail'
+    session.statusChunks = [tail]
+
+    const result = await call(ctx, owner, 'padded completion')
+    expect(result.isError).not.toBe(true)
+    expect(text(result)).toBe('kept  \ndsh> ' + (exitCode === 0 ? '' : `\n[exit code: ${exitCode}]`))
+    expect(session.sends).toBe(2)
+  })
+
+  it.each([0, 1, 2, 3, 4])('waits for the complete padded status newline at split %i', async (split) => {
+    const { ctx, owner, stub } = await setup({ backendType: 'stub' })
+    await call(ctx, owner, 'warm up')
+    const session = stub.sessions[0]!
+    session.mode = 'status-tail'
+    const tail = '7  \r\n'
+    session.statusChunks = [tail.slice(0, split), tail.slice(split)]
+    const send = vi.spyOn(session, 'startSend')
+
+    expect(text(await call(ctx, owner, 'split completion'))).toBe('kept  \ndsh> \n[exit code: 7]')
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(send.mock.calls[1]?.[0]).toMatchObject({ text: '', submit: false })
+  })
+
+  it.each(['0\t\n', '0\u00a0\n', '0\v\n', '0  ', '0  \r', '0junk\n', ' 0\n', '-1\n', '+1\n', "' + $__s)\n"])(
+    'does not accept unsupported completion status %j', async (tail) => {
+      const { ctx, owner, stub } = await setup({ backendType: 'stub' })
+      await call(ctx, owner, 'warm up')
+      const session = stub.sessions[0]!
+      session.mode = 'status-tail'
+      session.statusChunks = [tail]
+
+      const result = await call(ctx, owner, 'invalid completion')
+      expect(result.isError).toBe(true)
+      expect(text(result)).toContain('stub send failed')
+      expect(session.sends).toBe(3)
+    },
+  )
 
   it('reports the exit path when the shell exits between send settlement and the next poll', async () => {
     const { ctx, owner, stub } = await setup({ backendType: 'stub' })
@@ -445,6 +513,20 @@ describe('tool-pwsh-persistent', () => {
     await ctx.terminals.kill(owner, externallyClosed!, 'external cleanup')
     await fiber.dispose()
     expect(stub.sessions[2]?.closed).toEqual(['external cleanup'])
+  })
+
+  it('clips a split surrogate pair instead of leaving a lone half', async () => {
+    const { ctx, owner, stub } = await setup({ backendType: 'stub', maxOutputChars: 10 })
+    await call(ctx, owner, 'warm up')
+    const session = stub.sessions[0]!
+    session.mode = 'large'
+    // The tenth code unit is the emoji's high surrogate.
+    session.largeOutput = `${'x'.repeat(9)}😀tail`
+
+    const rendered = text(await call(ctx, owner, 'emoji'))
+
+    expect(rendered.startsWith(`${'x'.repeat(9)}<response clipped>`)).toBe(true)
+    expect(rendered).not.toContain('\uD83D')
   })
 
   it('waits for status digits after a torn completion marker', async () => {
@@ -713,9 +795,12 @@ describe('tool-pwsh-persistent', () => {
 
   it('cancels and awaits a pending shell spawn when the plugin is disposed', async () => {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     contexts.push(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRegistry)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(TerminalSessionService)
     const spawnStarted = Promise.withResolvers<undefined>()
@@ -745,8 +830,13 @@ describe('tool-pwsh-persistent', () => {
 
   it('rejects invalid config and invalid calls', async () => {
     const { ctx, owner, stub } = await setup()
-    expect((await call(ctx, undefined, 'pwd')).isError).toBe(true)
-    expect(text(await call(ctx, owner, ' '))).toContain('command must be a non-empty string')
+    expect(await call(ctx, undefined, 'pwd')).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ToolContextUnavailableError', code: 'TOOL_CONTEXT_UNAVAILABLE' } },
+    })
+    const blank = await call(ctx, owner, ' ')
+    expect(text(blank)).toContain('command must be a non-empty string')
+    expect(blank).toMatchObject({ isError: true, error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
 
     const controller = new AbortController()
     controller.abort(new Error('caller stopped'))

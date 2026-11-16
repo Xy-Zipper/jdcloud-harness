@@ -1,27 +1,29 @@
+import * as Protocol from '@deepseek-ai/dsh-llm-deepseek'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment/types'
 import type { AttachmentStore, ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import LlmRuntime, { ToolCallId, createUserMessage,
+import LlmRuntime, { type ToolCallId, createUserMessage,
   CONTEXT_WINDOW_EXCEEDED_CODE,
   createToolResultMessage,
   createAssistantMessage,
   LlmError,
-  ProviderRequestId,
+  type ProviderRequestId,
   QUOTA_EXCEEDED_CODE,
-  ReasoningEffortId,
+  type ReasoningEffortId,
   userAgent,
 } from '@deepseek-ai/dsh-llm'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { getOrCreateAnonymousUserId, type AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import DeepSeekLlmApiExtensionRegistry from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import type { PreparedDeepSeekLlmApiExtensions } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
-import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek'
+import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import { DeepSeekAdapter, resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { providerError } from '../src/transport.ts'
@@ -72,12 +74,12 @@ function noExtensions(): Promise<PreparedDeepSeekLlmApiExtensions> {
 function adapterOf(
   config: Partial<LlmDeepSeek.Options> & { apiKey?: string } = {},
   attachments?: AttachmentStore,
-  files?: LlmDeepSeek.DeepSeekFileStore,
+  files?: Protocol.DeepSeekFileStore,
 ): DeepSeekAdapter {
   const { apiKey, ...rest } = config
   return new DeepSeekAdapter({
     options: () => resolveAdapterOptions({ ...rest }),
-    resolveApiKey: () => Promise.resolve(apiKey ?? 'k'),
+    resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': apiKey ?? 'k' } }),
     resolveUserId: () => TEST_USER_ID,
     resolveAttachments: () => attachments,
     ...files === undefined ? {} : { resolveFiles: () => files },
@@ -90,7 +92,7 @@ async function drain(stream: AsyncIterable<unknown>): Promise<void> {
 }
 
 const imageRef: ImageAttachmentRef = {
-  attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`),
+  attachmentId: brandString<AttachmentId>(`sha256:${'a'.repeat(64)}`),
   mediaType: 'image/png',
   bytes: 3,
   width: 1,
@@ -99,7 +101,7 @@ const imageRef: ImageAttachmentRef = {
 
 function requestImage(ref = imageRef): RequestImageAttachment {
   return {
-    variantId: ImageVariantId(`sha256:${'b'.repeat(64)}`),
+    variantId: brandString<ImageVariantId>(`sha256:${'b'.repeat(64)}`),
     attachment: ref,
     data: Uint8Array.of(1, 2, 3),
     mediaType: 'image/png',
@@ -126,22 +128,22 @@ function attachmentStoreOf(
 }
 
 function fileStoreOf(
-  implementation: (...args: Parameters<LlmDeepSeek.DeepSeekFileStore['ensureUploaded']>) => ReturnType<LlmDeepSeek.DeepSeekFileStore['ensureUploaded']>,
+  implementation: (...args: Parameters<Protocol.DeepSeekFileStore['ensureUploaded']>) => ReturnType<Protocol.DeepSeekFileStore['ensureUploaded']>,
 ) {
   const ensureUploaded = vi.fn(implementation)
   const invalidate = vi.fn(() => Promise.resolve())
   return {
-    store: Object.assign(new LlmDeepSeek.DeepSeekFileStore(), { ensureUploaded, invalidate }),
+    store: Object.assign(new Protocol.DeepSeekFileStore(), { ensureUploaded, invalidate }),
     ensureUploaded,
     invalidate,
   }
 }
 
-function fileReference(fileId: string): Awaited<ReturnType<LlmDeepSeek.DeepSeekFileStore['ensureUploaded']>> {
+function fileReference(fileId: string): Awaited<ReturnType<Protocol.DeepSeekFileStore['ensureUploaded']>> {
   return {
-    record: { fileId: LlmDeepSeek.DeepSeekFileId(fileId) },
+    record: { fileId: brandString<Protocol.DeepSeekFileId>(fileId) },
     uploaded: true,
-  } as Awaited<ReturnType<LlmDeepSeek.DeepSeekFileStore['ensureUploaded']>>
+  } as Awaited<ReturnType<Protocol.DeepSeekFileStore['ensureUploaded']>>
 }
 
 function successfulSseResponse(): Response {
@@ -191,7 +193,7 @@ describe('request image target', () => {
     const attachments = {} as AttachmentStore
     const adapter = new DeepSeekAdapter({
       options: () => resolveAdapterOptions({ models: [{ id: 'vision', inputModalities: ['text', 'image'] }] }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
       resolveAttachments: () => attachments,
       resolveImageAccess: (store, ref) => (store === attachments && ref === imageRef
@@ -214,12 +216,12 @@ describe('DeepSeekAdapter against a mock server', () => {
     }))
     const adapter = new DeepSeekAdapter({
       options: () => resolveAdapterOptions({ baseURL: server.url }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
       prepareExtensions: prepareExtensions as never,
     })
 
-    await drain(adapter.stream({ provider: 'deepseek-official', model: 'm', messages: [], sessionId: SessionId('s') }))
+    await drain(adapter.stream({ provider: 'deepseek-official', model: 'm', messages: [], sessionId: brandString<SessionId>('s') }))
     expect(server.requests[0]).toMatchObject({ dsh_test: { version: 1 } })
     expect(prepareExtensions).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's' }))
     expect(accept).toHaveBeenCalledOnce()
@@ -229,7 +231,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     const server = await mockServer([])
     const base = {
       options: () => resolveAdapterOptions({ baseURL: server.url }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
     }
     const failed = new DeepSeekAdapter({
@@ -237,7 +239,10 @@ describe('DeepSeekAdapter against a mock server', () => {
       prepareExtensions: () => Promise.reject(new Error('metadata unavailable')),
     })
     await expect(drain(failed.stream({ provider: 'deepseek-official', model: 'm', messages: [] })))
-      .rejects.toMatchObject({ code: 'REQUEST_EXTENSION' })
+      .rejects.toMatchObject({
+        code: 'REQUEST_EXTENSION',
+        message: 'DeepSeek request extension preparation failed: metadata unavailable',
+      })
 
     const collision = new DeepSeekAdapter({
       ...base,
@@ -255,7 +260,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     let signalSeen: AbortSignal | undefined
     const adapter = new DeepSeekAdapter({
       options: () => resolveAdapterOptions({ baseURL: server.url }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
       prepareExtensions: ((request: { signal: AbortSignal }) => {
         signalSeen = request.signal
@@ -320,7 +325,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     const accept = vi.fn()
     const adapter = new DeepSeekAdapter({
       options: () => resolveAdapterOptions({ baseURL: server.url }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
       prepareExtensions: () => Promise.resolve({ fields: { dsh_test: 1 }, accept: async () => { accept() } }) as never,
     })
@@ -332,22 +337,25 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(accept).toHaveBeenCalledOnce()
   })
 
-  it('reports a post-2xx extension acceptance failure without relabelling it as transport', async () => {
-    const server = await mockServer([{ kind: 'sse', events: textEvents }])
+  it('reports a post-2xx extension acceptance failure and continues the stream', async () => {
+    const server = await mockServer([{ kind: 'sse', events: textEvents }, { kind: 'sse', events: textEvents }])
     const failure = new Error('watermark append failed')
-    const adapter = new DeepSeekAdapter({
+    const unaccepted = vi.fn()
+    const base = {
       options: () => resolveAdapterOptions({ baseURL: server.url }),
-      resolveApiKey: () => Promise.resolve('k'),
+      resolveAuth: () => Promise.resolve({ headers: { 'x-api-key': 'k' } }),
       resolveUserId: () => TEST_USER_ID,
       prepareExtensions: () => Promise.resolve({
         fields: { dsh_test: 1 },
         accept: () => Promise.reject(failure),
       }) as never,
-    })
+    }
+    const request = { provider: 'deepseek-official', model: 'm', messages: [] }
 
-    await expect(drain(adapter.stream({ provider: 'deepseek-official', model: 'm', messages: [] })))
-      .rejects.toMatchObject({ code: 'REQUEST_EXTENSION', cause: failure })
-    expect(server.requests).toHaveLength(1)
+    await expect(drain(new DeepSeekAdapter({ ...base, onExtensionsUnaccepted: unaccepted }).stream(request))).resolves.toBeUndefined()
+    expect(unaccepted).toHaveBeenCalledWith({ provider: 'deepseek-official', model: 'm', error: failure })
+    await expect(drain(new DeepSeekAdapter(base).stream(request))).resolves.toBeUndefined()
+    expect(server.requests).toHaveLength(2)
   })
 
   it('streams a text generation end to end through the assembler', async () => {
@@ -445,10 +453,10 @@ describe('DeepSeekAdapter against a mock server', () => {
 
   it('falls back to one all-base64 request when Files API resolution fails', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    const secondRef = { ...imageRef, attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`) }
+    const secondRef = { ...imageRef, attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`) }
     const attachments = attachmentStoreOf(ref => Promise.resolve({
       ...requestImage(ref),
-      variantId: ImageVariantId(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
+      variantId: brandString<ImageVariantId>(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
     })).store
     const files = fileStoreOf(() => Promise.reject(new LlmError('Files unavailable', 'SERVER')))
     const adapter = adapterOf({
@@ -497,10 +505,10 @@ describe('DeepSeekAdapter against a mock server', () => {
   })
   it('discards partially resolved file ids and falls back with every retained image inline', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    const secondRef = { ...imageRef, attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`) }
+    const secondRef = { ...imageRef, attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`) }
     const attachments = attachmentStoreOf(ref => Promise.resolve({
       ...requestImage(ref),
-      variantId: ImageVariantId(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
+      variantId: brandString<ImageVariantId>(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
     })).store
     const files = fileStoreOf(() => Promise.reject(new Error('unused')))
     files.ensureUploaded
@@ -528,39 +536,46 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(JSON.stringify(body)).not.toContain('file-api-partial')
   })
 
-  it('falls back after the configured Files API deadline without aborting the model request', async () => {
+  it('sends successive image requests inline after one 20-second upload timeout', async () => {
     vi.useFakeTimers()
     const started = Promise.withResolvers<undefined>()
-    const files = fileStoreOf((_version, _connection, _policy, signal) => new Promise((_resolve, reject) => {
+    const upload = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      id: 'file-probe', type: 'file', size_bytes: 3, created_at: new Date().toISOString(), filename: 'probe.png', mime_type: 'image/png',
+    }))).mockImplementationOnce((_url, init) => new Promise((_resolve, reject) => {
       started.resolve(undefined)
-      signal?.addEventListener('abort', () => {
-        const reason: unknown = signal.reason
-        reject(reason instanceof Error ? reason : new Error('files operation aborted'))
-      }, { once: true })
+      init!.signal!.addEventListener('abort', () => { reject(new Error('upload aborted')) }, { once: true })
     }))
+    const files = new Protocol.DeepSeekFileStore({ fetch: upload })
     const attachments = attachmentStoreOf(ref => Promise.resolve(requestImage(ref))).store
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(successfulSseResponse())
-    const adapter = adapterOf({
-      baseURL: 'https://deepseek.invalid',
-      filesApiTimeoutMs: 50,
-      models: [{ id: 'deepseek-v4-flash-vision-exp', inputModalities: ['text', 'image'] }],
-    }, attachments, files.store)
-
-    const pending = drain(adapter.stream({
-      provider: 'deepseek-official',
-      model: 'deepseek-v4-flash-vision-exp',
-      messages: [createUserMessage({
-        content: [{ type: 'image', attachment: imageRef }],
-        source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      })],
+    const messages = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => successfulSseResponse())
+    const adapter = adapterOf({ baseURL: 'https://deepseek.invalid' }, attachments, files)
+    const second = { ...imageRef, attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`) }
+    const request = (images = [imageRef]) => drain(adapter.stream({
+      provider: 'deepseek-official', model: 'deepseek-flash',
+      messages: [createUserMessage({ content: images.map(attachment => ({ type: 'image', attachment })), source: { kind: 'user' } })],
     }))
-    await started.promise
-    await vi.advanceTimersByTimeAsync(50)
-    await pending
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1)
-    expect(fetchSpy.mock.calls[0]?.[1]?.body).toEqual(expect.stringContaining('base64'))
-    fetchSpy.mockRestore()
+    try {
+      const first = request()
+      await started.promise
+      await vi.advanceTimersByTimeAsync(19_999)
+      expect(messages).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await first
+      await vi.advanceTimersByTimeAsync(3_600_000)
+      await drain(adapter.stream({ provider: 'deepseek-official', model: 'deepseek-flash', messages: [] }))
+      await request([imageRef, second])
+      expect(upload).toHaveBeenCalledTimes(1)
+      expect(messages).toHaveBeenCalledTimes(3)
+      expect(messages.mock.calls[0]?.[1]?.body).toEqual(expect.stringContaining('base64'))
+      const inline = messages.mock.calls[2]?.[1]?.body
+      expect(typeof inline === 'string' && inline.match(/"type":"base64"/gu)).toHaveLength(2)
+      await request()
+      expect(upload).toHaveBeenCalledTimes(2)
+      expect(messages.mock.calls[3]?.[1]?.body).toEqual(expect.stringContaining('file-probe'))
+    } finally {
+      messages.mockRestore()
+    }
   })
 
   it('does not turn caller cancellation during file resolution into base64 fallback', async () => {
@@ -623,8 +638,8 @@ describe('DeepSeekAdapter against a mock server', () => {
 
   it('does not prepare a surface-offloaded image and sends its placeholder instead', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    const old = { ...imageRef, attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`), bytes: 3 }
-    const recent = { ...imageRef, attachmentId: AttachmentId(`sha256:${'d'.repeat(64)}`), bytes: 3 }
+    const old = { ...imageRef, attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`), bytes: 3 }
+    const recent = { ...imageRef, attachmentId: brandString<AttachmentId>(`sha256:${'d'.repeat(64)}`), bytes: 3 }
     const attachmentMocks = attachmentStoreOf((ref) => {
       if (ref.attachmentId === old.attachmentId) throw new Error('old image must not be read')
       return Promise.resolve(requestImage(ref))
@@ -685,7 +700,7 @@ describe('DeepSeekAdapter against a mock server', () => {
       ],
     }, attachmentMocks.store)
     const nested = createToolResultMessage({
-      callId: ToolCallId('image-result'),
+      callId: brandString<ToolCallId>('image-result'),
       content: [{ type: 'image', attachment: imageRef }],
       isError: false,
     })
@@ -800,7 +815,7 @@ describe('DeepSeekAdapter against a mock server', () => {
   it('lists every candidate when a normalized multi-image rejection names no file id', async () => {
     const secondRef: ImageAttachmentRef = {
       ...imageRef,
-      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`),
     }
     const raw = JSON.stringify({ error: { message: 'unsupported image payload' } })
     const server = await mockServer([{ kind: 'http-error', status: 400, body: raw }])
@@ -808,7 +823,7 @@ describe('DeepSeekAdapter against a mock server', () => {
       const first = ref.attachmentId === imageRef.attachmentId
       return Promise.resolve({
         ...requestImage(ref),
-        variantId: ImageVariantId(`sha256:${(first ? 'b' : 'd').repeat(64)}`),
+        variantId: brandString<ImageVariantId>(`sha256:${(first ? 'b' : 'd').repeat(64)}`),
         attachment: first ? { ...ref, name: 'diagram.png' } : ref,
         hasAlpha: false,
       })
@@ -912,7 +927,7 @@ describe('DeepSeekAdapter against a mock server', () => {
   it('invalidates only the identified mapping when a multi-image request names one stale file id', async () => {
     const secondRef: ImageAttachmentRef = {
       ...imageRef,
-      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`),
     }
     const server = await mockServer([
       {
@@ -924,7 +939,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     ])
     const attachments = attachmentStoreOf(ref => Promise.resolve({
       ...requestImage(ref),
-      variantId: ImageVariantId(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
+      variantId: brandString<ImageVariantId>(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
     })).store
     const adapter = adapterOf({
       baseURL: server.url,
@@ -954,11 +969,11 @@ describe('DeepSeekAdapter against a mock server', () => {
   it('invalidates every listed missing file id and preserves unlisted mappings', async () => {
     const secondRef: ImageAttachmentRef = {
       ...imageRef,
-      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`),
     }
     const thirdRef: ImageAttachmentRef = {
       ...imageRef,
-      attachmentId: AttachmentId(`sha256:${'e'.repeat(64)}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${'e'.repeat(64)}`),
     }
     const server = await mockServer([
       {
@@ -979,7 +994,7 @@ describe('DeepSeekAdapter against a mock server', () => {
       else if (ref.attachmentId === secondRef.attachmentId) digest = 'd'
       return Promise.resolve({
         ...requestImage(ref),
-        variantId: ImageVariantId(`sha256:${digest.repeat(64)}`),
+        variantId: brandString<ImageVariantId>(`sha256:${digest.repeat(64)}`),
       })
     }).store
     const adapter = adapterOf({
@@ -1016,10 +1031,61 @@ describe('DeepSeekAdapter against a mock server', () => {
       ])
   })
 
+  it('recovers in one replacement request when the provider lists dozens of missing file ids', async () => {
+    const refs = Array.from({ length: 40 }, (_, index): ImageAttachmentRef => ({
+      ...imageRef,
+      attachmentId: brandString<AttachmentId>(`sha256:${(index + 1).toString(16).padStart(64, '0')}`),
+    }))
+    const missing = Array.from({ length: 30 }, (_, index) => `file-api-${index + 1}`)
+    const server = await mockServer([
+      {
+        kind: 'http-error',
+        status: 400,
+        body: JSON.stringify({
+          error: {
+            type: 'invalid_request_error',
+            message: 'messages.0.content.1.tool_result: the following file_ids do not exist or are not created under your account: '
+              + `${missing.join(', ')} (request_id: 00000000-0000-4000-8000-000000000002)`,
+          },
+        }),
+      },
+      { kind: 'sse', events: textEvents },
+    ])
+    const attachments = attachmentStoreOf(ref => Promise.resolve({
+      ...requestImage(ref),
+      variantId: brandString<ImageVariantId>(String(ref.attachmentId)),
+    })).store
+    const adapter = adapterOf({
+      baseURL: server.url,
+      models: [{ id: 'deepseek-v4-flash-vision-exp', inputModalities: ['text', 'image'] }],
+    }, attachments)
+
+    await drain(adapter.stream({
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash-vision-exp',
+      messages: [createUserMessage({
+        content: refs.map(ref => ({ type: 'image' as const, attachment: ref })),
+        source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      })],
+    }))
+
+    expect(server.requests).toHaveLength(2)
+    expect(server.fileRequests.filter(request => request.method === 'POST')).toHaveLength(70)
+    const attempts = server.requests as Array<{ messages: Array<{ content: Array<{ type: string; source?: { file_id?: string } }> }> }>
+    const fileIds = (attempt: number) => attempts[attempt]?.messages[0]?.content
+      .filter(block => block.type === 'image')
+      .map(block => block.source?.file_id)
+    expect(fileIds(0)).toEqual(refs.map((_, index) => `file-api-${index + 1}`))
+    expect(fileIds(1)).toEqual([
+      ...missing.map((_, index) => `file-api-${41 + index}`),
+      ...refs.slice(30).map((_, index) => `file-api-${31 + index}`),
+    ])
+  })
+
   it('invalidates every used mapping when a stale-file response does not identify one file id', async () => {
     const secondRef: ImageAttachmentRef = {
       ...imageRef,
-      attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`),
     }
     const server = await mockServer([
       {
@@ -1031,7 +1097,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     ])
     const attachments = attachmentStoreOf(ref => Promise.resolve({
       ...requestImage(ref),
-      variantId: ImageVariantId(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
+      variantId: brandString<ImageVariantId>(`sha256:${(ref.attachmentId === imageRef.attachmentId ? 'b' : 'd').repeat(64)}`),
     })).store
     const adapter = adapterOf({
       baseURL: server.url,
@@ -1084,12 +1150,12 @@ describe('DeepSeekAdapter against a mock server', () => {
     'rejects image input for text-only model %s before credentials, image reads, or fetch',
     async (model) => {
       const server = await mockServer([])
-      const resolveApiKey = vi.fn(() => Promise.resolve('k'))
+      const resolveAuth = vi.fn(() => Promise.resolve({ headers: { 'x-api-key': 'k' } }))
       const attachments = attachmentStoreOf(ref => Promise.resolve(requestImage(ref)))
       const resolveAttachments = vi.fn(() => attachments.store)
       const adapter = new DeepSeekAdapter({
         options: () => resolveAdapterOptions({ baseURL: server.url }),
-        resolveApiKey,
+        resolveAuth,
         resolveUserId: () => TEST_USER_ID,
         resolveAttachments,
         prepareExtensions: noExtensions,
@@ -1103,7 +1169,7 @@ describe('DeepSeekAdapter against a mock server', () => {
           source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
         })],
       }))).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
-      expect(resolveApiKey).not.toHaveBeenCalled()
+      expect(resolveAuth).not.toHaveBeenCalled()
       expect(attachments.readImageRequest).not.toHaveBeenCalled()
       expect(server.requests).toHaveLength(0)
     },
@@ -1111,13 +1177,13 @@ describe('DeepSeekAdapter against a mock server', () => {
 
   it('rejects vision input without an attachment provider before credentials or fetch', async () => {
     const server = await mockServer([])
-    const resolveApiKey = vi.fn(() => Promise.resolve('k'))
+    const resolveAuth = vi.fn(() => Promise.resolve({ headers: { 'x-api-key': 'k' } }))
     const adapter = new DeepSeekAdapter({
       options: () => resolveAdapterOptions({
         baseURL: server.url,
         models: [{ id: 'deepseek-v4-flash-vision-exp', inputModalities: ['text', 'image'] }],
       }),
-      resolveApiKey,
+      resolveAuth,
       resolveUserId: () => TEST_USER_ID,
       prepareExtensions: noExtensions,
     })
@@ -1130,7 +1196,7 @@ describe('DeepSeekAdapter against a mock server', () => {
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       })],
     }))).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
-    expect(resolveApiKey).not.toHaveBeenCalled()
+    expect(resolveAuth).not.toHaveBeenCalled()
     expect(server.requests).toHaveLength(0)
   })
 
@@ -1162,7 +1228,7 @@ describe('DeepSeekAdapter against a mock server', () => {
         content: [{ type: 'text', text: 'hi' }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       })],
-      sessionId: SessionId('child-session'),
+      sessionId: brandString<SessionId>('child-session'),
     })
 
     expect(server.headers[0]?.['x-deepseek-harness-session-id']).toBe('child-session')
@@ -1202,7 +1268,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     })
     await assemble(ctx,{
       model: 'deepseek-v4-flash',
-      reasoningEffort: ReasoningEffortId('off'),
+      reasoningEffort: brandString<ReasoningEffortId>('off'),
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi again' }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -1210,7 +1276,7 @@ describe('DeepSeekAdapter against a mock server', () => {
     })
     await assemble(ctx,{
       model: 'deepseek-v4-flash',
-      reasoningEffort: ReasoningEffortId('max'),
+      reasoningEffort: brandString<ReasoningEffortId>('max'),
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'one more time' }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -1263,11 +1329,11 @@ describe('DeepSeekAdapter against a mock server', () => {
       .resolves.toMatchObject({
         reasoning: {
           efforts: [{
-            id: ReasoningEffortId('off'),
+            id: brandString<ReasoningEffortId>('off'),
             name: 'Off',
             description: 'Use for simple tasks that do not need reasoning.',
           }],
-          defaultEffort: ReasoningEffortId('off'),
+          defaultEffort: brandString<ReasoningEffortId>('off'),
         },
       })
   })
@@ -1278,7 +1344,7 @@ describe('DeepSeekAdapter against a mock server', () => {
 
     const result = await assemble(ctx, {
       model: 'deepseek-v4-flash',
-      reasoningEffort: ReasoningEffortId('high'),
+      reasoningEffort: brandString<ReasoningEffortId>('high'),
       messages: [createUserMessage({
         content: [{ type: 'text', text: 'hi' }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -1300,7 +1366,7 @@ describe('DeepSeekAdapter against a mock server', () => {
       const stream = adapter.stream({
         provider: 'deepseek-official',
         model: 'deepseek-v4-flash',
-        reasoningEffort: ReasoningEffortId(effort),
+        reasoningEffort: brandString<ReasoningEffortId>(effort),
         messages: [createUserMessage({
           content: [{ type: 'text', text: 'hi' }],
           source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -1385,7 +1451,7 @@ describe('DeepSeekAdapter against a mock server', () => {
         code: 'RATE_LIMIT',
         status: 429,
         providerRetryAfterMs: 2_000,
-        requestId: ProviderRequestId('req-429'),
+        requestId: brandString<ProviderRequestId>('req-429'),
       },
     })
   })
@@ -1412,7 +1478,7 @@ describe('DeepSeekAdapter against a mock server', () => {
           code: 'SERVER',
           status: 503,
           providerRetryAfterMs: 3_000,
-          requestId: ProviderRequestId('deepseek-503'),
+          requestId: brandString<ProviderRequestId>('deepseek-503'),
         },
       })
     } finally {
@@ -1702,7 +1768,7 @@ describe('plugin registration and config', () => {
     expect(ctx.llm.listConfigurableProviders()).toEqual([{
       provider: 'deepseek-official',
       displayName: 'DeepSeek',
-      settingsNs: 'llm-deepseek',
+      settingsNs: 'llm-deepseek-api-key',
       settingsPath: [],
     }])
     await fiber.dispose()
@@ -1730,12 +1796,13 @@ describe('plugin registration and config', () => {
   })
 
   it('owns the deepseek provider and advertises the default models', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'catalog-fixture-key')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LlmDeepSeek, { baseURL: 'http://127.0.0.1:1' })
     expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
     await expect(ctx.llm.listModels('deepseek-official')).resolves.toEqual([
-      { provider: 'deepseek-official', id: 'deepseek-flash', name: 'DeepSeek-V41-Flash', inputModalities: ['text', 'image'] },
+      { provider: 'deepseek-official', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', inputModalities: ['text', 'image'] },
       {
         provider: 'deepseek-official',
         id: 'deepseek-v4-pro',
@@ -1748,19 +1815,19 @@ describe('plugin registration and config', () => {
       .resolves.toMatchObject({
         provider: 'deepseek-official',
         id: 'deepseek-flash',
-        name: 'DeepSeek-V41-Flash',
+        name: 'DeepSeek-V4.1-Flash',
         inputModalities: ['text', 'image'],
         systemPromptUpdate: 'in-history',
-        context: { contextWindow: 1_000_000 },
+        context: { contextWindow: 1_048_576 },
         defaultMaxTokens: 256_000,
         reasoning: {
           efforts: [
-            { id: ReasoningEffortId('off'), name: 'Off', description: 'Use for simple tasks that do not need reasoning.' },
-            { id: ReasoningEffortId('low'), name: 'Low', description: 'Prefer for routine or latency-sensitive tasks.' },
-            { id: ReasoningEffortId('high'), name: 'High', description: 'The default balance for most tasks.' },
-            { id: ReasoningEffortId('max'), name: 'Max', description: 'Reserve for the hardest quality-first tasks.' },
+            { id: brandString<ReasoningEffortId>('off'), name: 'Off', description: 'Use for simple tasks that do not need reasoning.' },
+            { id: brandString<ReasoningEffortId>('low'), name: 'Low', description: 'Prefer for routine or latency-sensitive tasks.' },
+            { id: brandString<ReasoningEffortId>('high'), name: 'High', description: 'The default balance for most tasks.' },
+            { id: brandString<ReasoningEffortId>('max'), name: 'Max', description: 'Reserve for the hardest quality-first tasks.' },
           ],
-          defaultEffort: ReasoningEffortId('high'),
+          defaultEffort: brandString<ReasoningEffortId>('high'),
         },
       })
   })
@@ -1773,7 +1840,7 @@ describe('plugin registration and config', () => {
     expect(info).toMatchObject({
       id: 'deepseek-v4-pro',
       inputModalities: ['text'],
-      context: { contextWindow: 1_000_000 },
+      context: { contextWindow: 1_048_576 },
       defaultMaxTokens: 256_000,
     })
     expect(info?.systemPromptUpdate).toBeUndefined()
@@ -1790,12 +1857,12 @@ describe('plugin registration and config', () => {
       .resolves.toMatchObject({
         reasoning: {
           efforts: [
-            { id: ReasoningEffortId('off'), name: 'Off', description: 'Use for simple tasks that do not need reasoning.' },
-            { id: ReasoningEffortId('low'), name: 'Low', description: 'Prefer for routine or latency-sensitive tasks.' },
-            { id: ReasoningEffortId('high'), name: 'High', description: 'The default balance for most tasks.' },
-            { id: ReasoningEffortId('max'), name: 'Max', description: 'Reserve for the hardest quality-first tasks.' },
+            { id: brandString<ReasoningEffortId>('off'), name: 'Off', description: 'Use for simple tasks that do not need reasoning.' },
+            { id: brandString<ReasoningEffortId>('low'), name: 'Low', description: 'Prefer for routine or latency-sensitive tasks.' },
+            { id: brandString<ReasoningEffortId>('high'), name: 'High', description: 'The default balance for most tasks.' },
+            { id: brandString<ReasoningEffortId>('max'), name: 'Max', description: 'Reserve for the hardest quality-first tasks.' },
           ],
-          defaultEffort: ReasoningEffortId(effort),
+          defaultEffort: brandString<ReasoningEffortId>(effort),
         },
       })
   })
@@ -1812,11 +1879,11 @@ describe('plugin registration and config', () => {
       .resolves.toMatchObject({
         reasoning: {
           efforts: [{
-            id: ReasoningEffortId('off'),
+            id: brandString<ReasoningEffortId>('off'),
             name: 'Off',
             description: 'Use for simple tasks that do not need reasoning.',
           }],
-          defaultEffort: ReasoningEffortId('off'),
+          defaultEffort: brandString<ReasoningEffortId>('off'),
         },
       })
   })
@@ -1848,21 +1915,22 @@ describe('plugin registration and config', () => {
     await expect(adapter.resolveModel('deepseek-official', 'pass-through')).resolves.toMatchObject({
       reasoning: {
         efforts: [{
-          id: ReasoningEffortId('off'),
+          id: brandString<ReasoningEffortId>('off'),
           name: 'Off',
           description: 'Use for simple tasks that do not need reasoning.',
         }],
-        defaultEffort: ReasoningEffortId('off'),
+        defaultEffort: brandString<ReasoningEffortId>('off'),
       },
     })
   })
 
   it('uses the default model catalog when apply is called directly', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'catalog-fixture-key')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     LlmDeepSeek.apply(ctx, LlmDeepSeek.Config({ baseURL: 'http://127.0.0.1:1' }))
     await expect(ctx.llm.listModels('deepseek-official')).resolves.toEqual([
-      { provider: 'deepseek-official', id: 'deepseek-flash', name: 'DeepSeek-V41-Flash', inputModalities: ['text', 'image'] },
+      { provider: 'deepseek-official', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', inputModalities: ['text', 'image'] },
       {
         provider: 'deepseek-official',
         id: 'deepseek-v4-pro',
@@ -1873,23 +1941,9 @@ describe('plugin registration and config', () => {
     ])
   })
 
-  it('defaults an adapter-supplied catalog entry to text input', async () => {
-    const connection = resolveAdapterOptions({ models: [] })
-    const adapter = new DeepSeekAdapter({
-      options: () => ({ ...connection, models: [{ id: 'adapter-model' }] }),
-      resolveApiKey: () => Promise.resolve('k'),
-      resolveUserId: () => TEST_USER_ID,
-      prepareExtensions: noExtensions,
-    })
-    await expect(adapter.listModels('deepseek-official')).resolves.toEqual([{
-      provider: 'deepseek-official',
-      id: 'adapter-model',
-      name: 'adapter-model',
-      inputModalities: ['text'],
-    }])
-  })
 
   it('advertises configured models without restricting arbitrary request ids', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'catalog-fixture-key')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LlmDeepSeek, {
@@ -2175,15 +2229,13 @@ describe('plugin registration and config', () => {
     expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
   })
 
-  it('loads keyless, keeps the catalog browsable, and fails the request actionably', async () => {
+  it('loads keyless with an empty catalog and fails requests actionably', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', '')
     const ctx = new Context()
     await ctx.plugin(LlmRuntime)
     await ctx.plugin(LlmDeepSeek, { baseURL: 'http://127.0.0.1:1' })
-    // First-boot onboarding: the route registers so models stay discoverable;
-    // only the request itself needs a key.
     expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
-    await expect(ctx.llm.listModels('deepseek-official')).resolves.toHaveLength(2)
+    await expect(ctx.llm.listModels('deepseek-official')).resolves.toEqual([])
     const first = await assemble(ctx, { model: 'deepseek-flash', messages: [] })
     expect(first.finish).toMatchObject({ kind: 'error', failure: { code: 'MISSING_CREDENTIAL' } })
     // The guidance leads with the managed credential store.
@@ -2269,22 +2321,21 @@ describe('plugin registration and config', () => {
   it('adapter is constructible directly for embedding over the shared resolver', async () => {
     const adapter = adapterOf()
     expect(adapter).toBeInstanceOf(DeepSeekAdapter)
-    // Direct embedding shares the plugin's one resolve step, so it advertises
-    // the same default catalog instead of a divergent empty one.
-    await expect(adapter.listModels('deepseek-official')).resolves.toHaveLength(2)
+    await expect(adapter.listModels('deepseek-official')).resolves.toEqual([])
+    await expect(adapter.resolveModel('deepseek-official', 'deepseek-flash')).resolves.toMatchObject({ name: 'DeepSeek-V4.1-Flash' })
   })
 
   it('resolves connection facts and the credential exactly once per stream call', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
     const options = vi.fn(() => resolveAdapterOptions({ baseURL: server.url }))
-    const resolveApiKey = vi.fn(() => Promise.resolve('per-request-key'))
+    const resolveAuth = vi.fn(() => Promise.resolve({ headers: { 'x-api-key': 'per-request-key' } }))
     const resolveUserId = vi.fn(() => TEST_USER_ID)
-    const adapter = new DeepSeekAdapter({ options, resolveApiKey, resolveUserId, prepareExtensions: noExtensions })
+    const adapter = new DeepSeekAdapter({ options, resolveAuth, resolveUserId, prepareExtensions: noExtensions })
 
     for await (const _chunk of adapter.stream({ provider: 'deepseek-official', model: 'm', messages: [] })) { /* drain */ }
 
     expect(options).toHaveBeenCalledTimes(1)
-    expect(resolveApiKey).toHaveBeenCalledTimes(1)
+    expect(resolveAuth).toHaveBeenCalledTimes(1)
     expect(resolveUserId).toHaveBeenCalledTimes(1)
     expect(server.headers[0]?.['x-api-key']).toBe('per-request-key')
   })

@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-08-user-stop-clears-todo-plan.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-08-user-stop-clears-todo-plan.md
-2026-09-08-user-stop-clears-todo-plan.md: d142d1f19fb0a4eefdcbc3fd4f4195062cc2eace
-2026-09-08-user-stop-clears-todo-plan.zh.md: adfbc350766a4e0711be5cabfc4437709ba9a84e
+/agent-note-user-stop-clears-the-todo-plan:
+  en: 15edc057f2dd80ed
+  zh: b4bd60bd380c2cef
+/agent-note-user-stop-clears-the-todo-plan/problem:
+  en: 6e7aa8b5817249ff
+  zh: 1623532f3b1cc891
+/agent-note-user-stop-clears-the-todo-plan/decision:
+  en: b7b76b15cb64049f
+  zh: f9060b9ea84bb27a
+/agent-note-user-stop-clears-the-todo-plan/alternatives-considered:
+  en: 7ca009abdc0aadf4
+  zh: 0b88ea2d04a62479
+/agent-note-user-stop-clears-the-todo-plan/consequences:
+  en: 6c975de2e28ea570
+  zh: 19199252af349308

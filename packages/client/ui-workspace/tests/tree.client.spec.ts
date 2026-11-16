@@ -1,23 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {
-  SessionPendingInteraction, SessionStatus, SessionStatusSnapshot,
-} from '@deepseek-ai/dsh-client-ui-session/client'
-import type { ScheduleId, ScheduleRecord } from '@deepseek-ai/dsh-schedule/client'
+  SessionListState, SessionProjectionMap, SessionSummary,
+} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionStatus, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session-status/client'
+import type { SessionPendingInteraction } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   type ArchivedFilter,
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, sessionSearchIndex, owningGroupKey, owningParentFolder,
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 
+type SearchArgs = Parameters<typeof deriveSearchResults>
+/** Sidebar search as the component runs it: build the list's index, then search it. */
+function searchResults(
+  sessions: SearchArgs[0], workspaces: SearchArgs[1], query: string, archivedIds: SearchArgs[3],
+  archivedFilter: SearchArgs[4], statuses: SearchArgs[5], content: SearchArgs[6], limit: number,
+): ReturnType<typeof deriveSearchResults> {
+  const index = sessionSearchIndex(sessions, workspaces, archivedIds, archivedFilter)
+  return deriveSearchResults(sessions, workspaces, query, archivedIds, archivedFilter, statuses, content, limit, index)
+}
+
 const sid = (id: string) => id as SessionId
 const wid = (id: string) => id as WorkspaceId
 const summary = (id: string, updatedAt: number, cwd?: string): SessionSummary => ({
-  id: sid(id), displayTitle: id, running: false, blank: false,
+  id: sid(id), title: id, displayTitle: id, running: false, blank: false,
   updatedAt, ...(cwd === undefined ? {} : { cwd }), retainedBy: {},
 })
 const list = (...items: SessionSummary[]): SessionListState => ({
@@ -40,6 +51,38 @@ const withMain = (state: SessionListState, id: SessionId): SessionListState => (
     [id]: { ...state.byId[id]!, retainedBy: { ...state.byId[id]!.retainedBy, mainView: 1 } },
   },
 })
+/**
+ * Projection values one shipped Host publishes for a Session. The `forkLineage` key belongs to the
+ * Liveshare package, which this program does not name, so the values are built through the open key
+ * space the wire allows.
+ */
+const projectionValues = (values: Record<string, JsonValue>): Readonly<Partial<SessionProjectionMap>> => values
+/**
+ * One list where the named Session carries the branch facts the Host publishes for this reader.
+ * @param items - list rows.
+ * @param branchId - Session the facts belong to.
+ * @param lineage - the branch fields that case exercises; `origin` is always a fork.
+ * @returns the list with that Session's `forkLineage` projection value.
+ */
+const branchedList = (
+  items: readonly SessionSummary[],
+  branchId: SessionId,
+  lineage: { readonly sourceSessionId: SessionId; readonly workspaceReadOnly?: boolean },
+): SessionListState => {
+  const base = list(...items)
+  return {
+    ...base,
+    byId: {
+      ...base.byId,
+      [branchId]: {
+        ...base.byId[branchId]!,
+        projectionValues: projectionValues({
+          forkLineage: { origin: 'fork', authoredByViewer: true, workspaceReadOnly: true, ...lineage },
+        }),
+      },
+    },
+  }
+}
 const workspace = (id: string, sessionIds: string[], title = id): WorkspaceView => ({
   workspaceId: wid(id), path: `/projects/${id}`, title,
   sessionIds: sessionIds.map(sid), createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
@@ -53,7 +96,7 @@ const noAttention: SessionStatusSnapshot = new Map()
 const status = (
   pendingInteraction: SessionPendingInteraction | undefined,
   overrides: Partial<SessionStatus> = {},
-): SessionStatus => ({ running: undefined, pendingInteraction, completionUnread: false, ...overrides })
+): SessionStatus => ({ running: undefined, pendingInteraction, completionUnread: false, completionFailed: false, ...overrides })
 const archived = (...ids: string[]): readonly SessionId[] => ids.map(sid)
 const rowState = (options: {
   pinned?: readonly string[]
@@ -65,12 +108,6 @@ const rowState = (options: {
   archivedFilter: options.archivedFilter ?? 'default' as const,
 })
 const noRows = rowState()
-const schedule = (id: string, scheduledAt: string): ScheduleRecord => ({
-  id: id as ScheduleId,
-  kind: 'at',
-  prompt: id,
-  scheduledAt,
-})
 
 describe('owningGroupKey', () => {
   it('returns the owning Workspace id or the Ungrouped key', () => {
@@ -156,26 +193,26 @@ describe('Session ordering', () => {
     expect(saved).toEqual(['saved-archive', 'saved-plain', 'saved-pin'])
   })
 
-  it('inserts new forks before their saved source while preserving saved positions', () => {
+  it('appends new forks by recency while preserving saved positions', () => {
     const sessions = list(
       summary('source', 1), summary('other', 2),
       { ...summary('older-fork', 3), parentId: sid('source') },
       { ...summary('newer-fork', 4), parentId: sid('source') },
     )
     const order = reconcileManualOrder(sessions.ids, ['other', 'source'], sessions.byId)
-    expect(order).toEqual(['other', 'older-fork', 'newer-fork', 'source'])
+    expect(order).toEqual(['other', 'source', 'newer-fork', 'older-fork'])
     expect(reconcileManualOrder(sessions.ids, ['source', 'other', 'older-fork', 'newer-fork'], sessions.byId))
       .toEqual(['source', 'other', 'older-fork', 'newer-fork'])
   })
 
-  it('places nested new forks before their parents even when catalog recency differs', () => {
+  it('orders unsaved nested forks by recency regardless of historical sources', () => {
     const sessions = list(
       summary('source', 1), summary('other', 2),
       { ...summary('parent', 4), parentId: sid('source') },
       { ...summary('child', 3), parentId: sid('parent') },
     )
     expect(reconcileManualOrder(sessions.ids, ['source', 'other'], sessions.byId))
-      .toEqual(['child', 'parent', 'source', 'other'])
+      .toEqual(['source', 'other', 'parent', 'child'])
   })
 
   it('appends forks with absent or self-referencing parents without duplicating rows', () => {
@@ -201,7 +238,7 @@ describe('Session ordering', () => {
         sessions, mode === 'workspace' ? [workspace('alpha', order)] : [], state, noAttention,
         view([mode === 'workspace' ? 'alpha' : UNGROUPED_KEY], order),
       )[0]!.sessions
-    expect(rows.map(row => row.id)).toEqual(['source', 'other-pin', 'fork', 'ordinary'])
+    expect(rows.map(row => row.id)).toEqual(['source', 'other-pin', 'ordinary', 'fork'])
   })
 
   it('keeps archive filtering out of complete flat membership', () => {
@@ -308,6 +345,20 @@ describe('deriveGroups', () => {
     expect(strayGroups.map(group => group.key)).toEqual(['first'])
   })
 
+  it('matches titles fuzzily and orders local results by match, then recency', () => {
+    const newer = { ...summary('newer', 3), title: 'Weekly sync notes' }
+    const older = { ...summary('older', 2), title: 'Sync dashboard' }
+    const other = { ...summary('other', 4), title: 'Unrelated' }
+    const sessions = list(newer, older, other)
+    const search = (query: string) => searchResults(
+      sessions, [workspace('first', ['newer', 'older', 'other'])], query, noArchive, 'default',
+      noAttention, { items: [], hasMore: false }, 10,
+    ).items.map(item => item.id)
+    expect(search('sync')).toEqual([older.id, newer.id])
+    expect(search('wksn')).toEqual([newer.id])
+    expect(search('zzz')).toEqual([])
+  })
+
   it('projects the completion reminder into session and search rows (absent = false)', () => {
     const done = summary('done', 3)
     const plain = summary('plain', 2)
@@ -322,41 +373,23 @@ describe('deriveGroups', () => {
     expect(plainNode.completed).toBe(false)
     expect(deriveFlat(sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, statuses)
       .find(node => node.id === done.id)!.completed).toBe(true)
-    const search = deriveSearchResults(
+    const search = searchResults(
       sessions, [workspace('first', ['done', 'plain'])], 'done', noArchive, 'default',
       statuses, { items: [], hasMore: false }, 10,
     )
     expect(search.items[0]?.completed).toBe(true)
   })
 
-  it('derives one active-Schedule fact for grouped, flat, and search rows', () => {
-    const absent = summary('absent', 4)
-    const empty = { ...summary('empty', 3), projectionValues: { schedule: [] } }
-    const future = {
-      ...summary('future', 2),
-      projectionValues: { schedule: [schedule('future', '2099-01-01T00:00:00.000Z')] },
-    }
-    const overdue = {
-      ...summary('overdue', 1),
-      projectionValues: { schedule: [schedule('overdue', '2000-01-01T00:00:00.000Z')] },
-    }
-    const sessions = list(absent, empty, future, overdue)
-    const workspaces = [workspace('project', ['absent', 'empty', 'future', 'overdue'], 'Project')]
-    const expected = [
-      [sid('absent'), false],
-      [sid('empty'), false],
-      [sid('future'), true],
-      [sid('overdue'), true],
-    ]
-
-    expect(deriveGroups(
-      sessions, workspaces, noRows, noAttention, view(['project']),
-    )[0]!.sessions.map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
-    expect(deriveFlat(sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, noAttention)
-      .map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
-    expect(deriveSearchResults(
-      sessions, workspaces, 'project', noArchive, 'default', noAttention, { items: [], hasMore: false }, 10,
-    ).items.map(node => [node.id, node.hasActiveSchedule])).toEqual(expected)
+  it.each([true, false])('shows failed completion only while unread=%s in session and search rows', (unread) => {
+    const failed = summary('failed', 3)
+    const sessions = list(failed)
+    const statuses: SessionStatusSnapshot = new Map([[failed.id, status(undefined, {
+      completionUnread: unread, completionFailed: unread,
+    })]])
+    const rows = deriveFlat(sessions, visibleSessionIds(sessions, noArchive, 'default'), noRows, statuses)
+    expect(rows[0]).toMatchObject({ completed: unread, failed: unread })
+    const search = searchResults(sessions, [], 'failed', noArchive, 'default', statuses, { items: [], hasMore: false }, 10)
+    expect(search.items[0]).toMatchObject({ completed: unread, failed: unread })
   })
 
   it('hides subagent-origin sessions and reads direct running counts from catalogs', () => {
@@ -398,7 +431,7 @@ describe('deriveGroups', () => {
       .map(node => [node.id, node.runningSubagentCount])).toEqual([
       [parent.id, 1], [fork.id, 1],
     ])
-    expect(deriveSearchResults(
+    expect(searchResults(
       sessions, [workspace('first', ['parent', 'fork'])], 'parent', noArchive, 'default',
       noAttention, { items: [], hasMore: false }, 10,
     ).items[0]).toMatchObject({ id: parent.id, runningSubagentCount: 1 })
@@ -423,7 +456,7 @@ describe('deriveGroups', () => {
     const counts = (snapshot: SessionStatusSnapshot) => [
       deriveGroups(sessions, [workspace('first', ['parent'])], noRows, snapshot, view(['first']))[0]!.sessions[0]!.runningSubagentCount,
       deriveFlat(sessions, [parent.id], noRows, snapshot)[0]!.runningSubagentCount,
-      deriveSearchResults(sessions, [], 'parent', noArchive, 'default', snapshot, { items: [], hasMore: false }, 10).items[0]!.runningSubagentCount,
+      searchResults(sessions, [], 'parent', noArchive, 'default', snapshot, { items: [], hasMore: false }, 10).items[0]!.runningSubagentCount,
     ]
     expect(counts(statuses)).toEqual([1, 1, 1])
     statuses.set(child.id, status(undefined, { running: false }))
@@ -520,6 +553,29 @@ describe('deriveGroups', () => {
     ])
   })
 
+  it('drops Workspaces without visible members under the only filter', () => {
+    const sessions = list(summary('stored', 2), summary('live', 1))
+    const groups = deriveGroups(
+      sessions, [workspace('full', ['stored', 'live']), workspace('empty', ['live'])],
+      rowState({ archived: ['stored'], archivedFilter: 'only' }),
+      noAttention, view(['full', 'empty']),
+    )
+    expect(groups.map(group => group.key)).toEqual(['full'])
+    expect(groups[0]!.sessions.map(node => node.id)).toEqual([sid('stored')])
+  })
+
+  it.each(['default', 'show'] as const)('keeps memberless Workspaces under the %s filter', (archivedFilter) => {
+    const sessions = list(summary('stored', 1))
+    const groups = deriveGroups(
+      sessions, [workspace('empty', ['stored'])],
+      rowState({ archived: ['stored'], archivedFilter }),
+      noAttention, view(['empty']),
+    )
+    expect(groups.map(group => [group.key, group.sessionCount])).toEqual([
+      ['empty', archivedFilter === 'show' ? 1 : 0],
+    ])
+  })
+
   it('marks selected Workspace and Ungrouped sessions without relying on an Intent', () => {
     const owned = summary('owned', 1)
     const loose = summary('loose', 2)
@@ -556,6 +612,17 @@ describe('deriveFlat', () => {
   it('tolerates ids whose summary has not landed yet', () => {
     const partial: SessionListState = { ...list(summary('present', 1)), ids: [sid('ghost'), sid('present')] }
     expect(visibleSessionIds(partial, noArchive, 'default')).toEqual([sid('present')])
+  })
+
+  it('leaves plugin-owned lineage interpretation to row slots in both list modes', () => {
+    const source = summary('shared', 1)
+    const child = summary('my-branch', 2)
+    const branched = branchedList([source, child], child.id, { sourceSessionId: source.id })
+    const rows = deriveFlat(branched, [source.id, child.id], noRows, noAttention)
+    expect(rows.every(row => !('fork' in row))).toBe(true)
+    const groups = deriveGroups(branched, [workspace('first', ['shared', 'my-branch'])],
+      noRows, noAttention, view(['first']))
+    expect(groups[0]!.sessions.every(row => !('fork' in row))).toBe(true)
   })
 
   it('shows only the current blank session and excludes blanks from search', () => {
@@ -600,10 +667,10 @@ describe('deriveFlat', () => {
 describe('deriveSearchResults archive filtering', () => {
   it('archived sessions never match — not by title and not via a backend content hit', () => {
     const hit = summary('hit', 2)
-    hit.displayTitle = 'Needle row'
+    hit.title = hit.displayTitle = 'Needle row'
     const gone = summary('gone', 1)
-    gone.displayTitle = 'Needle archived'
-    const result = deriveSearchResults(
+    gone.title = gone.displayTitle = 'Needle archived'
+    const result = searchResults(
       list(hit, gone),
       [],
       'needle',
@@ -618,8 +685,8 @@ describe('deriveSearchResults archive filtering', () => {
 
   it('matches archived sessions and flags them while the view shows them', () => {
     const gone = summary('gone', 1)
-    gone.displayTitle = 'Needle archived'
-    const result = deriveSearchResults(
+    gone.title = gone.displayTitle = 'Needle archived'
+    const result = searchResults(
       list(gone), [], 'needle', archived('gone'), 'show', noAttention, { items: [], hasMore: false }, 10,
     )
     expect(result.items.map(item => [item.id, item.archived])).toEqual([[gone.id, true]])
@@ -627,25 +694,61 @@ describe('deriveSearchResults archive filtering', () => {
 
   it('matches only archived sessions under the only filter', () => {
     const hit = summary('hit', 2)
-    hit.displayTitle = 'Needle row'
+    hit.title = hit.displayTitle = 'Needle row'
     const gone = summary('gone', 1)
-    gone.displayTitle = 'Needle archived'
-    const result = deriveSearchResults(
+    gone.title = gone.displayTitle = 'Needle archived'
+    const result = searchResults(
       list(hit, gone), [], 'needle', archived('gone'), 'only', noAttention, { items: [], hasMore: false }, 10,
     )
     expect(result.items.map(item => [item.id, item.archived])).toEqual([[gone.id, true]])
   })
 })
 
+describe('deriveSearchResults branch marks', () => {
+  it('carries the same branch facts a matching row shows in the list', () => {
+    const source = summary('shared', 1)
+    source.title = source.displayTitle = 'Needle source'
+    const branch = summary('my-branch', 2)
+    branch.title = branch.displayTitle = 'Needle branch'
+    const result = searchResults(
+      branchedList([source, branch], branch.id, { sourceSessionId: source.id }),
+      [workspace('first', ['shared', 'my-branch'])],
+      'needle',
+      noArchive,
+      'default',
+      noAttention,
+      { items: [], hasMore: false },
+      10,
+    )
+    expect(result.items.every(item => !('fork' in item))).toBe(true)
+  })
+})
+
 describe('deriveSearchResults', () => {
+  it('updates the previous index to the same results as a fresh one', () => {
+    const first = { ...summary('first', 1), title: 'Weekly sync notes' }
+    const second = { ...summary('second', 2), title: 'Sync dashboard' }
+    const before = list(first, second)
+    const previous = sessionSearchIndex(before, [], noArchive, 'default')
+    previous.search('sync')
+    // A republish rebuilds every summary object; one title changes and one Session is new.
+    const after = list({ ...first, title: 'Weekly planning' }, { ...second }, { ...summary('third', 3), title: 'Sync retro' })
+    const updated = sessionSearchIndex(after, [], noArchive, 'default', previous)
+    const fresh = sessionSearchIndex(after, [], noArchive, 'default')
+    for (const query of ['sync', 'wkpl', 'retro']) {
+      expect(updated.search(query).map(row => row.id)).toEqual(fresh.search(query).map(row => row.id))
+    }
+    expect(updated.search('sync').map(row => row.id)).toEqual([sid('third'), sid('second')])
+  })
+
   it('merges local title/Workspace matches before ranked content hits and enriches duplicates', () => {
     const titleHit = summary('title-hit', 30, '/projects/a')
-    titleHit.displayTitle = 'Needle title'
+    titleHit.title = titleHit.displayTitle = 'Needle title'
     const workspaceHit = summary('workspace-hit', 20, '/projects/b')
-    workspaceHit.displayTitle = 'Ordinary title'
+    workspaceHit.title = workspaceHit.displayTitle = 'Ordinary title'
     const contentHit = summary('content-hit', 10, '/projects/c')
     const sessions = list(titleHit, workspaceHit, contentHit)
-    const result = deriveSearchResults(
+    const result = searchResults(
       sessions,
       [
         workspace('a', ['title-hit'], 'Alpha'),
@@ -679,8 +782,7 @@ describe('deriveSearchResults', () => {
           running: false,
           runningSubagentCount: 0,
           pendingInteraction: 'plan-review',
-          completed: false,
-          hasActiveSchedule: false,
+          completed: false, failed: false,
           archived: false,
           snippet: 'title session body excerpt',
         },
@@ -690,8 +792,7 @@ describe('deriveSearchResults', () => {
           workspace: 'Needle Workspace',
           running: false,
           runningSubagentCount: 0,
-          completed: false,
-          hasActiveSchedule: false,
+          completed: false, failed: false,
           archived: false,
         },
         {
@@ -700,8 +801,7 @@ describe('deriveSearchResults', () => {
           workspace: 'c',
           running: false,
           runningSubagentCount: 0,
-          completed: false,
-          hasActiveSchedule: false,
+          completed: false, failed: false,
           archived: false,
           snippet: 'body needle excerpt',
         },
@@ -710,13 +810,24 @@ describe('deriveSearchResults', () => {
     })
   })
 
+  it('matches Session id substrings case-insensitively', () => {
+    const idHit = summary('3f9a2c71-session', 2)
+    idHit.title = idHit.displayTitle = 'Ordinary title'
+    const other = summary('b7e0d4aa-session', 1)
+    other.title = other.displayTitle = 'Another title'
+    const result = searchResults(
+      list(idHit, other), [], '9A2C71', noArchive, 'default', noAttention, { items: [], hasMore: false }, 10,
+    )
+    expect(result.items.map(item => [item.id, item.title])).toEqual([[idHit.id, 'Ordinary title']])
+  })
+
   it('excludes blank sessions from search regardless of query or content hits', () => {
     const currentBlank = { ...summary('opaque-current', 5), blank: true }
     const staleBlank = { ...summary('new session stale', 4), blank: true }
     const sessions = list(currentBlank, staleBlank)
     // Blank placeholders never match — not their localized-display title, not
     // their id, and not even a backend content hit naming them.
-    const result = deriveSearchResults(
+    const result = searchResults(
       sessions,
       [workspace('first', ['opaque-current', 'new session stale'])],
       'new session',
@@ -738,10 +849,10 @@ describe('deriveSearchResults', () => {
   it('uses the supplied cap and preserves either local overflow or backend hasMore', () => {
     const rows = Array.from({ length: 5 }, (_, index) => {
       const item = summary(`s-${String(index).padStart(2, '0')}`, index)
-      item.displayTitle = `Needle ${String(index)}`
+      item.title = item.displayTitle = `Needle ${String(index)}`
       return item
     })
-    const overflow = deriveSearchResults(
+    const overflow = searchResults(
       list(...rows),
       [],
       'needle',
@@ -754,7 +865,7 @@ describe('deriveSearchResults', () => {
     expect(overflow.items).toHaveLength(3)
     expect(overflow.hasMore).toBe(true)
 
-    const backendMore = deriveSearchResults(
+    const backendMore = searchResults(
       list(summary('body', 1)),
       [],
       'needle',
@@ -766,7 +877,7 @@ describe('deriveSearchResults', () => {
     )
     expect(backendMore.items).toHaveLength(1)
     expect(backendMore.hasMore).toBe(true)
-    expect(deriveSearchResults(list(), [], '  ', noArchive, 'default', noAttention, { items: [], hasMore: true }, 3))
+    expect(searchResults(list(), [], '  ', noArchive, 'default', noAttention, { items: [], hasMore: true }, 3))
       .toEqual({ items: [], hasMore: false })
   })
 })
@@ -893,4 +1004,12 @@ describe('parent folder membership', () => {
   ])('groups %s under its nearest registered ancestor', (path, parents, expected) => {
     expect(owningParentFolder(path, parents)).toBe(expected)
   })
+})
+
+it('leaves unnamed history titles empty for locale-owned row labels', () => {
+  const item = summary('unnamed', 1, '/work/Default workspace')
+  delete item.title
+  item.displayTitle = 'Default workspace'
+  const sessions = list(item)
+  expect(deriveFlat(sessions, [item.id], noRows, noAttention)[0]?.title).toBe('')
 })

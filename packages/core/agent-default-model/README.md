@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Give newly created agents a shared default provider and model when their sessions do not specify one. Provider, model, and reasoning effort are live Config fields. Saved selections update the active profile patch and apply to subsequent reads; per-session selection remains owned by the entry point.
+Give newly created agents a shared default provider and model when their sessions do not specify one. Provider, model, and reasoning effort are live Config fields. Saved selections update the active profile patch and apply to subsequent reads; per-session selection belongs to the [Agent model API](../agent/README.md).
 
 ## Table of Contents
 
@@ -68,14 +68,13 @@ This section explains how the service realizes the behavior above; the observabl
 
 ### Design concept
 
-The service retains its validated Config references and samples them in `currentSelection()`. `saveSelection()` delegates a complete selection to the profile configuration editor. Session-specific selection takes precedence in the consumer.
+The service retains its validated Config references and samples them in `currentSelection()`. `saveSelection()` captures the submitted values and serializes profile writes in submission order, including overlapping callers. Each caller observes its own write failure; a rejected write does not prevent later saves. Session-specific selection takes precedence in the consumer.
 
 ### Source map
 
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Live default selection and profile-backed writes |
-| — | No invariant companion is published because Config references are the only owned values. |
 
 ### Behavior notes
 
@@ -113,7 +112,7 @@ Changing the default affects only agents that subsequently resolve from it. An e
 
 These limits define the service's scope. They are current package constraints, not a task backlog.
 
-- **One process-wide default** — the service owns a single default; per-session model selection remains the entry point's responsibility.
+- **One process-wide default** — the service owns a single default; per-session model selection belongs to the [Agent model API](../agent/README.md).
 - **Persistence requires a profile configuration editor** — without it, saving a default does not retain the selection.
 
 <a id="dev-note"></a>

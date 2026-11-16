@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type {
   SkillEntry,
@@ -20,7 +20,6 @@ import {
   Input,
   Modal,
   Tooltip,
-  useAnchoredPosition,
   useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SkillKey } from './locales.ts'
@@ -192,14 +191,7 @@ export function SkillPickerView({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const selectionRevisionRef = useRef(0)
   const insertionRef = useRef<ReturnType<SkillPickerProps['inputActions']['captureInsertion']> | null>(null)
-  const position = useAnchoredPosition({
-    open,
-    anchorRef: rootRef,
-    panelRef,
-    side: 'top',
-    gap: 8,
-    margin: 12,
-  })
+  const anchorName = `--skill-picker-${useId().replaceAll(':', '')}`
   useDismissOnOutsidePointer(rootRef, open, setOpen, panelRef)
 
   useEffect(() => {
@@ -537,7 +529,7 @@ export function SkillPickerView({
   }
 
   return (
-    <span ref={rootRef} className={css.root}>
+    <span ref={rootRef} className={css.root} style={{ anchorName }}>
       <Tooltip label={t('picker.button')} side="top" delayMs={300} disabled={open}>
         <button
           type="button"
@@ -555,7 +547,7 @@ export function SkillPickerView({
         <div
           ref={panelRef}
           className={css.panel}
-          style={position ?? { visibility: 'hidden', left: 0, top: 0 }}
+          style={{ positionAnchor: anchorName }}
           role="dialog"
           aria-label={t('picker.title')}
         >

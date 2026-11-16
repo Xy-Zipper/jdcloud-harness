@@ -29,9 +29,9 @@ The `workflow` tool runs a model-authored orchestration script that fans work ou
 
 ### Calling the tool
 
-The model submits three parameters plus one flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
+The model submits three parameters plus one flag: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required plain JavaScript body — no `export const meta` statement; its parameter description carries the body rules and the tool description carries the hook contract), `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest), and `run_in_background` (optional; present only while `enableRunInBackground` holds).
 
-A foreground success returns the envelope `{ kind: 'foreground', runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
+A foreground success returns the envelope `{ kind: 'foreground', runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancelling the calling step returns the tool runtime's `AbortError` `ABORTED` result; any other cancellation and execution failures return `Error: workflow run was cancelled` (`WorkflowError` `CANCELLED`) or `Error: workflow run failed: <error>` (`WorkflowError` with the fatal code that ended the run, such as `AGENT_CAP`, or `RUN_FAILED` without one); partial output is never reported as success.
 
 ### What to expect during a run
 
@@ -67,7 +67,7 @@ The consumer owns the model-facing schema, the `tool:<toolName>` system-prompt g
 
 ### Run lifecycle
 
-`execute` starts the run and awaits `run.result` inside a `try/finally` that always disposes the run. `exec.signal` is bridged to `run.cancel()`, including the already-aborted-before-start case. A non-`completed` stop reason maps to an `isError` result reporting the reason; completion renders `{ kind, runId, agentsStarted, result }`, with the Native renderer truncating only that projection at `maxResultChars`.
+`execute` starts the run and awaits `run.result` inside a `try/finally` that always disposes the run. `exec.signal` is bridged to `run.cancel()`, including the already-aborted-before-start case. A non-`completed` stop reason maps to an `isError` result reporting the reason, rethrowing the caller's abort reason when `exec.signal` aborted and otherwise throwing a `WorkflowError`; completion renders `{ kind, runId, agentsStarted, result }`, with the Native renderer truncating only that projection at `maxResultChars`.
 
 ### Background lifecycle
 
@@ -75,7 +75,7 @@ A background call registers the run through `jobs.start` inside the job starter,
 
 ### Durable session records
 
-For a root transport execution (`exec.parent` absent), the tool projects the run into the calling Agent's Session with four log-only events: run-start after `start()` returns, member starts and endings filtered by `run.id`, then run-end only after the result is available and disposal reaches quiescence. Nested transport calls execute normally but write no record. The first failed Session append disables later recording for that run with one warning, leaving either no record or a legal continuous prefix without changing the tool result or cleanup. The package invariant rejects duplicate starts, unpaired members, terminal events with open members, and updates after run-end on both cold load and live append, while accepting missing terminal suffixes.
+For a root transport execution (`exec.parent` absent), the tool projects the run into the calling Agent's Session with four log-only events: run-start after `start()` returns, member starts and endings filtered by `run.id`, then run-end only after the result is available and disposal reaches quiescence. Nested transport calls execute normally but write no record. The first failed Session append disables later recording for that run with one warning, leaving either no record or a legal continuous prefix without changing the tool result or cleanup.
 
 The engine's `workflow/phase` and `workflow/log` events have no per-line durable surface from this tool: the session log deliberately records run and member lifecycle only, and the Web transcript derives from those records. A background run's lines reach a human through the job observation record instead, which is transient by design.
 
@@ -90,7 +90,6 @@ Decided up front per the [render-intent Agent Note](../../../.agents/notes/imple
 | [`src/index.ts`](src/index.ts) | Plugin entry: tool registration, run lifecycle, background job registration, recorder wiring |
 | [`src/record.ts`](src/record.ts) | Background runs' live-progress mirror into the job's output ring |
 | [`src/types.ts`](src/types.ts) | The four log-only record event payloads and their `SessionEventMap` declaration |
-| [`src/invariant.ts`](src/invariant.ts) | Invariant companion: durable workflow-record protocol validation |
 
 </details>
 
@@ -106,7 +105,7 @@ Read these pages when the tool-level contract is not enough. They move from the 
 - [PTC workflow engine](../workflow-ptc/README.md) — the engine that executes the scripts.
 - [subagent tool](../../subagent/tool-subagent/README.md) — the plain-delegation alternative for one or two children.
 - [Group map](../README.md) — the workflow capability family and its packages.
-- [Dynamic workflows Agent Note](../../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md) — the seam design and its decisions.
+- [historical Dynamic workflows Agent Note](../../../.agents/notes/archived/feature/2026-07-05-dynamic-workflows.md) — the seam design and its decisions.
 
 -----
 
@@ -151,7 +150,7 @@ Prefix-stable while `toolName`, definition, and visibility are unchanged. Renami
 
 #### What the model sees
 
-The full model-written script, metadata, and args remain in the assistant tool call. A foreground success is exactly `workflow "<name>" completed (<count> agent<optional-s>).`, newline, `Return value:`, newline, and pretty-printed data-dependent JSON; a cap adds `… [truncated: <omitted> more characters]` on a new line. A background acceptance is exactly `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`, and the same rendered value later reaches the model through the job's completion notice and `job_output`. Failures are exactly `Error: workflow run was cancelled`, optionally suffixed ` (<error>)`, `Error: workflow run failed: <error-or-unknown error>`, or defensively `Error: workflow run ended abnormally (<reason>)`; a call without an owning agent becomes `Error: workflow tool requires a calling agent (exec.agent was undefined)`. Intermediate child messages are omitted.
+The full model-written script, metadata, and args remain in the assistant tool call. A foreground success is exactly `workflow "<name>" completed (<count> agent<optional-s>).`, newline, `Return value:`, newline, and pretty-printed data-dependent JSON; a cap adds `… [truncated: <omitted> more characters]` on a new line. A background acceptance is exactly `workflow "<name>" started in the background as job <jobId>. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`, and the same rendered value later reaches the model through the job's completion notice and `job_output`. Failures after a caller abort render the abort reason; other failures are exactly `Error: workflow run was cancelled`, optionally suffixed ` (<error>)`, `Error: workflow run failed: <error-or-unknown error>`, or defensively `Error: workflow run ended abnormally (<reason>)`; a call without an owning agent becomes `Error: workflow tool requires a calling agent (exec.agent was undefined)` (`ToolContextUnavailableError`). Intermediate child messages are omitted.
 
 #### Token effect
 

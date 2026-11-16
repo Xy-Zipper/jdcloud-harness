@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-ontology",
   "description": "Model-facing Ontology Runtime discovery, query, Link traversal, and Action tools",
-  "version": "0.1.7-alpha.2",
+  "version": "0.2.2-rc.3",
   "publishConfig": {
     "access": "public"
   },
@@ -29,7 +29,10 @@
     "lib/index.js",
     "assets",
     "lib/types/**/*.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
+    "lib/**/*.js.map",
+    "src"
   ],
   "license": "MIT",
   "peerDependencies": {
@@ -53,7 +56,9 @@
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",
     "@deepseek-ai/dsh-user-approval": "workspace:*",
-    "@deepseek-ai/dsh-util-values": "workspace:*"
+    "@deepseek-ai/dsh-util-values": "workspace:*",
+    "@deepseek-ai/dsh-tool-testkit": "workspace:*",
+    "@deepseek-ai/dsh-session-projection": "workspace:*"
   },
   "dependencies": {
     "yaml": "^2.4.2"

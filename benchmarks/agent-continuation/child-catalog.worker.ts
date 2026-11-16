@@ -2,9 +2,11 @@
 
 import { performance } from 'node:perf_hooks'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import SessionStore, { SESSION_FORMAT_VERSION, type SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
 import SubagentRuntime, { SUBAGENT_DESCRIPTOR_VERSION } from '@deepseek-ai/dsh-subagent'
@@ -35,7 +37,7 @@ async function seed(ctx: Context): Promise<void> {
   const inherited = syntheticHistory(WORKLOAD.childHistoryTurns)
   const catalog: SessionEvent[] = []
   for (let child = 0; child < WORKLOAD.children; child++) {
-    const id = SessionId('bench-child-' + String(child))
+    const id = brandString<SessionId>('bench-child-' + String(child))
     catalog.push({
       type: 'subagent/catalog', seq: SessionSeq(child), time: TIME_ZERO + child,
       data: { version: 0, childId: id, childCreatedAt: TIME_ZERO + child,
@@ -74,12 +76,18 @@ async function run(root: string, mode: string): Promise<CatalogReport | { seeded
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(JsonlSessionPersistence, { root, compression: 'zstd' })
     await ctx.plugin(CatalogQuery)
+    provideWorkingDirectoryFixture(ctx, '/bench')
     await ctx.plugin(SubagentRuntime)
     if (mode === 'seed') {
       await seed(ctx)
       return { seeded: true }
     }
-    const readCatalog = () => ctx.subagents.listChildren(PARENT_ID)
+    const readCatalog = async () => {
+      using observation = await ctx.sessionQuery.observeSession(PARENT_ID)
+      const catalog = observation.projections?.values.subagentCatalog
+      if (catalog === undefined) throw new Error('child-catalog projection is unavailable')
+      return catalog
+    }
     const cpuStart = process.cpuUsage()
     const start = performance.now()
     const first = await readCatalog()

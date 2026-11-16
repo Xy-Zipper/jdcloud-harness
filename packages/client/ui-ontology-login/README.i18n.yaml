@@ -1,6 +1,37 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-ontology-login/README.md
-README.md: 4f7595bb21fbd980e80218ae932b21274b13afc4
-README.zh.md: dd7c1c6b62f3f9f42538c894338294e5b31d44a4
+/:
+  en: 177bf94b1c88bfd4
+  zh: c4d10a4292b120ac
+/ontology-login-ui:
+  en: de2281343b204675
+  zh: 5e8b16b8f84662df
+/ontology-login-ui/summary:
+  en: aca64c4f93a66d17
+  zh: 27fb0f8cd734c176
+/ontology-login-ui/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: de4a2a92773d135e
+/ontology-login-ui/use-this-package:
+  en: cc72ae066d47e9e3
+  zh: 8257ca0573622967
+/ontology-login-ui/understand-the-implementation:
+  en: f3f518c255c20960
+  zh: f15045180c0db60b
+/ontology-login-ui/further-exploration:
+  en: 8027526b0a2ed347
+  zh: 786a803abab8cab1
+/ontology-login-ui/model-experience:
+  en: 7005503b2c376989
+  zh: 0146885b4ff0f0d1
+/ontology-login-ui/model-experience/kv-cache-effect:
+  en: ceafb478d0e9f00c
+  zh: 53a150c7087ad83d
+/ontology-login-ui/known-limitations-and-deferred-work:
+  en: dea8a098025eb801
+  zh: 076e80b753e00efb
+/ontology-login-ui/known-limitations-and-deferred-work/dev-note:
+  en: c65a81433c32582c
+  zh: 3bdae576556e01fc

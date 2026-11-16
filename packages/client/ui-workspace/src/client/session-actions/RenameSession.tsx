@@ -1,44 +1,17 @@
-/**
- * The rename action: a `sidebar.workspaces.session.menu.item` row that raises
- * the rename request, and the `shell.overlay` dialog entry that answers it.
- * The dialog lives outside the row menu because the row unmounts with the
- * menu; the browser raises the same request from a title double-click.
- */
+/** Rename dialog shared by Session menus, shortcuts, and title double-clicks. */
 import { useRef, useState } from 'react'
-import { Button, IconEditOutlineRegular, MenuItemButton, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  RenameSessionInjected, SessionMenuItemProps, SessionRenameDialogInjected, SessionRenameDialogProps, SessionRenameTarget,
+  SessionRenameDialogInjected, SessionRenameDialogProps, SessionRenameTarget,
 } from '../contract/slots.ts'
 import css from '../rows/WorkspaceBrowser.module.css'
-
-/**
- * Menu row (order 200): ask for the rename dialog, seeded with the row's current title.
- * @param props - owner share, menu open state, and the rename share.
- * @returns the row.
- */
-export function RenameSessionMenuItem({
-  sessionId, displayTitle, useMenuOpenState, requestSessionRename, t,
-}: SessionMenuItemProps<RenameSessionInjected>) {
-  const [, setMenuOpen] = useMenuOpenState()
-  return (
-    <MenuItemButton
-      icon={<IconEditOutlineRegular />}
-      onSelect={() => {
-        setMenuOpen(false)
-        requestSessionRename(sessionId, displayTitle)
-      }}
-    >
-      {t('rename')}
-    </MenuItemButton>
-  )
-}
 
 /**
  * The `shell.overlay` entry: nothing while no rename is requested, otherwise
  * one dialog per request (keyed by the Session, so a new request starts a
  * fresh draft). Sessions have no client-side name-conflict rule (the host
  * normalizes), and unlike Workspace rename an unchanged title is NOT
- * blocked: confirming the current automatic title is the gesture that pins it.
+ * blocked. An unnamed Session starts with an empty draft and requires a name.
  * @param props - the request hook, its settlement, the rename hop, and the locale seat.
  * @returns the open dialog, or null.
  */
@@ -103,7 +76,7 @@ function RenameForm({ request, renameSession, onSettle, t }: {
         className={css.renameInput}
         value={draft}
         aria-label={t('field.sessionName')}
-        autoFocus
+        data-modal-autofocus
         disabled={renaming}
         onFocus={(e) => { e.target.select() }}
         onChange={(e) => { setDraft(e.target.value); setError(null) }}

@@ -1,6 +1,46 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/api/ontology-auth-controller/README.md
-README.md: 9a4378ab4ac35a0dc8443201b15a212f90461cfb
-README.zh.md: fb0e7f6bf115a287136a893efecefaa3fffdf426
+/:
+  en: 54a1f9b2229a92c1
+  zh: a471d0e8b39cfe3b
+/ontology-auth-controller:
+  en: 5303b7147cb9b3c5
+  zh: 520046fd5d6eb677
+/ontology-auth-controller/summary:
+  en: d82cd1efcb4d6def
+  zh: 26a882ca01120b80
+/ontology-auth-controller/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: de4a2a92773d135e
+/ontology-auth-controller/use-this-package:
+  en: 1c64641808f2fd5b
+  zh: 47da9ae0bd2c185e
+/ontology-auth-controller/understand-the-implementation:
+  en: 29b8dbbdabd8b635
+  zh: 1156acd9ce0e30b1
+/ontology-auth-controller/further-exploration:
+  en: 4574aa3a558231f9
+  zh: d2eb7aaaf3b16339
+/ontology-auth-controller/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/ontology-auth-controller/model-experience/embedded-modeling-context:
+  en: e997d760e27e797a
+  zh: 24ad12a2e6a4ae57
+/ontology-auth-controller/model-experience/embedded-modeling-context/what-the-model-sees:
+  en: 06ba3d6d34454cda
+  zh: b90b40f342ec2533
+/ontology-auth-controller/model-experience/embedded-modeling-context/token-effect:
+  en: de27fc191f88db94
+  zh: a90f456d66629ae9
+/ontology-auth-controller/model-experience/embedded-modeling-context/kv-cache-effect:
+  en: 023633c527ad55a2
+  zh: fff524845c492c4f
+/ontology-auth-controller/known-limitations-and-deferred-work:
+  en: 347b9e95bb661fde
+  zh: d89be9e851eb57b4
+/ontology-auth-controller/known-limitations-and-deferred-work/dev-note:
+  en: 127ded9b32bfa651
+  zh: 4169452c8fdcf003

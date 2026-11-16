@@ -1,10 +1,11 @@
 /** Messages file-reference admission, bounded recovery and request-wide inline fallback. */
 import type { AnonymousUserId } from '@deepseek-ai/dsh-anonymous-user-id'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment/types'
 import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
-import { createAssistantMessage, createToolResultMessage, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
-import { DeepSeekFileId } from '../src/file-id.ts'
+import { createAssistantMessage, createToolResultMessage, LlmError, type ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { DeepSeekFileId } from '../src/file-id.ts'
 import { DeepSeekFileStore } from '../src/file-store.ts'
 import { resolveAdapterOptions } from '../src/config.ts'
 import type { Options as Config } from '../src/config.ts'
@@ -14,10 +15,10 @@ import { providerErrorDetail } from '../src/transport.ts'
 import { chunks, options, prepareExtensions, sse, textEvents, user, requestImageStore } from './helpers.ts'
 
 const model = 'deepseek-flash'
-const ref: ImageAttachmentRef = { attachmentId: AttachmentId(`sha256:${'a'.repeat(64)}`), width: 1, height: 1, mediaType: 'image/png', bytes: 3 }
-const second = { ...ref, attachmentId: AttachmentId(`sha256:${'c'.repeat(64)}`) }
+const ref: ImageAttachmentRef = { attachmentId: brandString<AttachmentId>(`sha256:${'a'.repeat(64)}`), width: 1, height: 1, mediaType: 'image/png', bytes: 3 }
+const second = { ...ref, attachmentId: brandString<AttachmentId>(`sha256:${'c'.repeat(64)}`) }
 const version = (attachment: ImageAttachmentRef): RequestImageAttachment => ({
-  attachment, variantId: ImageVariantId(`sha256:${(attachment === ref ? 'b' : 'd').repeat(64)}`),
+  attachment, variantId: brandString<ImageVariantId>(`sha256:${(attachment === ref ? 'b' : 'd').repeat(64)}`),
   data: Uint8Array.of(1, 2, 3), bytes: 3, mediaType: 'image/png', width: 1, height: 1, depth: 'uchar', space: 'srgb', hasAlpha: false,
 })
 const request = (refs = [ref]) => options({ model, messages: [{ ...user(), content: refs.map(attachment => ({ type: 'image' as const, attachment })) }] })
@@ -29,7 +30,7 @@ function body(init: RequestInit | undefined): string {
 const rejected = (message: string, status = 400) => new Response(JSON.stringify({ error: { type: 'invalid_request_error', message } }), { status })
 function harness(config: Config = {}) {
   const ensureUploaded = vi.fn<DeepSeekFileStore['ensureUploaded']>(async image => ({
-    record: { fileId: DeepSeekFileId(image.attachment.attachmentId === ref.attachmentId ? 'file-a' : 'file-b') }, uploaded: false,
+    record: { fileId: brandString<DeepSeekFileId>(image.attachment.attachmentId === ref.attachmentId ? 'file-a' : 'file-b') }, uploaded: false,
   } as Awaited<ReturnType<DeepSeekFileStore['ensureUploaded']>>))
   const invalidate = vi.fn<DeepSeekFileStore['invalidate']>(async () => {})
   const files = Object.assign(new DeepSeekFileStore(), { ensureUploaded, invalidate })
@@ -39,7 +40,7 @@ function harness(config: Config = {}) {
   const prepare = vi.fn(prepareExtensions)
   const adapter = new DeepSeekAdapter({
     options: () => resolveAdapterOptions(Object.assign({ baseURL: 'https://gateway.example/custom' }, config)),
-    resolveApiKey: async () => 'test-key', resolveUserId: () => 'test-user' as AnonymousUserId, resolveAttachments: () => attachments,
+    resolveAuth: async () => ({ headers: { 'x-api-key': 'test-key' } }), resolveUserId: () => 'test-user' as AnonymousUserId, resolveAttachments: () => attachments,
     resolveImageAccess: () => ({ readonlyPath: '/workspace/image.png' }), resolveFiles: () => files, prepareExtensions: prepare,
   })
   return { adapter, ensureUploaded, invalidate, readImageRequest, prepare }
@@ -51,12 +52,12 @@ describe('Messages Files requests', () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => success())
     vi.stubGlobal('fetch', fetchImpl)
     const h = harness()
-    const callId = ToolCallId('image-tool')
+    const callId = brandString<ToolCallId>('image-tool')
     const messages = [user(), createAssistantMessage({ source: { provider: 'deepseek-official', model }, content: [{ type: 'tool-call', id: callId, name: 'read_image', arguments: '{}' }] }),
       createToolResultMessage({ callId, isError: false, content: [{ type: 'image', attachment: ref }, { type: 'image', attachment: ref }] })]
     await chunks(h.adapter.stream(options({ model, messages })))
     expect(h.readImageRequest).toHaveBeenCalledTimes(1)
-    expect(h.ensureUploaded).toHaveBeenCalledWith(expect.anything(), { baseURL: 'https://gateway.example/custom', apiKey: 'test-key', accountCredential: false }, expect.anything(), expect.any(AbortSignal))
+    expect(h.ensureUploaded).toHaveBeenCalledWith(expect.anything(), { baseURL: 'https://gateway.example/custom', headers: { 'x-api-key': 'test-key' } }, expect.anything(), expect.any(AbortSignal))
     const [url, init] = fetchImpl.mock.calls[0]!
     expect(url).toBe('https://gateway.example/custom/v1/messages')
     expect(new Headers(init?.headers).get('anthropic-beta')).toBe('files-api-2025-04-14')
@@ -73,7 +74,7 @@ describe('Messages Files requests', () => {
     vi.stubGlobal('fetch', fetchImpl)
     const h = harness()
     await chunks(h.adapter.stream(request([ref, second])))
-    expect(h.invalidate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attachment: ref }), 'file-a', expect.objectContaining({}))
+    expect(h.invalidate).toHaveBeenCalledExactlyOnceWith([{ variantId: version(ref).variantId, fileId: 'file-a' }], expect.objectContaining({}))
     expect(fetchImpl).toHaveBeenCalledTimes(2)
     expect(h.prepare).toHaveBeenCalledTimes(2)
     expect(h.ensureUploaded).toHaveBeenCalledTimes(4)
@@ -85,7 +86,7 @@ describe('Messages Files requests', () => {
     const h = harness()
     await expect(chunks(h.adapter.stream(request([ref, second])))).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
-    expect(h.invalidate).toHaveBeenCalledTimes(4)
+    expect(h.invalidate.mock.calls.map(call => call[0].length)).toEqual([2, 2])
     expect(fetchImpl.mock.calls.every(call => !body(call[1]).includes('base64'))).toBe(true)
   })
 
@@ -103,7 +104,7 @@ describe('Messages Files requests', () => {
     vi.stubGlobal('fetch', fetchImpl)
     const h = harness()
     h.ensureUploaded
-      .mockResolvedValueOnce({ record: { fileId: DeepSeekFileId('file-a') }, uploaded: true } as Awaited<ReturnType<DeepSeekFileStore['ensureUploaded']>>)
+      .mockResolvedValueOnce({ record: { fileId: brandString<DeepSeekFileId>('file-a') }, uploaded: true } as Awaited<ReturnType<DeepSeekFileStore['ensureUploaded']>>)
       .mockRejectedValueOnce(new LlmError('quota exhausted', 'FILES_API'))
     await chunks(h.adapter.stream(request([ref, second])))
     const init = fetchImpl.mock.calls[0]?.[1]
@@ -169,7 +170,7 @@ describe('Messages Files requests', () => {
   })
 
   it('projects nested logged offloads without an attachment service or a vision model', async () => {
-    const messages = [createToolResultMessage({ callId: ToolCallId('offloaded'), isError: false, content: [
+    const messages = [createToolResultMessage({ callId: brandString<ToolCallId>('offloaded'), isError: false, content: [
       { type: 'image', attachment: ref, offloaded: true },
     ] })]
     const prepared = await prepareImages(messages, resolveAdapterOptions({}), 'text-model', undefined,

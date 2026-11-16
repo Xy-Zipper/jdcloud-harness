@@ -71,8 +71,10 @@ it('keeps the newest event, hides for connection priority, and invokes only the 
     expect(screen.queryByRole('button')).toBeNull()
     await f.emit({ phase: 'downloading', version: available.version, percent: 58 })
     f.view.rerender(<f.Indicator />)
+    expect(screen.getByRole('button', { name: '58%' }).getAttribute('aria-disabled')).toBe('false')
     fireEvent.click(screen.getByRole('button', { name: '58%' }))
-    expect(f.open).toHaveBeenCalledOnce()
+    await act(async () => {})
+    expect(f.open).toHaveBeenCalledTimes(2)
     await f.emit({ phase: 'error', version: available.version, failure: 'download' })
     const retry = screen.getByRole('button', { name: '重试更新' })
     fireEvent.focus(retry)
@@ -151,4 +153,90 @@ it('shows fallback progress and error details when the shell omits optional fiel
     fireEvent.focus(screen.getByRole('button', { name: '重试更新' }))
     expect((await screen.findByRole('tooltip')).textContent).toBe('安装更新失败，请稍后重试。')
   } finally { f.view.unmount(); f.status.resolve({ phase: 'idle' }) }
+})
+
+it.each(['checking', 'verifying', 'installing'] as const)('shows only the version during %s in both locales', async (phase) => {
+  const f = fixture()
+  try {
+    await f.emit({ phase, version: '0.1.7-alpha.2' })
+    fireEvent.focus(screen.getByRole('button'))
+    expect((await screen.findByRole('tooltip')).textContent).toBe('0.1.7-alpha.2')
+    f.view.rerender(<f.Indicator dictionary={en} />)
+    fireEvent.focus(screen.getByRole('button'))
+    expect((await screen.findByRole('tooltip')).textContent).toBe('0.1.7-alpha.2')
+  } finally { f.view.unmount(); f.status.resolve({ phase: 'idle' }) }
+})
+
+it.each([
+  ['checking', '正在检查更新…'],
+  ['verifying', '正在校验更新文件…'],
+  ['installing', '正在准备重启…'],
+] as const)('retains the state label when %s has no version', async (phase, label) => {
+  const f = fixture()
+  try {
+    await f.emit({ phase })
+    fireEvent.focus(screen.getByRole('button', { name: label }))
+    expect((await screen.findByRole('tooltip')).textContent).toBe(label)
+  } finally { f.view.unmount(); f.status.resolve({ phase: 'idle' }) }
+})
+
+it('localizes fullscreen timeout guidance and preserves the retry action', async () => {
+  const f = fixture()
+  const copy: string[] = []
+  try {
+    await f.emit({ phase: 'error', failure: 'fullscreen-timeout', version: available.version })
+    for (const dictionary of [zh, en]) {
+      f.view.rerender(<f.Indicator dictionary={dictionary} />)
+      fireEvent.focus(screen.getByRole('button'))
+      copy.push((await screen.findByRole('tooltip')).textContent ?? '')
+    }
+    expect(copy).toMatchInlineSnapshot(`
+      [
+        "无法退出全屏，请退出全屏后重试更新",
+        "Could not exit fullscreen. Exit fullscreen, then retry the update.",
+      ]
+    `)
+    fireEvent.click(screen.getByRole('button'))
+    expect(f.open).toHaveBeenCalledOnce()
+  } finally { f.view.unmount(); f.status.resolve(available) }
+})
+
+
+it('keeps a configuration error actionable while download progress continues', async () => {
+  const f = fixture()
+  await f.emit({ phase: 'idle', configurationError: 'format' })
+  const error = screen.getByRole('button', { name: '配置不可用' })
+  fireEvent.click(error)
+  await act(async () => {})
+  expect(f.open).toHaveBeenCalledOnce()
+  await f.emit({ phase: 'downloading', percent: 58, configurationError: 'cleanup' })
+  fireEvent.click(screen.getByRole('button', { name: '配置不可用' }))
+  await act(async () => {})
+  expect(f.open).toHaveBeenCalledTimes(2)
+  f.view.unmount()
+  f.status.resolve({ phase: 'idle' })
+})
+
+it('opens download status while the original download action remains pending and coalesces status clicks', async () => {
+  const f = fixture()
+  const download = Promise.withResolvers<undefined>()
+  const statusDialog = Promise.withResolvers<undefined>()
+  try {
+    await act(async () => { f.status.resolve(available) })
+    f.open.mockImplementationOnce(() => download.promise).mockImplementationOnce(() => statusDialog.promise)
+    fireEvent.click(screen.getByRole('button', { name: '新版本' }))
+    await f.emit({ phase: 'downloading', percent: 12, version: available.version })
+    const progress = screen.getByRole('button', { name: '12%' })
+    fireEvent.click(progress)
+    fireEvent.click(progress)
+    expect(f.open).toHaveBeenCalledTimes(2)
+    await act(async () => { download.resolve(undefined) })
+    expect(progress.getAttribute('aria-disabled')).toBe('true')
+    await act(async () => { statusDialog.resolve(undefined) })
+    expect(progress.getAttribute('aria-disabled')).toBe('false')
+  } finally {
+    f.view.unmount()
+    download.resolve(undefined)
+    statusDialog.resolve(undefined)
+  }
 })

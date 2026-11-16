@@ -9,10 +9,16 @@
   ],
   "references": [
     {
+      "path": "../../util/text-search"
+    },
+    {
       "path": "../../api/remotes/tsconfig.client.json"
     },
     {
       "path": "../../api/session-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../../boot/plugin-manager"
     },
     {
       "path": "../../core/session"
@@ -27,6 +33,9 @@
       "path": "../ui-renderer"
     },
     {
+      "path": "../ui-conversation/tsconfig.client.json"
+    },
+    {
       "path": "../ui-tool"
     },
     {
@@ -34,9 +43,6 @@
     },
     {
       "path": "../ui-input-trigger"
-    },
-    {
-      "path": "../ui-conversation/tsconfig.client.json"
     },
     {
       "path": "../ui-settings/tsconfig.client.json"

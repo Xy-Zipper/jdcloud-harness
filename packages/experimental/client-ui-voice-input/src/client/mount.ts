@@ -6,9 +6,11 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { VoiceInput, type VoiceInputInjected } from './VoiceInput.tsx'
 import { Recording } from './audio.ts'
-import { en, NS, zh } from './locales.ts'
+import { createMicrophoneDeviceStore } from './microphone-device.ts'
+import { en, ja, es, fr, de, ru, pt, NS, zh } from './locales.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { observeReadiness } from './readiness.ts'
 import { VoicePreparation } from './PreparationCard.tsx'
@@ -17,21 +19,34 @@ import { VoiceSetupPrompt } from './VoiceSetupPrompt.tsx'
 export const inject = ['remote', 'slots', 'locale']
 
 function registerUi(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }))
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }))
   const recordings = new Set<Recording>()
+  const microphone = createMicrophoneDeviceStore()
   const readiness = observeReadiness(ctx)
   ctx.effect(() => readiness.dispose)
   ctx.effect(() => async () => { await Promise.all([...recordings].map(recording => recording.dispose())) })
+  // The Plugins page provides its navigation only while the current Peer may use it.
+  const pluginNavigation = createSnapshotStore(false)
+  ctx.inject(['pluginNavigation'], (scope: Context) => {
+    scope.effect(() => {
+      pluginNavigation.set(true)
+      return () => { pluginNavigation.set(false) }
+    }, 'voice-input: plugin navigation presence')
+  })
   const actions: VoiceInputInjected = {
-    hooks: { speechReadiness: readiness.state },
+    openSettings: () => { ctx.get('pluginNavigation')?.openBundle('@deepseek-ai/dsh-experimental-voice-input-bundle') },
+    hooks: { speechReadiness: readiness.state, microphoneDevice: microphone, pluginNavigation },
+    selectMicrophone: (device) => { microphone.set(device) },
     createRecording: () => {
-      const recording = new Recording(() => { recordings.delete(recording) })
+      const recording = new Recording(() => { recordings.delete(recording) }, microphone.getSnapshot().id)
       recordings.add(recording)
       return recording
     },
     transcribe: async (request, signal) => await ctx.remote.speech.transcribe(request, signal),
     configure: async (patch) => { const result = await ctx.remote.speech.configure(patch); if (!result.ok) throw result.error },
-    prepare: async (providerId) => { const result = await ctx.remote.speech.prepare(providerId); if (!result.ok) throw result.error },
+    prepare: async (providerId, options) => {
+      const result = await ctx.remote.speech.prepare(providerId, options); if (!result.ok) throw result.error
+    },
     cancelPreparation: async (providerId) => {
       const result = await ctx.remote.speech.cancelPreparation(providerId); if (!result.ok) throw result.error
     },

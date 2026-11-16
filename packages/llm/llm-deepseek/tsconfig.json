@@ -8,6 +8,8 @@
     "src"
   ],
   "references": [
+    { "path": "../../credentials/credentials" },
+    { "path": "../../credentials/deepseek-account" },
     {
       "path": "../../../vendor/cosmokit"
     },
@@ -36,9 +38,6 @@
       "path": "../../util/home-paths"
     },
     {
-      "path": "../../credentials/credentials"
-    },
-    {
       "path": "../deepseek-llm-api-extensions"
     },
     {
@@ -58,9 +57,6 @@
     },
     {
       "path": "../../settings/settings"
-    },
-    {
-      "path": "../../credentials/deepseek-account"
     }
   ]
 }

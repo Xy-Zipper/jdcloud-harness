@@ -1,3 +1,4 @@
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** Sidebar shell slot registration and its Session/layout callbacks. */
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
@@ -5,8 +6,9 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import type { SidebarRootInjected } from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type { SidebarRootInjected, SidebarSectionInjected, UseSectionScroller } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
+import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import { HeaderLeadingControls } from '../src/client/HeaderLeadingControls.tsx'
 import { apply as hostApply } from '../src/index.ts'
 
@@ -20,7 +22,7 @@ afterEach(async () => {
 })
 
 function SidebarFrame({ renderSlot }: PropsRenderSlots<'sidebar'>) {
-  return renderSlot('sidebar', { collapsed: false, width: 300 })
+  return renderSlot('sidebar', { collapsed: false, width: 300, drawer: false })
 }
 
 async function bench(declare = true) {
@@ -33,6 +35,7 @@ async function bench(declare = true) {
   await ctx.plugin(SlotRegistry).await()
   const layout = { toggleSidebar: vi.fn(), selectPanel: vi.fn() }
   const uiWorkspace = { startSession: vi.fn() }
+  ctx.provide('shortcuts', { catalog: createSnapshotStore([]) } as never)
   ctx.provide('layout', layout)
   ctx.provide('uiWorkspace', uiWorkspace as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
@@ -56,7 +59,7 @@ describe('ui-sidebar apply', () => {
   })
 
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'layout', 'uiWorkspace', 'locale'])
+    expect(inject).toEqual(['slots', 'layout', 'uiWorkspace', 'locale', 'shortcuts'])
   })
 
   it('registers the shell and declares its child seats', async () => {
@@ -65,10 +68,14 @@ describe('ui-sidebar apply', () => {
     expect(b.slots.entries('sidebar')).toHaveLength(1)
     expect(b.slots.spec('sidebar.brand.mark')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('sidebar.brand.name')).toEqual({ kind: 'single', scope: 'root' })
-    expect(b.slots.spec('sidebar.account')).toEqual({ kind: 'single', scope: 'root' })
-    expect(b.slots.spec('sidebar.workspaces')).toEqual({ kind: 'single', scope: 'root' })
+    const section = b.slots.spec('sidebar.workspaces') as { kind: string; scope: string; inject: SidebarSectionInjected }
+    expect(section).toMatchObject({ kind: 'single', scope: 'root' })
+    // The section occupant's scroller hook is the one each sidebar render supplies.
+    const useSectionScroller: UseSectionScroller = () => ({ bindScrollerRef: () => {} })
+    expect(section.inject.hooks.sectionScroller({} as never, { useSectionScroller })).toBe(useSectionScroller)
     expect(b.slots.spec('sidebar.settings')).toEqual({ kind: 'single', scope: 'root' })
     expect(b.slots.spec('sidebar.footer.action')).toEqual({ kind: 'list', scope: 'root' })
+    expect(b.slots.spec('sidebar.session.action')).toEqual({ kind: 'hoc', scope: 'root' })
     expect(b.slots.spec('sidebar.panellist')).toEqual({ kind: 'list', scope: 'root' })
     // Copy rides the standard locale seat, not the inject face.
     expect(b.slots.entries('sidebar')[0]!.locale).toBe('sidebar')
@@ -79,8 +86,10 @@ describe('ui-sidebar apply', () => {
     expect(leading[0]!.locale).toBe('sidebar')
     expect(leading[0]!.inject).toBe(b.slots.entries('sidebar')[0]!.inject)
     const injected = (b.slots.entries('sidebar')[0]!.inject as () => SidebarRootInjected)()
-    expect(Object.keys(injected)).toEqual(['startSession', 'toggleSidebar', 'selectPanel', 'hooks'])
+    expect(Object.keys(injected)).toEqual(['startSession', 'toggleSidebar', 'selectPanel', 'setPinned', 'trackEntryClick', 'hooks'])
     expect(injected.hooks.panels.getSnapshot()).toEqual([])
+    expect(injected.hooks.entryPins.getSnapshot()).toEqual([])
+    expect(injected.hooks.entryActions.getSnapshot()).toBe(false)
     expect(b.slots.entries('main')).toEqual([])
     // Both arms delegate to the Workspace UI's shared New Session action.
     injected.startSession('workspace' as never)
@@ -95,18 +104,49 @@ describe('ui-sidebar apply', () => {
     expectTypeOf<Parameters<SidebarRootInjected['selectPanel']>[0]>().toEqualTypeOf<MainPanelId>()
   })
 
+  it('forwards entry clicks to the optional product analytics service without tracking panel selection', async () => {
+    const b = await bench()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const injected = (b.slots.entries('sidebar')[0]!.inject as () => SidebarRootInjected)()
+    // Ordinary Web mounts no analytics service; reporting is then a no-op.
+    expect(() => { injected.trackEntryClick({ menu_name: 'more', position: 'sidebar' }) }).not.toThrow()
+    const track = vi.fn<TrackProductEvent>()
+    b.ctx.provide('productAnalytics', { track } as never)
+    injected.trackEntryClick({ menu_name: 'new_session', position: 'titlebar' })
+    expect(track).toHaveBeenCalledExactlyOnceWith('sidebar_menu_click', { menu_name: 'new_session', position: 'titlebar' })
+    // Selection only navigates; the clicked control reports its own entry and position.
+    injected.selectPanel('plugins' as MainPanelId)
+    injected.selectPanel('schedules' as MainPanelId)
+    expect(b.layout.selectPanel.mock.calls).toEqual([['plugins'], ['schedules']])
+    expect(track).toHaveBeenCalledOnce()
+    // The window-chrome occupant shares the same reporting callback.
+    const leading = (b.slots.entries('shell.leading')[0]!.inject as () => SidebarRootInjected)()
+    leading.trackEntryClick({ menu_name: 'cron', position: 'sidebar_more' })
+    expect(track).toHaveBeenLastCalledWith('sidebar_menu_click', { menu_name: 'cron', position: 'sidebar_more' })
+  })
+
   it('waits for the sidebar declaration before registering', async () => {
     const b = await bench(false)
     const fiber = b.ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     expect(b.slots.entries('sidebar')).toHaveLength(0)
-    const disposeRoot = b.slots.register({
+    expect(b.slots.spec('sidebar.panellist')).toBeUndefined()
+    const declareSidebar = () => b.slots.register({
       name: 'root',
       children: { sidebar: { kind: 'single', scope: 'root' } },
     }, SidebarFrame)
+    const disposeRoot = declareSidebar()
     expect(b.slots.entries('sidebar')).toHaveLength(1)
+    expect(b.slots.spec('sidebar.panellist')).toEqual({ kind: 'list', scope: 'root' })
     disposeRoot()
+    expect(b.slots.entries('sidebar')).toEqual([])
+    expect(b.slots.spec('sidebar.panellist')).toBeUndefined()
+    const disposeReplacement = declareSidebar()
+    expect(b.slots.entries('sidebar')).toHaveLength(1)
+    expect(b.slots.spec('sidebar.panellist')).toEqual({ kind: 'list', scope: 'root' })
     await fiber.dispose()
+    expect(b.slots.spec('sidebar.panellist')).toBeUndefined()
+    disposeReplacement()
   })
 
   it('projects plugin-owned panel entries and removes them with their owner', async () => {
@@ -140,35 +180,6 @@ describe('ui-sidebar apply', () => {
     }
   })
 
-  it('filters unavailable panel entries and restores them when the policy is released', async () => {
-    const b = await bench()
-    const sidebar = b.ctx.plugin({ inject: [...inject], apply })
-    await sidebar.await()
-    const injected = (b.slots.entries('sidebar')[0]!.inject as () => SidebarRootInjected)()
-    const panel = b.ctx.plugin({
-      inject: ['slots'],
-      apply(ctx: Context) {
-        ctx.slots.register({ name: 'sidebar.panellist', id: 'plugins', order: 20, label: 'Plugins' }, () => null)
-      },
-    })
-    try {
-      await panel.await()
-      await vi.waitFor(() => {
-        expect(injected.hooks.panels.getSnapshot()).toEqual([{ id: 'plugins', order: 20, label: 'Plugins' }])
-      })
-      const release = (b.ctx.get('sidebarPanels') as { registerAvailabilityFilter(filter: (id: string) => boolean): () => void })
-        .registerAvailabilityFilter(id => id !== 'plugins')
-      await vi.waitFor(() => { expect(injected.hooks.panels.getSnapshot()).toEqual([]) })
-      release()
-      await vi.waitFor(() => {
-        expect(injected.hooks.panels.getSnapshot()).toEqual([{ id: 'plugins', order: 20, label: 'Plugins' }])
-      })
-    } finally {
-      await panel.dispose()
-      await sidebar.dispose()
-    }
-  })
-
   it('removes the entry and child declaration on teardown', async () => {
     const b = await bench()
     const fiber = b.ctx.plugin({ inject: [...inject], apply })
@@ -178,9 +189,9 @@ describe('ui-sidebar apply', () => {
     expect(b.slots.entries('shell.leading')).toHaveLength(0)
     expect(b.slots.spec('sidebar.brand.mark')).toBeUndefined()
     expect(b.slots.spec('sidebar.brand.name')).toBeUndefined()
-    expect(b.slots.spec('sidebar.account')).toBeUndefined()
     expect(b.slots.spec('sidebar.workspaces')).toBeUndefined()
     expect(b.slots.spec('sidebar.footer.action')).toBeUndefined()
+    expect(b.slots.spec('sidebar.session.action')).toBeUndefined()
     expect(b.slots.spec('sidebar.panellist')).toBeUndefined()
     expect(b.slots.entries('main')).toHaveLength(0)
   })

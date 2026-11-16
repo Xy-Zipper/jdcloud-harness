@@ -2,14 +2,14 @@
  * Compaction Service Definition (`ctx.compaction`): providers decide when to
  * compact and replace a history range with one summary node by subclassing
  * {@link CompactionEngine}. This interface necessarily depends on session and LLM
- * vocabulary; the rationale is in the
- * [compaction Agent Note](../../../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
+ * vocabulary; the dependency rule is documented in the
+ * [compaction reference](../README.md#understand-the-implementation).
  * @module @deepseek-ai/dsh-compaction
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import type { CommandId } from '@deepseek-ai/dsh-commands/types'
 import type { CompactionResult } from './types.ts'
 import type { CompactionCheckpointSource } from './checkpoint.ts'
 

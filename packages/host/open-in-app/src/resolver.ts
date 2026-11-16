@@ -58,14 +58,15 @@ export type OpenInAppLaunchOutcome = 'launched' | 'missing' | 'failed'
 /**
  * Launch one application adapter detached from this process: the child gets a
  * credential-scrubbed environment (never the harness's `*KEY*`/`*SECRET*`
- * variables) plus the adapter's explicit environment entries, holds no stdio
- * pipe, and outlives dsh. Windows GUI processes remain visible unless the
- * adapter explicitly hides its own CLI process. Launch success is decoupled
- * from process exit — launchers such as kitty or the JetBrains IDEs stay in
- * the foreground for their whole window lifetime, so the watch window only
- * catches launchers that fail immediately: rejects on a spawn failure and on
- * a nonzero exit inside the window; a child still running when the window
- * closes is unrefed and counted launched, never killed.
+ * variables) without an inherited `ELECTRON_RUN_AS_NODE`, plus the adapter's
+ * explicit environment entries, holds no stdio pipe, and outlives dsh. Windows
+ * GUI processes remain visible unless the adapter explicitly hides its own CLI
+ * process. Launch success is decoupled from process exit — launchers such as
+ * kitty or the JetBrains IDEs stay in the foreground for their whole window
+ * lifetime, so the watch window only catches launchers that fail immediately:
+ * rejects on a spawn failure and on a nonzero exit inside the window; a child
+ * still running when the window closes is unrefed and counted launched, never
+ * killed.
  * @param command - executable path or PATH name.
  * @param args - argv (never a shell string).
  * @param options - watch-window length and adapter-specific process options.
@@ -73,11 +74,15 @@ export type OpenInAppLaunchOutcome = 'launched' | 'missing' | 'failed'
  */
 export const launchDetachedApp: OpenInAppLauncher = (command, args, options) =>
   new Promise((resolve, reject) => {
+    // Desktop runs the Host with ELECTRON_RUN_AS_NODE=1; inheriting it starts Electron apps such as VS Code in Node mode.
+    // Windows environment names are case-insensitive.
+    const base = Object.fromEntries(Object.entries(scrubbedParentEnv())
+      .filter(([name]) => name.toUpperCase() !== 'ELECTRON_RUN_AS_NODE'))
     const child = spawn(command, [...args], {
       detached: true,
       stdio: 'ignore',
       windowsHide: options.windowsHide,
-      env: { ...scrubbedParentEnv(), ...options.env },
+      env: { ...base, ...options.env },
     })
     let settled = false
     const settle = (outcome: () => void): void => {
@@ -168,7 +173,7 @@ export async function output(
   command: string, args: readonly string[], timeoutMs: number, internals: ResolvedInternals,
 ): Promise<string | null> {
   try {
-    const { stdout } = await internals.run(command, args, AbortSignal.timeout(timeoutMs))
+    const { stdout } = await internals.run(command, args, AbortSignal.timeout(timeoutMs), 'hidden')
     return stdout
   } catch {
     // Swallows spawn, non-zero-exit, and timeout-abort failures alike: a
@@ -680,8 +685,8 @@ function isMissingExecutable(error: unknown): boolean {
  * Open one directory through the OS shell's open verb under the launch watch
  * window: the opener command completing inside the window decides the
  * outcome, and an opener still running when it closes counts as launched and
- * keeps running (a cold `powershell.exe` start can outlive the window; its
- * late settlement is swallowed because the request already answered).
+ * keeps running (a cold shell opener can outlive the window; its late
+ * settlement is swallowed because the request already answered).
  */
 function runShellOpen(
   path: string, watchMs: number, internals: ResolvedInternals,

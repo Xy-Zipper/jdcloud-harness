@@ -1,8 +1,9 @@
 /**
  * Authenticated GET/HEAD /api/file reads bounded file responses through
- * the composed filesystem provider. Ontology-authenticated requests are
- * restricted to roots owned by the current user; generic deployments
- * retain the connection service's existing filesystem policy.
+ * the composed filesystem provider. Paths and MIME types do not restrict access;
+ * the connection service authenticates requests before this handler. A request
+ * without the current `v` version is redirected, uncached, to the versioned URL,
+ * whose response is cacheable indefinitely.
  * @module @deepseek-ai/dsh-api-session-controller/media-references
  */
 
@@ -10,45 +11,42 @@ import { isAbsolute } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-attachment'
-import { FsError, type FileSystem, type FsTarget } from '@deepseek-ai/dsh-fs'
+import { FsError, type FileSystem } from '@deepseek-ai/dsh-fs'
 import mime from 'mime-types'
 
 const BASE_HEADERS = {
-  'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
   // HTML and SVG files may be opened directly on the authenticated API origin.
   'Content-Security-Policy': "sandbox; default-src 'none'",
 }
+const NO_STORE = { ...BASE_HEADERS, 'Cache-Control': 'private, no-store' }
+// A versioned URL names one file version, so its response never changes.
+const VERSIONED = { ...BASE_HEADERS, 'Cache-Control': 'private, max-age=31536000, immutable' }
 
-async function serveFile(
-  request: Request,
-  fs: FileSystem,
-  maxBytes: number,
-  allowedRoots?: readonly FsTarget[],
-): Promise<Response> {
+async function serveFile(request: Request, fs: FileSystem, maxBytes: number): Promise<Response> {
   const fail = (status: number, text: string): Response =>
-    new Response(request.method === 'HEAD' ? null : text, { status, headers: BASE_HEADERS })
-  const path = new URL(request.url).searchParams.get('path')
+    new Response(request.method === 'HEAD' ? null : text, { status, headers: NO_STORE })
+  const params = new URL(request.url).searchParams
+  const path = params.get('path')
   if (path === null || path.length === 0) return fail(400, 'missing path')
   if (path.includes('\0') || !isAbsolute(path)) return fail(400, 'absolute path required')
   try {
     const target = await fs.resolve(path, { signal: request.signal })
-    if (allowedRoots !== undefined && !allowedRoots.some(root => fs.contains(root, target))) {
-      return fail(403, 'workspace access denied')
+    const info = await fs.stat(target, request.signal)
+    if (info === undefined) return fail(404, 'not found')
+    if (info.type !== 'file') return fail(403, 'not a regular file')
+    if (info.size !== undefined && info.size > maxBytes) return fail(413, 'file exceeds byte limit')
+    if (params.get('v') !== info.version) {
+      // Relative to the request URL, so deployment prefixes and the Desktop scheme are kept.
+      const location = `?${new URLSearchParams({ path, v: info.version }).toString()}`
+      return new Response(null, { status: 302, headers: { ...NO_STORE, Location: location } })
     }
-    const mediaType = mime.lookup(target.displayPath) || 'application/octet-stream'
     const headers: Record<string, string> = {
-      ...BASE_HEADERS,
-      'Content-Type': mediaType,
+      ...VERSIONED,
+      'Content-Type': mime.lookup(target.displayPath) || 'application/octet-stream',
     }
     if (request.method === 'HEAD') {
-      const info = await fs.stat(target, request.signal)
-      if (info === undefined) return fail(404, 'not found')
-      if (info.type !== 'file') return fail(403, 'not a regular file')
-      if (info.size !== undefined) {
-        if (info.size > maxBytes) return fail(413, 'file exceeds byte limit')
-        headers['Content-Length'] = String(info.size)
-      }
+      if (info.size !== undefined) headers['Content-Length'] = String(info.size)
       return new Response(null, { headers })
     }
     const bytes = await fs.readBytes(target, request.signal, maxBytes)
@@ -80,44 +78,7 @@ export const SessionMediaReferences = {
       path: '/api/file',
       methods: ['GET', 'HEAD'],
       requestBody: 'buffered',
-      fetch: async request => serveFile(request, ctx.fs, maxBytes, await authorizedRoots(ctx)),
+      fetch: request => serveFile(request, ctx.fs, maxBytes),
     }), 'session-controller: /api/file')
   },
-}
-
-interface ScopeOwner {
-  owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
-}
-
-interface WorkspaceLike {
-  readonly id: string
-  readonly path: string
-}
-
-interface SessionLike {
-  readonly id: string
-  readonly header: { readonly cwd?: string }
-}
-
-/** Resolve roots visible to the current Ontology user; absent auth keeps generic deployments unchanged. */
-async function authorizedRoots(ctx: Context): Promise<readonly FsTarget[] | undefined> {
-  const owner = ctx.get('ontologyAuthController') as ScopeOwner | undefined
-  if (owner === undefined) return undefined
-  const roots: FsTarget[] = []
-  const fs = ctx.fs
-  const registry = ctx.get('workspaceRegistry') as { list(): readonly WorkspaceLike[] } | undefined
-  if (registry !== undefined) {
-    for (const workspace of registry.list()) {
-      if (await owner.owns('workspace', workspace.id)) roots.push(await fs.resolve(workspace.path))
-    }
-  }
-  const sessions = ctx.get('sessions') as { list(): readonly SessionLike[] } | undefined
-  if (sessions !== undefined) {
-    for (const session of sessions.list()) {
-      if (session.header.cwd !== undefined && await owner.owns('session', session.id)) {
-        roots.push(await fs.resolve(session.header.cwd))
-      }
-    }
-  }
-  return roots
 }

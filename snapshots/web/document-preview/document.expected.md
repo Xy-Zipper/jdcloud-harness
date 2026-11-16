@@ -41,6 +41,8 @@
 - Continuous pages: 2
 - Zoom reveal: hidden -> bottom hover -> delayed hidden
 - Zoom modes: fit width -> 100% -> 150% -> fit width
+- Paper layout: 12px page gaps and outer backdrop insets in both themes
+- Settled zoom redraws the page at device resolution
 - Horizontal overflow: false
 - Canvas fills: red -> blue -> blue
 - Same tab: true
@@ -58,17 +60,22 @@
 
 - Table selection: forward and backward drags exclude later sections
 - Line-break highlight: transparent
+- Text selection: translucent blue in light and dark themes; canvas text remains visible
+- Mouse release preserves the selected text
 
 ## Image zoom
 
+- Contained sidebar PNG drags into the composer as an original-byte image attachment
 - Small PNG fit width remains at intrinsic size; 200% doubles it
 - SVG fit width -> 100% -> fit width toggles horizontal overflow: false -> true -> false
 - Image and Blob identities remain stable while zoom changes
+- Overflowing image drag pans both axes by 80px; releasing restores the grab cursor
 
 ## Code paging
 
 - Viewer: Code
 - Initial reading indicator: true
+- Loading feedback: centered 28px spinner with "Rendering document..."
 - Lines: 64 -> 65
 - Prefix retained: true
 - Tail: const tail = "CODE_TAIL";

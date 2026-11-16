@@ -29,6 +29,8 @@ function actions(
   return {
     captureInsertion,
     insertText,
+    insertQuote: vi.fn(() => true),
+    persistDraft: vi.fn(),
     setDraft: vi.fn(),
     addAttachments: vi.fn(() => true),
     removeAttachment: vi.fn(),

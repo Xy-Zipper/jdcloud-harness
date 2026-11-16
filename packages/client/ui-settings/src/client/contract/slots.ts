@@ -56,6 +56,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'settings.section': { kind: 'list'; scope: 'root'; owner: SettingsSectionOwnerProps }
     /**
+     * Optional navigation icons addressed by the matching settings.section id.
+     * The registration id must equal the target section's id; unmatched ids
+     * never render. The icon's label option is not displayed.
+     * The shell owns the button and label and keeps its default glyph when
+     * no icon is registered for that id.
+     */
+    'settings.section.icon': { kind: 'list'; scope: 'root'; inline: true; owner: SettingsSectionIconOwnerProps }
+    /**
      * One page inside the Plugins settings section. The section owner renders
      * localized entry labels as tabs and mounts each contribution inside its
      * corresponding tab panel. Options: `id` (tab key), `order` (tab order),
@@ -128,6 +136,14 @@ export interface SettingsSectionOwnerProps {
   close: () => void
 }
 
+/** Icon presentation supplied by the settings navigation row. */
+export interface SettingsSectionIconOwnerProps {
+  /** Requested square edge in pixels. */
+  size: number
+  /** Whether this section is selected. */
+  active: boolean
+}
+
 /** Owner share of the currently active settings-backed onboarding step. */
 export interface SettingsOnboardingOwnerProps {
   /** Stable id of the step currently selected by the coordinator. */
@@ -144,8 +160,12 @@ export interface SettingsOnboardingOwnerProps {
 export interface SettingsLauncherOwnerProps {
   /** Whether the sidebar shows labels. */
   wide: boolean
-  /** Open the settings panel. */
-  openSettings: () => void
+  /** Whether the settings dialog covers the sidebar; a launcher may treat a false-to-true edge as one Settings entry. */
+  settingsOpen: boolean
+  /** Effective Settings key labels and accessible combination; omitted when unbound. */
+  settingsShortcut?: { readonly keys: readonly string[]; readonly aria?: string | undefined }
+  /** @param sectionId - section to open; absent uses the shell's default section. */
+  openSettings: (sectionId?: string) => void
   /** @param id - registered onboarding editor to open explicitly. */
   openOnboarding: (id: string) => void
 }

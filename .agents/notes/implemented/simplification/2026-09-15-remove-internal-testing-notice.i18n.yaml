@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-15-remove-internal-testing-notice.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/simplification/2026-09-15-remove-internal-testing-notice.md
-2026-09-15-remove-internal-testing-notice.md: b902df4b56a58d963736903a85770506a662f1dd
-2026-09-15-remove-internal-testing-notice.zh.md: 00c3524608a110a5e7f081d3ef17d849d5a6120d
+/agent-note-remove-the-internal-testing-notice:
+  en: 2312bc2140efacf5
+  zh: 9f21d718be305363
+/agent-note-remove-the-internal-testing-notice/problem:
+  en: 0bbfa0d0fd97cd06
+  zh: 826cceba5de4fb50
+/agent-note-remove-the-internal-testing-notice/decision:
+  en: 9aed6c3755920f89
+  zh: 1b8a8ec7be53d9ff
+/agent-note-remove-the-internal-testing-notice/alternatives-considered:
+  en: 5ea0d1b8ee17bac3
+  zh: 256b7e49b978ff06
+/agent-note-remove-the-internal-testing-notice/consequences:
+  en: e404f7111ee4c729
+  zh: 9f7836d750a2dcf3

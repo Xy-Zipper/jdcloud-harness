@@ -9,10 +9,22 @@
   ],
   "references": [
     {
+      "path": "../../util/text-search"
+    },
+    {
       "path": "../../api/session-controller/tsconfig.client.json"
     },
     {
+      "path": "../ui-session-status/tsconfig.client.json"
+    },
+    {
+      "path": "../../preset/agent-preset-registry"
+    },
+    {
       "path": "../../api/workspace-controller/tsconfig.client.json"
+    },
+    {
+      "path": "../../api/remote-access/tsconfig.client.json"
     },
     {
       "path": "../locale/tsconfig.client.json"
@@ -70,6 +82,15 @@
     },
     {
       "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../shortcuts/tsconfig.client.json"
+    },
+    {
+      "path": "../product-analytics/tsconfig.client.json"
+    },
+    {
+      "path": "../ui-context-menu"
     }
   ]
 }

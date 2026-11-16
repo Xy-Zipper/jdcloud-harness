@@ -12,6 +12,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState, TagTone } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { localizedValues, TextSearchIndex, type SearchKeys } from '@deepseek-ai/dsh-util-text-search'
 import type { PluginInventoryLocaleKey } from './locales.ts'
 import css from './PluginInventorySettingsTab.module.css'
 
@@ -58,6 +59,9 @@ const PHASE_KEYS = {
   unloading: 'unloading',
 } satisfies Record<Exclude<PluginFiberPhase, null>, PluginInventoryLocaleKey>
 
+/** Placeholder cards the loading skeleton lays out in the cards grid. */
+const SKELETON_CARDS = [0, 1, 2, 3] as const
+
 /** Localized accessible label for one root Fiber phase. */
 function phaseLabel(phase: PluginFiberPhase, t: Translate): string {
   return phase === null ? t('unobserved') : t(PHASE_KEYS[phase])
@@ -77,6 +81,16 @@ function entrySubtitle(entryId: string): string {
   return entryId.replace(/^include:/, '')
 }
 
+/** Whether a card shows its entry id: the id exists and, without its `include:` marker, differs from the title. */
+function idAddsToTitle(entryId: string | null, title: string): entryId is string {
+  return entryId !== null && entrySubtitle(entryId) !== title
+}
+
+/** Accessible card name: the title, the complete entry id when the card shows one, then the enablement state. */
+function cardLabel(title: string, entryId: string | null, state: string): string {
+  return idAddsToTitle(entryId, title) ? `${title}, ${entryId}, ${state}` : `${title}, ${state}`
+}
+
 /** Preserve translated titles and shorten literal package or module name fallbacks in Settings. */
 function pluginText(row: PluginInventoryEntry | AgentPresetRow, resolveText: PluginInventorySettingsTabInjected['resolveText']) {
   const title = row.meta?.title
@@ -86,12 +100,12 @@ function pluginText(row: PluginInventoryEntry | AgentPresetRow, resolveText: Plu
   }
 }
 
-/** Match translated text alongside the row's technical module and entry identities. */
-function matches(row: PluginInventoryEntry | AgentPresetRow, normalizedQuery: string, resolveText: PluginInventorySettingsTabInjected['resolveText']): boolean {
-  if (normalizedQuery.length === 0) return true
-  const { title, description } = pluginText(row, resolveText)
-  return [row.moduleName, row.entryId, title, description]
-    .some(value => value?.toLocaleLowerCase().includes(normalizedQuery))
+/** Search text of one row: its module and entry identities and every language of its title and description. */
+function searchKeys(row: PluginInventoryEntry | AgentPresetRow): SearchKeys {
+  return {
+    fuzzy: [row.moduleName, row.entryId ?? undefined, ...localizedValues(row.meta?.title)],
+    substring: localizedValues(row.meta?.description),
+  }
 }
 
 /** The roster row shown when the preset switcher has no explicit choice. */
@@ -151,8 +165,12 @@ function PluginCard({
             <IconChevronDownOutlineRegular className={css.chevron} size={12} aria-hidden="true" />
           </span>
         </span>
-        {description === undefined ? null : <span className={css.hint} id={descriptionId}>{description}</span>}
-        {entryId === null ? null : <code className={css.cardIdentity} title={entryId}>{entrySubtitle(entryId)}</code>}
+        {description === undefined ? null : <span className={css.cardDescription} id={descriptionId}>{description}</span>}
+        {idAddsToTitle(entryId, title) ? (
+          <span className={css.cardMeta}>
+            <code className={css.cardIdentity} title={entryId}>{entrySubtitle(entryId)}</code>
+          </span>
+        ) : null}
       </button>
       {metadataError === undefined ? null : <p className={css.brokenNote} role="status" data-package-meta-error>{metadataError}</p>}
       {open ? <div className={css.cardDetails} id={detailId}>{children}</div> : null}
@@ -189,15 +207,15 @@ function CardFacts({ moduleName, moduleLabel, entryId, facts }: {
 /* `pending` is the only dotted phase with no work under way. `loading` and
  * `unloading` are both live transitions the Host is running — an async
  * disposer can hold `unloading` for a while — so both animate. `active` and
- * `failed` carry no dot: a settled enabled row shows its enablement tag alone,
- * and a failed row has the failure tag. */
+ * `failed` carry no dot: a settled enabled row needs no marker, and a failed
+ * row has the failure tag. */
 const PHASE_DOT_STATES = {
   pending: 'idle',
   loading: 'ongoing',
   unloading: 'ongoing',
 } as const satisfies Partial<Record<NonNullable<PluginFiberPhase>, StateDotState>>
 
-/** A live root-fiber phase whose dot still adds to the row's enablement tag. */
+/** A live root-fiber phase the row marks with a dot. */
 type DotPhase = keyof typeof PHASE_DOT_STATES
 
 /** Whether a live root-fiber phase carries a dot of its own. */
@@ -220,16 +238,15 @@ function PhaseDot({ phase, t }: { readonly phase: DotPhase; readonly t: Translat
 type EnablementKind = 'enabled' | 'disabled' | 'conditional' | 'preset' | 'failed'
 
 const TAG_TONES = {
-  enabled: 'success',
   disabled: 'neutral',
   conditional: 'warning',
   preset: 'info',
   failed: 'danger',
-} as const satisfies Record<EnablementKind, TagTone>
+} as const satisfies Record<Exclude<EnablementKind, 'enabled'>, TagTone>
 
-/** Enablement tag; `kind` selects the palette. */
+/** Enablement tag for the states that depart from the default; a plainly enabled row carries none. */
 function StateTag({ kind, label }: { readonly kind: EnablementKind; readonly label: string }): ReactNode {
-  return <Tag tone={TAG_TONES[kind]}>{label}</Tag>
+  return kind === 'enabled' ? null : <Tag tone={TAG_TONES[kind]}>{label}</Tag>
 }
 
 /** Render the read-only plugin inventory: agent presets first, then the global plane. */
@@ -256,8 +273,7 @@ export function PluginInventorySettingsTab(
     return () => { current = false }
   }, [list, request])
 
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  const searching = normalizedQuery.length > 0
+  const searching = query.trim().length > 0
   const snapshot = state.status === 'ready' ? state.snapshot : undefined
   const presets = snapshot?.agentPresets ?? []
   const selected = presets.find(preset => preset.id === chosenPreset) ?? fallbackPreset(presets)
@@ -277,27 +293,33 @@ export function PluginInventorySettingsTab(
   }, [presets])
 
   const entries = snapshot?.entries ?? []
-  const failedEntries: PluginInventoryEntry[] = []
-  const regularEntries: PluginInventoryEntry[] = []
-  for (const entry of entries) {
-    if (entry.fiberPhase === 'failed') failedEntries.push(entry)
-    else regularEntries.push(entry)
-  }
-
-  const entryMatch = (entry: PluginInventoryEntry): boolean => matches(entry, normalizedQuery, resolveText)
-  const rowMatch = (row: AgentPresetRow): boolean => matches(row, normalizedQuery, resolveText)
-  const filteredFailed = failedEntries.filter(entryMatch)
-  const filteredRegular = regularEntries.filter(entryMatch)
+  // One index per list, built when the snapshot changes; typing only searches them.
+  const indexes = useMemo(() => {
+    const failed: PluginInventoryEntry[] = []
+    const regular: PluginInventoryEntry[] = []
+    for (const entry of snapshot?.entries ?? []) {
+      if (entry.fiberPhase === 'failed') failed.push(entry)
+      else regular.push(entry)
+    }
+    return {
+      failed: new TextSearchIndex(failed, searchKeys),
+      regular: new TextSearchIndex(regular, searchKeys),
+      presets: (snapshot?.agentPresets ?? []).map(preset => ({ preset, index: new TextSearchIndex(preset.rows, searchKeys) })),
+    }
+  }, [snapshot])
+  const filteredFailed = indexes.failed.search(query)
+  const filteredRegular = indexes.regular.search(query)
   const globalCount = filteredFailed.length + filteredRegular.length
-  const selectedRows = selected === undefined ? [] : selected.rows.filter(rowMatch)
-  const otherPresetMatches = searching
-    ? presets.filter(preset => preset !== selected && preset.rows.some(rowMatch))
+  const selectedRows = indexes.presets.find(({ preset }) => preset === selected)?.index.search(query) ?? []
+  const otherMatches = searching
+    ? indexes.presets.flatMap(({ preset, index }) => preset === selected ? [] : [{ preset, count: index.search(query).length }])
+      .filter(match => match.count > 0)
     : []
-  const otherMatchCount = otherPresetMatches
-    .reduce((total, preset) => total + preset.rows.filter(rowMatch).length, 0)
+  const otherPresetMatches = otherMatches.map(match => match.preset)
+  const otherMatchCount = otherMatches.reduce((total, match) => total + match.count, 0)
 
-  // Both groups start collapsed; a search opens them for as long as it lasts.
-  const presetEffectiveOpen = searching || (presetOpen ?? false)
+  // The preset group starts open and the larger global plane folded; a search opens both for as long as it lasts.
+  const presetEffectiveOpen = searching || (presetOpen ?? true)
   const globalEffectiveOpen = searching || (globalOpen ?? false)
   const nothingMatches = searching && globalCount === 0 && selectedRows.length === 0
     && otherPresetMatches.length === 0
@@ -331,7 +353,7 @@ export function PluginInventorySettingsTab(
         failed={failed}
         expanded={expanded}
         onToggle={toggleRow}
-        ariaLabel={`${title}${row.entryId === null ? '' : `, ${row.entryId}`}, ${stateText}`}
+        ariaLabel={cardLabel(title, row.entryId, stateText)}
         trailing={(
           <>
             {row.enabled === true && showsPhaseDot(row.fiberPhase)
@@ -380,7 +402,7 @@ export function PluginInventorySettingsTab(
         failed={failed}
         expanded={expanded}
         onToggle={toggleRow}
-        ariaLabel={`${title}, ${entry.entryId}, ${stateText}`}
+        ariaLabel={cardLabel(title, entry.entryId, stateText)}
         trailing={(
           <>
             {entry.enabled && showsPhaseDot(entry.fiberPhase)
@@ -397,18 +419,7 @@ export function PluginInventorySettingsTab(
           facts={providers !== undefined
             ? [
               [t('configuration'), t('presetProvidedDetail')],
-              [t('enabledIn'), (
-                <span className={css.enabledIn}>
-                  <span>{providers.map(preset => presetName(preset)).join(' · ')}</span>
-                  <button
-                    type="button"
-                    className={css.jumpLink}
-                    onClick={() => { setChosenPreset(providers[0].id) }}
-                  >
-                    {t('viewInPreset')}
-                  </button>
-                </span>
-              )],
+              [t('enabledIn'), providers.map(preset => presetName(preset)).join(' · ')],
             ]
             : [
               [t('configuration'), t(entry.enabled ? 'enabledTag' : 'disabledTag')],
@@ -436,9 +447,15 @@ export function PluginInventorySettingsTab(
         </div>
       )}
       {state.status === 'loading' ? (
-        <p className={`${css.status} ${css.statusWithDot}`} role="status">
-          <StateDot state="ongoing" />{t('loading')}
-        </p>
+        <div className={css.cards} role="status">
+          <span className={css.visuallyHidden}>{t('loading')}</span>
+          {SKELETON_CARDS.map(slot => (
+            <div key={slot} className={css.skeletonCard} aria-hidden="true">
+              <span className={css.skeletonBar} />
+              <span className={css.skeletonBar} />
+            </div>
+          ))}
+        </div>
       ) : null}
       {state.status === 'error' ? (
         <div className={css.failure}>
@@ -505,12 +522,7 @@ export function PluginInventorySettingsTab(
                   />
                 </div>
               </div>
-              <p className={css.groupSub}>
-                {t('presetSubtitle')}
-                <span data-preset-plugin-count={selectedRows.length}>
-                  {` · ${String(selectedRows.length)} ${t('countUnit')}`}
-                </span>
-              </p>
+              <p className={css.groupSub}>{t('presetSubtitle')}</p>
               {presetEffectiveOpen ? (
                 <div id={`${sectionId}-preset`} className={css.groupBody}>
                   {selected.broken !== undefined ? (
@@ -555,13 +567,7 @@ export function PluginInventorySettingsTab(
                   <span className={css.groupTitle}>{t('globalTitle')}</span>
                 </button>
               </div>
-              <p className={css.groupSub}>
-                {t('globalSubtitle')}
-                <span data-plugin-count={globalCount}>{` · ${String(globalCount)} ${t('countUnit')}`}</span>
-                {filteredFailed.length > 0 ? (
-                  <span className={css.failedCount}>{filteredFailed.length} {t('failedCountLabel')}</span>
-                ) : null}
-              </p>
+              <p className={css.groupSub}>{t('globalSubtitle')}</p>
               {globalEffectiveOpen && globalCount > 0 ? (
                 <ul className={css.cards} id={`${sectionId}-global`}>
                   {filteredFailed.map(entry => globalRowCard(entry))}

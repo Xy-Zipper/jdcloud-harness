@@ -5,9 +5,8 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
-import { ImageVariantId } from '@deepseek-ai/dsh-attachment'
-import type { AttachmentId, ImageVariantId as ImageVariantIdType } from '@deepseek-ai/dsh-attachment'
-import { DeepSeekFileId, DeepSeekFileScope } from './file-id.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { AttachmentId, ImageVariantId as ImageVariantIdType } from '@deepseek-ai/dsh-attachment/types'
 import type { DeepSeekFileId as DeepSeekFileIdType, DeepSeekFileScope as DeepSeekFileScopeType } from './file-id.ts'
 
 /** One durable remote upload mapping. Unix times are milliseconds. */
@@ -37,18 +36,18 @@ export interface UploadIndexCommit {
 }
 
 /**
- * Derive a non-secret stable index namespace without persisting or logging the API key.
+ * Derive a non-secret stable index namespace without persisting or logging authentication headers.
  * @param baseURL - normalized provider endpoint namespace.
- * @param apiKey - resolved credential used only as hash input.
+ * @param credentials - serialized authentication headers used only as hash input.
  * @returns branded SHA-256 namespace digest.
  */
-export function deepSeekFileScope(baseURL: string, apiKey: string): DeepSeekFileScopeType {
+export function deepSeekFileScope(baseURL: string, credentials: string): DeepSeekFileScopeType {
   const digest = createHash('sha256')
     .update(baseURL.replace(/\/+$/u, ''))
     .update('\0')
-    .update(apiKey)
+    .update(credentials)
     .digest('hex')
-  return DeepSeekFileScope(digest)
+  return brandString<DeepSeekFileScopeType>(digest)
 }
 
 function absent(error: unknown): boolean {
@@ -70,10 +69,10 @@ function parseRecord(value: unknown): DeepSeekUploadRecord {
     throw new InvalidUploadIndexError('llm-deepseek: upload index contains an invalid record')
   }
   return {
-    scope: DeepSeekFileScope(record.scope),
+    scope: brandString<DeepSeekFileScopeType>(record.scope),
     attachmentId: record.attachmentId as AttachmentId,
-    variantId: ImageVariantId(record.variantId),
-    fileId: DeepSeekFileId(record.fileId),
+    variantId: brandString<ImageVariantIdType>(record.variantId),
+    fileId: brandString<DeepSeekFileIdType>(record.fileId),
     bytes: record.bytes as number,
     createdAt: record.createdAt as number,
     expiresAt: record.expiresAt as number,
@@ -120,9 +119,9 @@ export class DeepSeekUploadIndex {
     this.path = path
   }
 
-  private async load(): Promise<StoredIndex> {
+  private async load(signal?: AbortSignal): Promise<StoredIndex> {
     try {
-      return parseIndex(await readFile(this.path, 'utf8'))
+      return parseIndex(await readFile(this.path, { encoding: 'utf8', signal }))
     } catch (error: unknown) {
       if (absent(error) || error instanceof InvalidUploadIndexError) {
         return { formatVersion: 3, records: [] }
@@ -144,6 +143,7 @@ export class DeepSeekUploadIndex {
    * @param variantId - complete request-image transformation identity.
    * @param now - current Unix time in milliseconds.
    * @param refreshMarginMs - remaining lifetime below which a mapping is not reused.
+   * @param signal - cancellation of the index read.
    * @returns the mapping when it has enough lifetime remaining.
    */
   async get(
@@ -151,8 +151,9 @@ export class DeepSeekUploadIndex {
     variantId: ImageVariantIdType,
     now: number,
     refreshMarginMs: number,
+    signal?: AbortSignal,
   ): Promise<DeepSeekUploadRecord | undefined> {
-    const record = (await this.load()).records.find(candidate => (
+    const record = (await this.load(signal)).records.find(candidate => (
       candidate.scope === scope && candidate.variantId === variantId
     ))
     return record !== undefined && reusable(record, now, refreshMarginMs) ? record : undefined
@@ -190,21 +191,20 @@ export class DeepSeekUploadIndex {
   }
 
   /**
-   * Remove one exact mapping without deleting a concurrently installed successor.
+   * Remove exact mappings in one locked rewrite without deleting concurrently installed successors.
    * @param scope - endpoint/API-key namespace.
-   * @param variantId - complete request-image transformation identity.
-   * @param fileId - exact remote generation being invalidated.
+   * @param generations - exact remote generations being invalidated; pairs absent from the index are ignored.
    */
   async remove(
     scope: DeepSeekFileScopeType,
-    variantId: ImageVariantIdType,
-    fileId: DeepSeekFileIdType,
+    generations: readonly Pick<DeepSeekUploadRecord, 'variantId' | 'fileId'>[],
   ): Promise<void> {
+    const invalidated = new Set(generations.map(generation => `${generation.variantId}\0${generation.fileId}`))
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
     await withFileLock(this.path, async () => {
       const index = await this.load()
       const records = index.records.filter(record => !(
-        record.scope === scope && record.variantId === variantId && record.fileId === fileId
+        record.scope === scope && invalidated.has(`${record.variantId}\0${record.fileId}`)
       ))
       if (records.length !== index.records.length) await this.save({ formatVersion: 3, records })
     })

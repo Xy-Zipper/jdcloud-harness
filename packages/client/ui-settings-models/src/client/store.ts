@@ -2,16 +2,14 @@
  * Models settings page store: one snapshot joining the configurable-provider
  * directory (`llm/listProviders` joined with `llm/listConfigurableProviders`),
  * the settings namespaces (shared settings mirror),
- * and the referenced credentials (`credentials/describe`). A non-loopback
- * browser cannot read Host settings, so it receives a read-only projection of
- * the active provider directory instead. The host stays the single fact source
- * — every mutation writes through the wire and the page re-renders from the
- * next describe, pushed or refetched.
+ * and the referenced credentials (`credentials/describe`). The host stays the
+ * single fact source — every mutation writes through the wire and the page
+ * re-renders from the next describe, pushed or refetched.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
-  CredentialInfo, LlmConfigurableProvider, LlmProviderInfo, SettingsNamespaceView,
+  CredentialInfo, LlmConfigurableProvider, LlmNativeAuth, LlmProviderInfo, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -32,6 +30,9 @@ export interface ProviderDirectoryEntry {
   readonly settingsPath: readonly string[]
   readonly active: boolean
   readonly declared?: boolean
+  readonly defaultBaseURL?: string
+  readonly baseURLEnv?: readonly string[]
+  readonly nativeAuth?: LlmNativeAuth
   readonly error?: string
 }
 
@@ -39,7 +40,7 @@ export interface ProviderDirectoryEntry {
  * Join declared configurable providers with the currently registered routes.
  * @param registered - live provider routes in registration order.
  * @param directory - declared configurable providers in declaration order.
- * @returns declared rows followed by live routes with no declaration.
+ * @returns account and official routes first, then other routes in their original order.
  */
 export function joinProviderDirectory(
   registered: readonly LlmProviderInfo[],
@@ -54,6 +55,9 @@ export function joinProviderDirectory(
     settingsPath: [...entry.settingsPath],
     active: active.has(entry.provider),
     ...entry.declared === undefined ? {} : { declared: entry.declared },
+    ...entry.defaultBaseURL === undefined ? {} : { defaultBaseURL: entry.defaultBaseURL },
+    ...entry.baseURLEnv === undefined ? {} : { baseURLEnv: entry.baseURLEnv },
+    ...entry.nativeAuth === undefined ? {} : { nativeAuth: entry.nativeAuth },
     ...entry.error === undefined ? {} : { error: entry.error },
   }))
   for (const provider of registered) {
@@ -66,11 +70,15 @@ export function joinProviderDirectory(
       active: true,
     })
   }
-  return rows
+  return rows.toSorted((left, right) =>
+    (left.provider === 'deepseek-account' ? 0 : left.provider === 'deepseek-official' ? 1 : 2)
+      - (right.provider === 'deepseek-account' ? 0 : right.provider === 'deepseek-official' ? 1 : 2))
 }
 
 /** One provider row the page renders. */
 export interface ProviderRow {
+  /** Account route has usable credentials for the configured inference origin. */
+  accountAvailable?: boolean
   /** The directory entry (route id, display name, settings address, live state). */
   entry: ProviderDirectoryEntry
   /** Whether any layer configures this provider (its profile resolves). */
@@ -88,6 +96,8 @@ export interface ProviderRow {
    * own derivation rule.
    */
   derivedCredential?: CredentialInfo
+  /** Redacted checks for named or native references; absent when their read failed. */
+  credentialChecks?: Readonly<Record<string, CredentialInfo>>
 }
 
 /** Page snapshot. */
@@ -136,6 +146,28 @@ export function protocolChoices(
   return list.list.map(entry => entry.value).filter((value): value is string => typeof value === 'string')
 }
 
+/**
+ * The reasoning levels a hand-declared route's models may declare, read out of
+ * the owning namespace's own schema for the same reason as
+ * {@link protocolChoices}: the levels the page offers and the keys the
+ * adapter accepts in `reasoningEfforts` come from the same `Config`.
+ * @param namespace - the namespace view whose schema declares the profile shape.
+ * @param schema - settings schema operations.
+ * @returns the levels in the schema's escalation order, or an empty list when the schema has none.
+ */
+export function reasoningLevelChoices(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+): string[] {
+  if (namespace === undefined) return []
+  const path = ['providers', PROBE_ROUTE, 'models', '0', 'reasoningEfforts']
+  const node = schema.nodeAtPath(schema.rehydrate(namespace.schema), path)
+  // `false | { [level]: value }`: the dict branch's key schema lists the levels.
+  const branches = (node as { list?: readonly { type?: string; sKey?: unknown }[] } | undefined)?.list ?? []
+  const keys = branches.find(branch => branch.type === 'dict')?.sKey as { list?: readonly { value?: unknown }[] } | undefined
+  return (keys?.list ?? []).map(entry => entry.value).filter((value): value is string => typeof value === 'string')
+}
+
 /** The credential reference a resolved profile names (its `apiKeyEnv` field). */
 function apiKeyEnvOf(
   namespace: SettingsNamespaceView | undefined,
@@ -158,6 +190,8 @@ export class ModelsSettingsStore {
 
   /** Latest load wins; an older response never overwrites a newer one. */
   private generation = 0
+  /** Callers follow the current refresh's outcome, including callers whose read was superseded. */
+  private readonly pendingLoads = new Set<PromiseWithResolvers<void>>()
 
   /**
    * @param ctx - the page plugin's context, whose `remote.llm` and
@@ -174,45 +208,40 @@ export class ModelsSettingsStore {
   /**
    * Refresh the whole page snapshot: the provider directory and the mirror's
    * settings answer in parallel, then one batched credential describe over
-   * every referenced ref. Provider failure surfaces an error. A browser that
-   * cannot access Host settings receives only active providers as read-only
-   * rows; a failed settings refresh reuses the mirror's held view.
-   * @returns nothing; the snapshot carries the outcome.
+   * every referenced ref. Provider failure or absence of an initial settings
+   * answer keeps the last good rows and surfaces an error; a failed settings
+   * refresh reuses the mirror's held view. Concurrent callers resolve only
+   * after the current refresh publishes its ready or error snapshot.
+   * @returns resolution after the current snapshot is published.
+   * @throws the current read's unexpected rejection; superseded rejections are ignored.
    */
-  async load(): Promise<void> {
+  load(): Promise<void> {
+    const pending = Promise.withResolvers<void>()
+    this.pendingLoads.add(pending)
     const generation = ++this.generation
+    void this.read(generation).then(
+      () => { this.settleLoads(generation, (load) => { load.resolve() }) },
+      (error: unknown) => { this.settleLoads(generation, (load) => { load.reject(error) }) },
+    )
+    return pending.promise
+  }
+
+  /** Publish one joined answer; stale answers leave the current refresh in charge. */
+  private async read(generation: number): Promise<void> {
     this.store.update((s) => { s.status = 'loading'; s.error = null })
     const [registered, declared] = await Promise.all([
       this.ctx.remote.llm.listProviders(),
       this.ctx.remote.llm.listConfigurableProviders(),
       this.describeFace.ensure(),
     ])
-    if (!registered.ok) { this.failLoad(generation, registered.error.message); return }
-    if (!declared.ok) { this.failLoad(generation, declared.error.message); return }
+    if (generation !== this.generation) return
+    if (!registered.ok) { this.failLoad(registered.error.message); return }
+    if (!declared.ok) { this.failLoad(declared.error.message); return }
     const mirrored = this.describeFace.getSnapshot()
     if (mirrored.view === undefined) {
-      if (mirrored.status !== 'unavailable') {
-        this.failLoad(generation, mirrored.error ?? 'settings are unavailable in this browser')
-        return
-      }
-      const activeRows: ProviderRow[] = joinProviderDirectory(registered.value, declared.value)
-        .filter(entry => entry.active)
-        .map(entry => ({
-          entry,
-          configured: true,
-          removable: false,
-          apiKeyEnv: undefined,
-          credential: undefined,
-        }))
-      if (generation !== this.generation) return
-      this.store.update((s) => {
-        s.status = 'ready'
-        s.error = null
-        s.credentialError = null
-        s.writable = false
-        s.rows = activeRows
-        s.namespaces = new Map()
-      })
+      /* v8 ignore next -- SettingsDescribeFace.ensure settles with a view or the read's error */
+      if (mirrored.error === null) throw new Error('settings describe settled with neither a view nor an error')
+      this.failLoad(mirrored.error)
       return
     }
     const providers = joinProviderDirectory(registered.value, declared.value)
@@ -231,20 +260,29 @@ export class ModelsSettingsStore {
         entry,
         configured,
         removable,
-        apiKeyEnv: apiKeyEnvOf(namespace, entry.settingsPath, this.schema),
+        apiKeyEnv: entry.provider === 'deepseek-account' ? undefined : apiKeyEnvOf(namespace, entry.settingsPath, this.schema),
         credential: undefined,
       }
     })
-    const refs = [...new Set(rows.map(row => row.apiKeyEnv ?? deriveKeyRef(row.entry.provider)))]
-    let credentials: Record<string, CredentialInfo> = {}
+    if (rows.some(row => row.entry.provider === 'deepseek-account')) {
+      const catalog = await this.ctx.remote.session.modelCatalog()
+      for (const row of rows) {
+        if (row.entry.provider === 'deepseek-account') row.accountAvailable = catalog.ok
+          && catalog.value.groups.some(group => group.id === 'deepseek-account' && group.models.length > 0)
+      }
+    }
+    const refs = [...new Set(rows.filter(row => row.entry.provider !== 'deepseek-account').flatMap(row =>
+      row.apiKeyEnv === undefined ? [deriveKeyRef(row.entry.provider), ...row.entry.nativeAuth?.env ?? []] : [row.apiKeyEnv]))]
+    const credentials: Record<string, CredentialInfo> = {}
     let credentialError: string | null = null
-    if (refs.length > 0) {
-      const response = await this.ctx.remote.credentials.describe(refs)
+    // credentials.describe accepts at most 64 references per request.
+    for (let index = 0; index < refs.length; index += 64) {
+      const response = await this.ctx.remote.credentials.describe(refs.slice(index, index + 64))
       // Credential state is an enrichment for the Models page: a failure
       // degrades the badge instead of failing the load. The onboarding
       // projection below retains the failure distinction.
-      if (response.ok) credentials = response.value
-      else credentialError = response.error.message
+      if (response.ok) Object.assign(credentials, response.value)
+      else { credentialError = response.error.message; break }
     }
     if (generation !== this.generation) return
     this.store.update((s) => {
@@ -252,22 +290,37 @@ export class ModelsSettingsStore {
       s.error = null
       s.credentialError = credentialError
       s.writable = writable
-      s.rows = rows.map((row) => {
+      s.rows = rows.filter(row => row.entry.provider !== 'deepseek-account' || row.accountAvailable === true).map((row) => {
+        if (row.entry.provider === 'deepseek-account') return row
         const named = row.apiKeyEnv === undefined ? undefined : credentials[row.apiKeyEnv]
         const derived = row.apiKeyEnv !== undefined ? undefined : credentials[deriveKeyRef(row.entry.provider)]
         return {
           ...row,
           ...named === undefined ? {} : { credential: named },
           ...derived === undefined ? {} : { derivedCredential: derived },
+          ...credentialError === null ? { credentialChecks: Object.fromEntries(
+            (row.apiKeyEnv === undefined ? row.entry.nativeAuth?.env ?? [] : [row.apiKeyEnv])
+              .flatMap((ref) => {
+                const info = credentials[ref]
+                return info === undefined ? [] : [[ref, info] as const]
+              }),
+          ) } : {},
         }
       })
       s.namespaces = namespaces
     })
   }
 
-  /** Publish one load's failure text, unless a newer load already took over. */
-  private failLoad(generation: number, message: string): void {
+  /** Settle callers only while this read still owns the current refresh. */
+  private settleLoads(generation: number, settle: (load: PromiseWithResolvers<void>) => void): void {
     if (generation !== this.generation) return
+    const pending = [...this.pendingLoads]
+    this.pendingLoads.clear()
+    for (const load of pending) settle(load)
+  }
+
+  /** Publish the current joined read's failure text. */
+  private failLoad(message: string): void {
     this.store.update((s) => {
       s.status = 'error'
       s.error = message
@@ -287,6 +340,7 @@ export class ModelsSettingsStore {
  */
 export function providerUsable(row: ProviderRow): boolean {
   if (!row.entry.active) return false
+  if (row.entry.provider === 'deepseek-account') return row.accountAvailable === true
   if (row.apiKeyEnv === undefined) return true
   return row.credential?.configured === true
 }
@@ -311,7 +365,9 @@ export type OnboardingReadiness =
  * Project first-run readiness from the provider/settings/credential join used
  * by the Models page. The step exists to leave the user with a model to talk
  * to, so ANY usable provider ends it; only when none exists does the official
- * DeepSeek route decide whether prompting can help.
+ * DeepSeek route — the one route the prompt can offer a key field for — decide
+ * whether prompting can help. A missing official configurable-provider
+ * declaration means the adapter is not repairable by navigating to Models.
  * @param state - current shared Models join snapshot.
  * @returns the onboarding state without reading a parallel fact source.
  */
@@ -320,7 +376,10 @@ export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadi
     return { kind: 'loading' }
   }
   if (state.status === 'error') {
-    return { kind: 'unavailable', reason: 'load-failed' }
+    return {
+      kind: 'unavailable',
+      reason: 'load-failed',
+    }
   }
   if (state.rows.some(providerUsable)) return { kind: 'provider-ready' }
   const row = state.rows.find(candidate =>
@@ -328,12 +387,31 @@ export function onboardingReadiness(state: ModelsSettingsState): OnboardingReadi
     && candidate.entry.settingsNs === 'llm-deepseek'
     && candidate.entry.settingsPath.length === 0)
   if (row === undefined) return { kind: 'adapter-absent' }
-  if (!row.entry.active) return { kind: 'unavailable', reason: 'provider-inactive' }
-  // An active route past the usable gate names a credential reference with no stored value.
-  if (state.credentialError !== null || row.credential === undefined) {
-    return { kind: 'unavailable', reason: 'credentials-unavailable' }
+  if (!row.entry.active) {
+    return {
+      kind: 'unavailable',
+      reason: 'provider-inactive',
+    }
   }
-  if (!state.writable) return { kind: 'unavailable', reason: 'settings-read-only' }
-  if (!row.credential.writable) return { kind: 'unavailable', reason: 'credential-read-only' }
+  // Past the usable gate an active route names a reference it has no stored
+  // credential for, so the remaining questions are all about that credential.
+  if (state.credentialError !== null || row.credential === undefined) {
+    return {
+      kind: 'unavailable',
+      reason: 'credentials-unavailable',
+    }
+  }
+  if (!state.writable) {
+    return {
+      kind: 'unavailable',
+      reason: 'settings-read-only',
+    }
+  }
+  if (!row.credential.writable) {
+    return {
+      kind: 'unavailable',
+      reason: 'credential-read-only',
+    }
+  }
   return { kind: 'credential-missing' }
 }

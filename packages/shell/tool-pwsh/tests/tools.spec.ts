@@ -1,6 +1,6 @@
 /**
  * Consumer-surface tests for the `pwsh` tool over a FAKE bash executor,
- * exercised through `ctx.tools.execute()` so nothing bypasses the tool
+ * exercised through `executeToolFixture()` so nothing bypasses the tool
  * registry. The fake executor makes every seam outcome scriptable — output
  * text, truncation, timeout, abort, nonzero exits, background handles — so
  * these tests verify the schema, argument validation, workdir derivation,
@@ -9,35 +9,45 @@
  * background job wiring, and the UI presenters. Real-pwsh behavior
  * is pinned separately in integration.spec.ts.
  */
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, type SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { ShellExecutor } from '@deepseek-ai/dsh-shell'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellProcess, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { turnBoundaryProjectionDefinition } from '@deepseek-ai/dsh-agent-loop'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { escalationHintMarker, sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
 import * as ToolPwsh from '@deepseek-ai/dsh-tool-pwsh'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
 import { processOutcome } from '../src/background.ts'
 import { renderPwshJobRead, renderPwshResult } from '../src/render.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 /** Empty offset readers for fakes that never produce output. */
 const silentReader = { readFrom: (fromByte: number) => ({ text: '', nextOffset: fromByte, lossy: false }) }
+
+/** Use the newest id returned by the real registry, including settled jobs. */
+function currentId(ctx: Context, owner?: Agent): string {
+  const id = ctx.jobs.list(owner?.id).at(-1)?.id
+  if (id === undefined) throw new Error('background job was not registered')
+  return id
+}
 
 const testToolSignal = new AbortController().signal
 
@@ -141,8 +151,11 @@ function killableProcess(): ShellProcess {
 
 async function setup(toolConfig: Partial<ToolPwsh.Config> = {}, dshHome?: string) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(BashEnvPlugin, dshHome === undefined ? {} : { dshHome })
   await ctx.plugin(FakeBash)
@@ -154,8 +167,11 @@ async function setup(toolConfig: Partial<ToolPwsh.Config> = {}, dshHome?: string
 /** Full harness: the generic job runtime + its controller, then the pwsh tool. */
 async function setupWithJobs(toolConfig: Partial<ToolPwsh.Config> = {}, dshHome?: string) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(ToolJobs)
@@ -212,23 +228,24 @@ class ConfiningFakeBash extends ShellExecutor {
 }
 
 /** Sandboxed composition: the shared policy service + a confining executor + the pwsh tool (+ optional approval). */
-async function setupSandboxed(withApproval = false) {
+async function setupSandboxed(withApproval = false, toolConfig: Partial<ToolPwsh.Config> = {}) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(ToolJobs)
   await ctx.plugin(BashEnvPlugin)
-  await ctx.plugin(SessionProjectionRegistry)
   // The loop's turnBoundary unit (the open-turn fold) is not mounted in this
   // bench — the loop itself is not composed. Register its open-turn fold so
   // the approval service's turn-enclosure gate reads the seeded log shape.
-  ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
   await ctx.plugin(SandboxPolicyService, {})
   await ctx.plugin(ConfiningFakeBash)
   if (withApproval) await ctx.plugin(ApprovalService)
-  await ctx.plugin(ToolPwsh)
+  await ctx.plugin(ToolPwsh, toolConfig)
   const bash = ctx.shell as ConfiningFakeBash
   return { ctx, bash }
 }
@@ -255,7 +272,7 @@ function sandboxAgent(
   if (mode !== undefined) {
     events.push({ type: 'sandbox/mode', seq: SessionSeq(1), time: 1, data: { mode } })
   }
-  const id = SessionId('sandbox-session')
+  const id = brandString<SessionId>('sandbox-session')
   return {
     id,
     ...ctx === undefined ? {} : { ctx: ctx.plugin(() => {}).ctx },
@@ -293,7 +310,7 @@ function sandboxAgent(
  */
 async function registerFakeAgent(ctx: Context, sessionId: string): Promise<Agent> {
   const scopeFiber = ctx.plugin(() => {})
-  const id = SessionId(sessionId)
+  const id = brandString<SessionId>(sessionId)
   const agent = {
     id,
     ctx: scopeFiber.ctx,
@@ -313,9 +330,9 @@ async function registerFakeAgent(ctx: Context, sessionId: string): Promise<Agent
 
 let callCounter = 0
 function call(ctx: Context, name: string, args: unknown, agent?: Agent) {
-  return ctx.tools.execute({
+  return executeToolFixture(ctx, {
     signal: testToolSignal,
-    callId: ToolCallId(`call-${++callCounter}`),
+    callId: brandString<ToolCallId>(`call-${++callCounter}`),
     name,
     arguments: args,
     ...agent ? { agent } : {},
@@ -344,6 +361,22 @@ async function callUntilText(
 }
 
 describe('registration', () => {
+  it.each([
+    ['foreground-only', setup],
+    ['job-backed', setupWithJobs],
+  ] as const)('requests description before command in the %s schema', async (_mode, setupContext) => {
+    const { ctx } = await setupContext()
+    try {
+      const schema = ctx.tools.schemas().find(tool => tool.name === 'pwsh')!
+      expect(Object.keys(schema.parameters.properties as Record<string, unknown>).slice(0, 2))
+        .toEqual(['description', 'command'])
+      expect(schema.parameters).toHaveProperty('required', ['description', 'command'])
+      expect(schema.description).toContain('Provide `description` before `command` in the arguments.')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('registers the pwsh tool with its prompt section and schema', async () => {
     const { ctx } = await setupWithJobs()
     const schema = ctx.tools.schemas().find(s => s.name === 'pwsh')
@@ -356,7 +389,7 @@ describe('registration', () => {
       workdir: { type: 'string' },
       run_in_background: { type: 'boolean' },
     })
-    expect(schema?.parameters.required).toEqual(['command', 'description'])
+    expect(schema?.parameters.required).toEqual(['description', 'command'])
     const prompt = renderPrompt(await ctx.systemPrompt.assemble())
     expect(prompt).toContain('Non-zero exits are reported as `[exit code: N]` markers')
     expect(prompt).toContain('without a signal marker')
@@ -366,23 +399,26 @@ describe('registration', () => {
     const { ctx } = await setup()
     const schema = ctx.tools.schemas().find(s => s.name === 'pwsh')!
     expect(Object.keys(schema.parameters.properties as Record<string, unknown>))
-      .toEqual(['command', 'description', 'timeoutMs', 'workdir'])
-    expect(schema.description).toContain('Background execution is not available')
-    expect(schema.description).not.toContain('job_output')
+      .toEqual(['description', 'command', 'timeoutMs', 'workdir'])
+    expect(JSON.stringify(schema.parameters)).not.toContain('job_output')
   })
 
   it('stays pending until ctx.shell exists (inject)', async () => {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(ToolPwsh)
     expect(ctx.tools.schemas()).toHaveLength(0)
   })
 
   it('unregisters everything on fiber disposal (HMR safety)', async () => {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(BashEnvPlugin)
     await ctx.plugin(FakeBash)
     const fiber = await ctx.plugin(ToolPwsh)
@@ -399,6 +435,13 @@ describe('argument validation', () => {
     expect(text(await call(ctx, 'pwsh', { command: 'Write-Output hi', description: ' ' }))).toContain('expected a non-empty string')
     expect(text(await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'd', timeoutMs: -1 })))
       .toContain('invalid timeoutMs: expected a positive number')
+    for (const args of [
+      { command: '  ', description: 'd' },
+      { command: 'Write-Output hi', description: ' ' },
+      { command: 'Write-Output hi', description: 'd', timeoutMs: -1 },
+    ]) {
+      expect(await call(ctx, 'pwsh', args)).toMatchObject({ isError: true, error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
+    }
   })
 })
 
@@ -422,6 +465,7 @@ describe('execution through the bash seam', () => {
     expect(request?.timeoutMs).toBe(1234)
     expect(request?.dshEnv).toEqual({
       DSH_HOME: dshHome,
+      DSH_NODE_EXECUTABLE: process.execPath,
       DSH_SHELL: '1',
       DSH_SESSION_ID: 'session-1',
     })
@@ -455,9 +499,9 @@ describe('execution through the bash seam', () => {
     const { ctx, bash } = await setup()
     const controller = new AbortController()
     bash.handler = () => runResult('ok\n')
-    await ctx.tools.execute({
+    await executeToolFixture(ctx, {
       signal: controller.signal,
-      callId: ToolCallId('call-signal'),
+      callId: brandString<ToolCallId>('call-signal'),
       name: 'pwsh',
       arguments: { command: 'Write-Output ok', description: 'ok' },
     })
@@ -476,6 +520,7 @@ describe('execution through the bash seam', () => {
     if (result.isError) throw new Error('expected pwsh success')
     expect(result.value).toEqual({
       kind: 'foreground',
+      cwd: process.cwd(),
       exitCode: 2,
       signal: null,
       timedOut: false,
@@ -586,8 +631,11 @@ describe('per-call sandbox policy resolution', () => {
 
   it('fails load when a confining executor has no shared sandbox-policy resolver', async () => {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(BashEnvPlugin)
     await ctx.plugin(ConfiningFakeBash)
@@ -608,9 +656,9 @@ describe('sandbox escalation through ctx.approval', () => {
   it('advertises the sandbox fields, the escalation clause, and the confined-mode contracts', async () => {
     const { ctx } = await setupSandboxed()
     const schema = ctx.tools.schemas().find(item => item.name === 'pwsh')!
-    const properties = schema.parameters.properties as Record<string, { enum?: string[] }>
+    const properties = schema.parameters.properties as Record<string, { enum?: string[]; description?: string }>
     expect(properties['sandbox_permissions']?.enum).toEqual(['workspace-write', 'danger-full-access'])
-    expect(schema.description).toContain('approval prompt')
+    expect(properties['sandbox_permissions']?.description).toContain('asks the user for approval')
     expect(schema.description).toContain('ConstrainedLanguage')
     expect(schema.description).toContain('workspace-write stays in FullLanguage')
     expect(schema.description).toContain('In both confined modes, programs cannot open named pipes')
@@ -634,9 +682,25 @@ describe('sandbox escalation through ctx.approval', () => {
     expect(schema.parameters.properties).not.toHaveProperty('sandbox_permissions')
   })
 
+  it('rejects a forced background call before asking for an escalation', async () => {
+    const { ctx, bash } = await setupSandboxed(true, { enableRunInBackground: false })
+    const prompted = vi.fn()
+    ctx.on('approval/request', () => { prompted(); return Promise.resolve<ApprovalOutcome>('allowed-once') })
+    const result = await call(ctx, 'pwsh', { ...escalate, run_in_background: true }, sandboxAgent())
+    expect(text(result)).toContain('invalid arguments: run_in_background is disabled for this deployment (enableRunInBackground: false)')
+    expect(result).toMatchObject({ error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
+    expect(prompted).not.toHaveBeenCalled()
+    expect(bash.modes).toEqual([])
+  })
+
   it('rejects injected escalation without a sandbox and narrower escalation without prompting', async () => {
     const plain = await setup()
-    expect(text(await call(plain.ctx, 'pwsh', escalate))).toContain('not available in this composition')
+    const { command, description, sandbox_permissions, justification } = escalate
+    for (const args of [escalate, { command, description, sandbox_permissions }, { command, description, justification }]) {
+      const unavailable = await call(plain.ctx, 'pwsh', args)
+      expect(text(unavailable)).toContain('invalid arguments: sandbox_permissions and justification are not available in this composition')
+      expect(unavailable).toMatchObject({ error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
+    }
 
     const { ctx } = await setupSandboxed(true)
     const prompted = vi.fn()
@@ -685,8 +749,8 @@ describe('sandbox escalation through ctx.approval', () => {
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'))
     const agent = sandboxAgent(undefined, ctx)
     await ctx.agents.register(agent)
-    const foreground = await ctx.tools.execute({
-      callId: ToolCallId('sandbox-signal'),
+    const foreground = await executeToolFixture(ctx, {
+      callId: brandString<ToolCallId>('sandbox-signal'),
       name: 'pwsh',
       arguments: escalate,
       agent,
@@ -697,7 +761,7 @@ describe('sandbox escalation through ctx.approval', () => {
     // with the result, and the ordinal is never reused.
     expect(ctx.jobs.list(agent.id)).toEqual([])
     const background = await call(ctx, 'pwsh', { ...escalate, run_in_background: true }, agent)
-    expect(text(background)).toBe('started background job pwsh-2')
+    expect(text(background)).toBe(`started background job ${currentId(ctx, agent)}`)
     expect(bash.modes).toEqual(['workspace-write', 'workspace-write'])
   })
 
@@ -711,8 +775,8 @@ describe('sandbox escalation through ctx.approval', () => {
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('allowed-once'))
     const started = vi.spyOn(bash, 'execute')
 
-    const result = await ctx.tools.execute({
-      callId: ToolCallId('cancelled-escalation-background'),
+    const result = await executeToolFixture(ctx, {
+      callId: brandString<ToolCallId>('cancelled-escalation-background'),
       name: 'pwsh',
       arguments: { ...escalate, run_in_background: true },
       agent,
@@ -780,13 +844,13 @@ describe('background execution through the job runtime', () => {
     const started = await call(ctx, 'pwsh', { command: 'Write-Output bg-ok', description: 'test command', run_in_background: true })
     expect(started.isError).toBe(false)
     if (started.isError) throw new Error('expected background pwsh success')
-    expect(started.value).toEqual({ kind: 'background', jobId: 'pwsh-1' })
-    expect(text(started)).toBe('started background job pwsh-1')
+    expect(started.value).toEqual({ kind: 'background', jobId: currentId(ctx), cwd: process.cwd() })
+    expect(text(started)).toBe(`started background job ${currentId(ctx)}`)
 
-    const read = await callUntilText(ctx, 'job_output', { job_id: 'pwsh-1' }, 'bg-ok')
+    const read = await callUntilText(ctx, 'job_output', { job_id: currentId(ctx) }, 'bg-ok')
     expect(text(read)).toContain('bg-ok')
     // A later read reports the terminal outcome in the generic status line.
-    const final = await callUntilText(ctx, 'job_output', { job_id: 'pwsh-1' }, '[status: completed, exit code: 0]')
+    const final = await callUntilText(ctx, 'job_output', { job_id: currentId(ctx) }, '[status: completed, exit code: 0]')
     expect(final.isError).toBe(false)
   })
 
@@ -795,11 +859,11 @@ describe('background execution through the job runtime', () => {
     bash.backgroundHandler = () => killableProcess()
     await call(ctx, 'pwsh', { command: 'Start-Sleep -Seconds 60', description: 'test command', run_in_background: true })
 
-    const killed = await call(ctx, 'job_kill', { job_id: 'pwsh-1' })
-    expect(text(killed)).toBe('requested cancellation of job pwsh-1')
+    const killed = await call(ctx, 'job_kill', { job_id: currentId(ctx) })
+    expect(text(killed)).toBe(`requested cancellation of job ${currentId(ctx)}`)
     // The cancel reached the process handle; the task settles as killed with
     // the signal detail mapped by processOutcome.
-    const final = await call(ctx, 'job_output', { job_id: 'pwsh-1', wait: true })
+    const final = await call(ctx, 'job_output', { job_id: currentId(ctx), wait: true })
     expect(text(final)).toContain('[status: killed, signal: SIGTERM]')
   })
 
@@ -807,21 +871,24 @@ describe('background execution through the job runtime', () => {
     const { ctx } = await setupWithJobs()
     const agent = await registerFakeAgent(ctx, 'sess-owner')
     const started = await call(ctx, 'pwsh', { command: 'Start-Sleep -Seconds 60', description: 'test command', run_in_background: true }, agent)
-    expect(text(started)).toBe('started background job pwsh-1')
+    expect(text(started)).toBe(`started background job ${currentId(ctx, agent)}`)
 
-    const anon = await call(ctx, 'job_output', { job_id: 'pwsh-1' })
+    const anon = await call(ctx, 'job_output', { job_id: currentId(ctx, agent) })
     expect(anon.isError).toBe(true)
     expect(text(anon)).toMatch(/belongs to another session/)
 
-    const killed = await call(ctx, 'job_kill', { job_id: 'pwsh-1' }, agent)
+    const killed = await call(ctx, 'job_kill', { job_id: currentId(ctx, agent) }, agent)
     expect(killed.isError).toBe(false)
-    await call(ctx, 'job_output', { job_id: 'pwsh-1', wait: true }, agent) // await settlement — no orphan
+    await call(ctx, 'job_output', { job_id: currentId(ctx, agent), wait: true }, agent) // await settlement — no orphan
   })
 
   it('fails loud when the job runtime is not loaded', async () => {
     const { ctx } = await setup() // no LocalJobRegistry / ToolJobs
     const result = await call(ctx, 'pwsh', { command: 'Start-Sleep -Seconds 60', description: 'test command', run_in_background: true })
-    expect(result.isError).toBe(true)
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'ToolContextUnavailableError', code: 'TOOL_CONTEXT_UNAVAILABLE' } },
+    })
     expect(text(result)).toContain('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
   })
 
@@ -829,8 +896,8 @@ describe('background execution through the job runtime', () => {
     const { ctx, bash } = await setupWithJobs()
     const controller = new AbortController()
     controller.abort()
-    const result = await ctx.tools.execute({
-      callId: ToolCallId('call-pre-aborted'),
+    const result = await executeToolFixture(ctx, {
+      callId: brandString<ToolCallId>('call-pre-aborted'),
       name: 'pwsh',
       arguments: { command: 'Start-Sleep -Seconds 60', description: 'test command', run_in_background: true },
       signal: controller.signal,
@@ -846,8 +913,10 @@ describe('background execution through the job runtime', () => {
   it('never spawns the process when tasks.start preflight throws (no orphan, by construction)', async () => {
     // With no job controller, preflight fails before the executor can spawn.
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(LocalJobRegistry)
     await ctx.plugin(BashEnvPlugin)
     await ctx.plugin(FakeBash)
@@ -861,18 +930,17 @@ describe('background execution through the job runtime', () => {
     expect(bash.startCalls).toBe(0)
   })
 
-  it('enableRunInBackground: false removes the parameter and flips the description', async () => {
+  it('enableRunInBackground: false removes the parameter and rejects the call', async () => {
     const { ctx } = await setup({ enableRunInBackground: false })
     const schema = ctx.tools.schemas().find(s => s.name === 'pwsh')!
     expect(Object.keys(schema.parameters.properties as Record<string, unknown>))
-      .toEqual(['command', 'description', 'timeoutMs', 'workdir'])
-    expect(schema.description).toContain('Background execution is not available')
+      .toEqual(['description', 'command', 'timeoutMs', 'workdir'])
     expect(schema.description).not.toContain('run_in_background')
 
     // Schema omission is advertising; execution must also enforce the opt-out.
     const forced = await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'test command', run_in_background: true })
-    expect(forced.isError).toBe(true)
-    expect(text(forced)).toContain('run_in_background is disabled for this deployment')
+    expect(forced).toMatchObject({ isError: true, error: { info: { name: 'ToolArgsError', code: 'INVALID_ARGS' } } })
+    expect(text(forced)).toContain('invalid arguments: run_in_background is disabled for this deployment (enableRunInBackground: false)')
     const foreground = await call(ctx, 'pwsh', { command: 'Write-Output hi', description: 'test command' })
     expect(foreground.isError).toBe(false)
   })
@@ -881,8 +949,11 @@ describe('background execution through the job runtime', () => {
     // Bypasses the schemastery defaults on purpose: apply() must stand on its
     // own `?? true` fallback when embedded programmatically without the schema.
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     await ctx.plugin(BashEnvPlugin)
@@ -892,15 +963,18 @@ describe('background execution through the job runtime', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     const schema = ctx.tools.schemas()[0]!
     expect(schema.parameters.properties).toHaveProperty('run_in_background')
-    expect(schema.description).toContain('job_output')
+    expect(JSON.stringify(schema.parameters)).toContain('job_output')
   })
 })
 
 describe('the background surface follows the job registry', () => {
   async function bare() {
     const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(BashEnvPlugin)
     await ctx.plugin(FakeBash)
@@ -919,7 +993,7 @@ describe('the background surface follows the job registry', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(backgroundAdvertised(ctx)).toBe(true)
     const started = await call(ctx, 'pwsh', { command: 'Write-Output swapped', description: 'test command', run_in_background: true })
-    expect(text(started)).toBe('started background job pwsh-1')
+    expect(text(started)).toBe(`started background job ${currentId(ctx)}`)
 
     // The registry leaves; the foreground-only variant returns in its place,
     // and the tool never disappears in between.
@@ -1189,5 +1263,89 @@ describe('processOutcome', () => {
     const runnerFailed = processOutcome(settled({ exitCode: 1, sandbox: { mode: 'read-only', denied: false, runnerFailed: true } }))
     expect(runnerFailed.detail).toContain('the sandbox runner itself failed under read-only mode')
     expect(processOutcome(settled({ sandbox: { mode: 'read-only', denied: false } })).detail).toBe('exit code: 0')
+  })
+})
+
+
+describe('resolved launch directory metadata', () => {
+  it.each([
+    { background: false, workdir: undefined },
+    { background: false, workdir: 'relative' },
+    { background: true, workdir: undefined },
+    { background: true, workdir: 'relative' },
+  ])('records the executor directory for background=$background and workdir=$workdir', async ({ background, workdir }) => {
+    const { ctx, bash } = await setupWithJobs()
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-pwsh-cwd-meta-'))
+    bash.handler = () => runResult('metadata-ok')
+    bash.backgroundHandler = () => fakeProcess('metadata-ok')
+    const current = join(directory, 'current')
+    const ensure = vi.spyOn(ctx.workingDirectory, 'ensure').mockResolvedValue(current)
+    const resolve = ctx.shell.resolve.bind(ctx.shell)
+    const resolving = vi.spyOn(ctx.shell, 'resolve').mockImplementation(request => ({ ...resolve(request), workdir: directory }))
+    const launch = vi.spyOn(ctx.shell, 'execute')
+    try {
+      const owner = await registerFakeAgent(ctx, 'directory-metadata')
+      const result = await call(ctx, 'pwsh', {
+        command: "[Console]::Out.Write('metadata-ok')", description: 'Read launch metadata', run_in_background: background,
+        ...workdir === undefined ? {} : { workdir },
+      }, owner)
+      expect(result.isError).toBe(false)
+      if (result.isError) throw new Error('expected shell success')
+      expect(result.value).toMatchObject({ cwd: directory })
+      expect(result.meta).toEqual({ cwd: directory })
+      expect(resolving).toHaveBeenCalledOnce()
+      expect(resolving).toHaveBeenCalledWith(expect.objectContaining({ workdir: workdir === undefined ? current : join(current, workdir) }))
+      expect(launch).toHaveBeenCalledWith(expect.objectContaining({ workdir: directory }))
+      expect(text(result)).toBe(background ? `started background job ${currentId(ctx, owner)}` : 'metadata-ok')
+      if (background) await call(ctx, 'job_output', { job_id: currentId(ctx, owner), wait: true }, owner)
+    } finally {
+      ensure.mockRestore()
+      resolving.mockRestore()
+      launch.mockRestore()
+      await ctx.fiber.dispose()
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('launch failures without a job registry', () => {
+  it('classifies a platform spawn error and keeps this call\'s cancellation', async () => {
+    const { ctx } = await setup()
+    const missing = vi.spyOn(ctx.shell, 'execute').mockRejectedValueOnce(Object.assign(new Error('spawn pwsh ENOENT'), { code: 'ENOENT' }))
+    expect(await call(ctx, 'pwsh', { command: 'Write-Output ok', description: 'd' })).toMatchObject({
+      isError: true,
+      error: { info: { name: 'SubprocessError', code: 'SUBPROCESS_SPAWN_NOT_FOUND' } },
+    })
+    missing.mockRestore()
+
+    const controller = new AbortController()
+    const reason = new Error('caller stopped')
+    vi.spyOn(ctx.shell, 'execute').mockImplementationOnce(() => {
+      controller.abort(reason)
+      return Promise.reject(reason)
+    })
+    const aborted = await executeToolFixture(ctx, {
+      signal: controller.signal,
+      callId: brandString<ToolCallId>('launch-aborted'),
+      name: 'pwsh',
+      arguments: { command: 'Write-Output ok', description: 'd' },
+    })
+    expect(aborted).toMatchObject({ isError: true, error: { info: { name: 'AbortError', code: TOOL_ABORTED } } })
+  })
+
+  it('classifies a spawn error that settles after this call was cancelled', async () => {
+    const { ctx } = await setup()
+    const controller = new AbortController()
+    vi.spyOn(ctx.shell, 'execute').mockImplementationOnce(() => {
+      controller.abort(new Error('caller stopped'))
+      return Promise.reject(Object.assign(new Error('spawn pwsh ENOENT'), { code: 'ENOENT' }))
+    })
+    const result = await executeToolFixture(ctx, {
+      signal: controller.signal,
+      callId: brandString<ToolCallId>('launch-aborted-spawn-error'),
+      name: 'pwsh',
+      arguments: { command: 'Write-Output ok', description: 'd' },
+    })
+    expect(result).toMatchObject({ isError: true, error: { info: { name: 'SubprocessError', code: 'SUBPROCESS_SPAWN_NOT_FOUND' } } })
   })
 })

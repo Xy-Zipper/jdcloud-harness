@@ -44,7 +44,9 @@ export type FileTypeIconProps = IconProps & (
   }
 )
 
-const EXTENSION_TYPES: Readonly<Record<string, ClassifiedFileType>> = {
+// Maps, not objects: a basename or extension equal to an `Object.prototype` key
+// (`constructor`, `__proto__`) must miss instead of resolving the inherited member.
+const EXTENSION_TYPES: ReadonlyMap<string, ClassifiedFileType> = new Map(Object.entries({
   scss: 'code',
   sass: 'code',
   less: 'code',
@@ -101,13 +103,13 @@ const EXTENSION_TYPES: Readonly<Record<string, ClassifiedFileType>> = {
   ots: 'excel',
   fods: 'excel',
   numbers: 'excel',
-}
+}))
 
-const NAME_TYPES: Readonly<Record<string, ClassifiedFileType>> = {
+const NAME_TYPES: ReadonlyMap<string, ClassifiedFileType> = new Map(Object.entries({
   changelog: 'markdown',
   contributing: 'markdown',
   readme: 'markdown',
-}
+}))
 
 function basename(path: string): string {
   return path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
@@ -140,8 +142,8 @@ export function classifyFileType(
   const name = basename(path).toLowerCase()
   const extension = fileExtension(name).toLowerCase()
   return classifyCodeFileType(name, extension, context)
-    ?? NAME_TYPES[name]
-    ?? EXTENSION_TYPES[extension]
+    ?? NAME_TYPES.get(name)
+    ?? EXTENSION_TYPES.get(extension)
     ?? 'other'
 }
 
@@ -197,9 +199,10 @@ function glyph(type: TraditionalFileType, size: number, className: string | unde
   switch (type) {
     case 'code':
       return (
-        <FileGlyph size={size} className={className} markTransform={FILE_MARK_TRANSFORM}>
-          <path d="M8.61 16.3601L11.76 18.3901V20.1401L7 17.0601V15.6601L11.76 12.5801V14.3301L8.61 16.3601Z" fill="currentColor" />
-          <path d="M16.1918 14.3301V12.5801L20.9518 15.6601V17.0601L16.1918 20.1401V18.3901L19.3418 16.3601L16.1918 14.3301Z" fill="currentColor" />
+        <FileGlyph size={size} className={className}>
+          <path d="M10.0053 13.126L7.0236 16.3788C6.96052 16.4476 6.96052 16.5532 7.0236 16.622L10.0053 19.8748" stroke="currentColor" strokeWidth="1.35" />
+          <path d="M17.9941 13.126L20.9759 16.3788C21.039 16.4476 21.039 16.5532 20.9759 16.622L17.9941 19.8748" stroke="currentColor" strokeWidth="1.35" />
+          <path d="M15.2652 12.957L12.7344 20.0433" stroke="currentColor" strokeWidth="1.35" />
         </FileGlyph>
       )
     case 'excel': return <SpreadsheetGlyph size={size} className={className} />

@@ -20,7 +20,7 @@
     - img "Added": +
     - text: Review the narrow layout Pending
 - button "Inspect"
-- button "Create reminder Review the build and open the demo" [expanded]
+- button "Create automation task Review the build and open the demo" [expanded]
 - list:
   - listitem:
     - text: Review the build and open the demo
@@ -30,6 +30,84 @@
     - definition: Every 1 h
     - term: Status
     - definition: Scheduled
+- button "Inspect"
+- button "Update automation task Review the build and open the demo" [expanded]
+- list:
+  - listitem:
+    - text: Review the build and open the demo
+    - term: Scheduled for
+    - definition: Sep 11, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Every day at {{clock}} (Asia/Shanghai)
+    - term: Status
+    - definition: Scheduled
+- button "Inspect"
+- button "Create automation task Weekly release review" [expanded]
+- list:
+  - listitem:
+    - text: Weekly release review
+    - term: Scheduled for
+    - definition: Sep 14, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Custom
+    - term: Status
+    - definition: Enabled
+- button "Inspect"
+- button "View automation task Weekly release review" [expanded]
+- list:
+  - listitem:
+    - text: Weekly release review
+    - term: Scheduled for
+    - definition: Sep 14, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Custom
+    - term: Status
+    - definition: Enabled
+- button "Inspect"
+- button "Edit automation task Weekly release review" [expanded]
+- list:
+  - listitem:
+    - text: Weekly release review
+    - term: Scheduled for
+    - definition: Sep 14, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Custom
+    - term: Status
+    - definition: Paused
+- button "Inspect"
+- button "List automation tasks 3 automation tasks" [expanded]
+- list:
+  - listitem:
+    - text: Review the build and open the demo
+    - term: Scheduled for
+    - definition: Sep 11, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Every day at {{clock}} (Asia/Shanghai)
+    - term: Status
+    - definition: Enabled
+  - listitem:
+    - text: Weekly release review
+    - term: Scheduled for
+    - definition: Sep 14, 2099, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Custom
+    - term: Status
+    - definition: Paused
+  - listitem:
+    - text: Share the demo link
+    - term: Scheduled for
+    - definition: Sep 10, 2026, {{clock}} GMT+8
+    - term: Repeat
+    - definition: Custom
+    - term: Status
+    - definition: Ended
+- button "Inspect"
+- button "Edit automation task details-task" [expanded]
+- list:
+  - listitem:
+    - text: details-task
+    - term: Status
+    - definition: Deleted
 - button "Inspect"
 - button "View goal Ship compact tool cards" [expanded]
 - list:
@@ -49,7 +127,7 @@
     - term: Rounds
     - definition: 0 / 8
 - button "Inspect"
-- button "List reminders 4 reminders" [expanded]
+- button "List automation tasks 4 automation tasks" [expanded]
 - list:
   - listitem:
     - text: Review the build and open the demo
@@ -84,7 +162,7 @@
     - term: Status
     - definition: Scheduled
 - button "Inspect"
-- button "Delete reminder details-reminder" [expanded]
+- button "Delete automation task details-reminder" [expanded]
 - list:
   - listitem:
     - text: details-reminder
@@ -244,7 +322,7 @@
         - listitem:
           - paragraph: terminal_list
 - button "Inspect"
-- button "Run Ralph 已检查详情区域的换行和工具名称显示。" [expanded]
+- button "Run ralph loop 已检查详情区域的换行和工具名称显示。" [expanded]
 - text: Recorded result
 - list:
   - listitem:
@@ -383,35 +461,25 @@
     - text: deepseek/deepseek-reasoner
     - paragraph: DeepSeek Reasoner
 - button "Inspect"
-- button "Delegate task 检查工具卡片布局，并列出三个最值得改进的地方。" [expanded]
+- button "Create subagent 检查工具卡片布局，并列出三个最值得改进的地方。" [expanded]
 - text: Recorded result
 - list:
   - listitem:
-    - text: 检查工具卡片布局，并列出三个最值得改进的地方。 Started
-    - term: Agent ID
+    - text: Started
+    - term: ID
     - definition: agent-demo-review
+    - group:
+      - text: Task
+      - list:
+        - listitem:
+          - paragraph: 检查工具卡片布局，并列出三个最值得改进的地方。
 - button "Inspect"
-- button "List agents 3 agents" [expanded]
+- button "List subagents 3 agents" [expanded]
 - text: Recorded result
 - list:
-  - listitem:
-    - text: 检查工具卡片布局 Running agent-demo-review
-    - term: Parent
-    - definition: todo-diff-demo
-    - term: Depth
-    - definition: "1"
-  - listitem:
-    - text: 整理工具展示清单 Idle agent-demo-docs
-    - term: Parent
-    - definition: todo-diff-demo
-    - term: Depth
-    - definition: "1"
-  - listitem:
-    - text: 检查状态图标 Ready agent-demo-icons
-    - term: Parent
-    - definition: agent-demo-review
-    - term: Depth
-    - definition: "2"
+  - listitem: 检查工具卡片布局 Running agent-demo-review
+  - listitem: 整理工具展示清单 Idle agent-demo-docs
+  - listitem: 检查状态图标 Ready agent-demo-icons
 - button "Inspect"
 - button "Send message agent-demo-review" [expanded]
 - text: Recorded result
@@ -574,7 +642,7 @@
     - term: Context
     - definition: fresh
 - button "Inspect"
-- button "List agents 3 agents" [expanded]
+- button "List subagents 3 agents" [expanded]
 - text: Recorded result
 - list:
   - listitem:
@@ -584,8 +652,7 @@
     - term: Role
     - definition: lead
   - listitem:
-    - text: ui-review Running
-    - paragraph: 检查工具卡片的可读性
+    - text: 检查工具卡片的可读性 Running ui-review
     - term: ID
     - definition: agent-demo-review
     - term: Role
@@ -595,8 +662,7 @@
     - term: Context
     - definition: fresh
   - listitem:
-    - text: docs Inactive
-    - paragraph: 整理工具清单
+    - text: 整理工具清单 Inactive docs
     - term: ID
     - definition: agent-demo-docs
     - term: Role
@@ -661,7 +727,7 @@
     - definition: "2"
     - term: Ready
     - definition: "Yes"
-    - term: Owner
+    - term: ownerName
     - definition: ui-review
     - group:
       - text: Write scopes
@@ -681,7 +747,7 @@
     - definition: "2"
     - term: Ready
     - definition: "Yes"
-    - term: Owner
+    - term: ownerName
     - definition: ui-review
     - group:
       - text: Write scopes
@@ -703,10 +769,10 @@
         - listitem:
           - paragraph: task-demo-1
 - button "Inspect"
-- button "Wait for teammates Teammate activity" [expanded]
+- button "Wait ended" [expanded]
 - text: Recorded result
 - list:
-  - listitem: Teammate activity Change detected
+  - listitem: Wait result Wait ended
 - button "Inspect"
 - button "Interrupt agent ui-review" [expanded]
 - text: Recorded result

@@ -49,7 +49,7 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 
 ### 获得的能力
 
-该 layer 把 Connection row 替换为 `browserAuthentication: false`、`browserSession: true` 与 `browserSessionTransport: bearer`。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会用应用内目录浏览器替换自适应操作系统选择器；选择器打开后位于已登录用户的 Workspace 根目录，只列出 Host 校验通过的后代目录，并允许在其中创建子文件夹。它还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。
+该 layer 禁用 `authentication-token`，并把 `@deepseek-ai/dsh-client-connection/browser-session` 安装为 Connection 认证 Provider。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会用应用内目录浏览器替换自适应操作系统选择器；选择器打开后位于已登录用户的 Workspace 根目录，只列出 Host 校验通过的后代目录，并允许在其中创建子文件夹。它还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。
 
 -----
 
@@ -79,7 +79,7 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 <a id="model-experience"></a>
 ## 模型体验
 
-通过 `@deepseek-ai/dsh-tool-ontology` 间接影响，该包负责 Ontology 指引、九个工具 schema 与已校验 Runtime 结果。
+通过 `@deepseek-ai/dsh-tool-ontology` 间接影响，该包负责 Ontology 指引、十三个工具 schema 与已校验 Runtime 结果。
 
 #### KV Cache 影响
 

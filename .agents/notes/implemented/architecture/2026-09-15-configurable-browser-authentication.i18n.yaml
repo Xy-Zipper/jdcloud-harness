@@ -1,6 +1,22 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-15-configurable-browser-authentication.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-15-configurable-browser-authentication.md
-2026-09-15-configurable-browser-authentication.md: 7f94044b4e9e747d1458753369fff6a4876e2e7a
-2026-09-15-configurable-browser-authentication.zh.md: 48618693a7080349207fe23057f1aa93fafe8f24
+/agent-note-configurable-browser-authentication:
+  en: c1f49c37e22d3266
+  zh: c04b7f8a08b2b027
+/agent-note-configurable-browser-authentication/problem:
+  en: f5f1f2510d03f0e1
+  zh: 063980b28f9647c2
+/agent-note-configurable-browser-authentication/decision:
+  en: 27ce75894e832b9b
+  zh: 8ff07b0bc97a57eb
+/agent-note-configurable-browser-authentication/verification:
+  en: d3a9a2a5d53c666d
+  zh: b7bd633be9cc2271
+/agent-note-configurable-browser-authentication/alternatives-considered:
+  en: a74672d0f64f6f68
+  zh: c55f860a83ffdd55
+/agent-note-configurable-browser-authentication/consequences:
+  en: ca3a788f52890891
+  zh: b9edba226ed72d55

@@ -33,6 +33,8 @@ kind: "package-reference"
 
 ### 工具卡片显示什么
 
+准备中的调用显示为带普通 Cordis 图标与标题的不可展开单行。此阶段不派生包身份、不读取其当前清单，也不挂载其业务视图；这些操作需要 start/result props。
+
 `cordis_define` 卡片是一份记录：模型写下的 name 与 purpose、它写的源码，以及该定义是否在跑——没有开关、没有审批，只有一句指向面板的指引。`cordis_run` 卡片显示模式、插件标识、包标识与运行标识、结果，并在包注册了业务视图时经 `tool.view.cordis` slot 提供它。define、run、stop 与 undefine 卡片在失败或中断时继续保留普通业务图标，包括调用回执成功后发生的关联激活失败。所有卡片都渲染会话记录下的 call 与 result，因此回放显示同一张卡。
 
 ### 需要规划的边界
@@ -122,5 +124,3 @@ kind: "package-reference"
 无。
 
 </details>
-
-**运行时不变式：** 不发布伴生入口。插件只注册一个 keyed toolview，其资源释放已由 HMR 安全性测试证明。本包拥有的唯一可变关系，即 per-definition run-state 观察量，只存在于浏览器进程中，Host 不变式服务无法触及；Node 端不发出任何 Cordis 事件，也不持有任何跨插件状态。

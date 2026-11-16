@@ -1,21 +1,28 @@
 /** MCP admission, token retention, recovery files, and PTC forwarding together. */
+import { executeToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import * as PtcToolExecutor from '@deepseek-ai/dsh-tool-executor-ptc'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import AttachmentStore, { AttachmentId } from '@deepseek-ai/dsh-attachment'
+import AttachmentStore from '@deepseek-ai/dsh-attachment'
+import type { AttachmentId } from '@deepseek-ai/dsh-attachment/types'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ImageAttachmentRef, SaveImageAttachment, StoredImageAttachment } from '@deepseek-ai/dsh-attachment'
 import FileSystem from '@deepseek-ai/dsh-fs-local'
-import { LlmAdapter, LlmRuntime, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, LlmRuntime, type ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk, ImageBlock, LlmImageRequestPricing, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import { deepSeekImageTokens } from '@deepseek-ai/dsh-llm-deepseek'
 import { estimateContent } from '@deepseek-ai/dsh-token-meter/estimate'
 import { createMcpToolDefinition } from '@deepseek-ai/dsh-mcp-client'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, type SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import LocalSpillStore from '@deepseek-ai/dsh-spill-local'
 import { PtcRuntime } from '@deepseek-ai/dsh-ptc-runtime'
 import type { PtcRunRequest, PtcRunSpec, PtcRunResult } from '@deepseek-ai/dsh-ptc-runtime'
@@ -35,7 +42,7 @@ class TestAttachments extends AttachmentStore {
   validateImage(): Promise<void> { return Promise.resolve() }
   async saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef> {
     const ref: ImageAttachmentRef = {
-      attachmentId: AttachmentId(`sha256:${String(++this.ordinal).padStart(64, '0')}`),
+      attachmentId: brandString<AttachmentId>(`sha256:${String(++this.ordinal).padStart(64, '0')}`),
       mediaType: input.mediaType, bytes: input.data.byteLength, width: 1, height: 1,
     }
     await writeFile(this.imageHostPath(ref), input.data, { flag: 'wx' })
@@ -61,14 +68,16 @@ class VisionAdapter extends LlmAdapter {
   stream(_options: GenerateOptions): AsyncIterable<StreamChunk> { throw new Error('fixture does not stream') }
 }
 
-async function setup(content: JsonValue[], maxInlineTokens: number) {
+async function setup(content: JsonValue[], maxInlineTokens: number, mode: 'native' | 'ptc' = 'native') {
   const root = await mkdtemp(join(tmpdir(), 'dsh-multimodal-spill-'))
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx, root)
   onTestFinished(async () => {
     try { await ctx.fiber.dispose() } finally { await rm(root, { recursive: true, force: true }) }
   })
   await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime, { mode: 'both' })
+  await ctx.plugin(ToolRuntime)
+  await ctx.plugin(mode === 'ptc' ? PtcToolExecutor : NativeToolExecutor)
   const fsFiber = await ctx.plugin(FileSystem, { cwd: root })
   await ctx.plugin(TestAttachments, root)
   await ctx.plugin(LocalSpillStore, { root: join(root, 'spill'), cleanupPeriodDays: 0 })
@@ -79,10 +88,10 @@ async function setup(content: JsonValue[], maxInlineTokens: number) {
     name: 'inspect', rawName: 'inspect', description: 'Return text and screenshots',
     inputSchema: { type: 'object' }, call: async () => ({ content }),
   }))
-  const session = Session.create(SessionId('mixed-spill'))
-  const agent = { session, options: { provider: 'vision', model: 'vision' } } as Agent
-  const execute = (name = 'inspect') => ctx.tools.execute({
-    signal: new AbortController().signal, callId: ToolCallId('mixed-call'), name,
+  const session = Session.create(brandString<SessionId>('mixed-spill'))
+  const agent = { ctx, session, options: { provider: 'vision', model: 'vision' } } as Agent
+  const execute = (name = 'inspect') => executeModelToolFixture(ctx, {
+    signal: new AbortController().signal, callId: brandString<ToolCallId>('mixed-call'), name,
     arguments: name === 'run_code' ? { code: 'return await tools.inspect({})', description: 'Inspect a window' } : {}, agent,
   })
   return { ctx, execute, session, fsFiber }
@@ -161,8 +170,8 @@ describe('multimodal spill', () => {
       async execute() { return [{ type: 'image', attachment }] },
     }))
     const warning = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
-    const result = await ctx.tools.execute({ signal: new AbortController().signal,
-      callId: ToolCallId('offline'), name: 'offline_image', arguments: {} })
+    const result = await executeToolFixture(ctx, { signal: new AbortController().signal,
+      callId: brandString<ToolCallId>('offline'), name: 'offline_image', arguments: {} })
     expect(result.content).toEqual([{ type: 'image', attachment }])
     expect(warning).toHaveBeenCalledWith(expect.stringContaining('no image token calculator'))
   })
@@ -178,7 +187,7 @@ describe('multimodal spill', () => {
 
   it.each([false, true])('forwards omitted-image recovery only for successful PTC results (failure: %s)', async (failure) => {
     const original = [text('A'.repeat(4000)), image(), text('C'.repeat(4000))]
-    const { ctx, execute, session } = await setup(original, 200)
+    const { ctx, execute, session } = await setup(original, 200, 'ptc')
     if (failure) {
       const attachment = await ctx.attachments.saveImage({ data: PNG, mediaType: 'image/png' })
       ctx.on('tools/execute', async (exec, next) => {
@@ -199,7 +208,7 @@ describe('multimodal spill', () => {
         if (binding === undefined) throw new Error('missing inspect binding')
         if (failure) await expect(binding({})).rejects.toThrow('capture failed')
         else expect(await binding({})).toEqual({ content: original })
-        return { logs: [], value: 'complete' }
+        return { output: [], value: 'complete' }
       }
     }
     await ctx.plugin(BindingRuntime)

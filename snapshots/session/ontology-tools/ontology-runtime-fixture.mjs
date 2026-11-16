@@ -5,6 +5,10 @@ export const name = 'ontology-runtime-fixture'
 
 /** Provide bounded Project and Action-preview responses without network credentials. */
 export function apply(ctx) {
+  // Forward slashes identify the same directory on Windows and keep quoted runtime paths portable.
+  ctx.on('agent/created', ({ agent }) => {
+    agent.session.append('working-directory/change', { cwd: process.cwd().replaceAll('\\', '/') })
+  })
   const draft = {
     dataSources: [{ id: 'source-orders', label: 'Orders', description: '', kind: 'mock', enabled: true, readOnly: false }], objectTypes: [], linkTypes: [], actionTypes: [],
   }

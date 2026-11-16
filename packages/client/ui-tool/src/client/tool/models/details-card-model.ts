@@ -3,7 +3,7 @@ import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallBlock } from './tool-call-model.ts'
 import type { ToolDetailsModel } from '../components/ToolDetails.tsx'
 import { parsedToolCall, singleResultText } from './raw-tool-call.ts'
-import { controlDetails } from './control-details-model.ts'
+import { controlDetails, subagentDetails } from './control-details-model.ts'
 import { inspectionDetails } from './inspection-details-model.ts'
 import { detailJson, detailRecord, nonempty } from './detail-model-shared.ts'
 
@@ -66,6 +66,12 @@ function goalDetail(value: unknown, t: Translate): ToolDetailsModel | null {
   return { items: [{ title: goal.objective, fields }] }
 }
 
+/** ISO-weekday keys, Monday first: a stored weekly rule names days 1 through 7. */
+const WEEKDAY_KEYS = [
+  'detail.weekday.1', 'detail.weekday.2', 'detail.weekday.3', 'detail.weekday.4',
+  'detail.weekday.5', 'detail.weekday.6', 'detail.weekday.7',
+] as const
+
 function interval(seconds: number, t: Translate): string {
   if (seconds % 86400 === 0) return t('detail.days', { count: seconds / 86400 })
   if (seconds % 3600 === 0) return t('detail.hours', { count: seconds / 3600 })
@@ -73,14 +79,45 @@ function interval(seconds: number, t: Translate): string {
   return t('detail.seconds', { count: seconds })
 }
 
+/** A stored wall clock without its zero seconds, the figure the schedule surfaces state. */
+function shortTime(time: string): string {
+  return time.replace(/:00\.000$/, '').replace(/\.000$/, '')
+}
+
+/** Localized weekday list of a stored weekly rule, or undefined when the set is empty or out of range. */
+function weekdayText(days: unknown, t: Translate): string | undefined {
+  if (!Array.isArray(days) || days.length === 0) return undefined
+  const labels: string[] = []
+  for (const day of days) {
+    if (typeof day !== 'number' || !Number.isInteger(day)) return undefined
+    const key = WEEKDAY_KEYS[day - 1]
+    if (key === undefined) return undefined
+    labels.push(t(key))
+  }
+  // The reader's own enumeration separator, the one the Web detail states.
+  return labels.join(t('detail.weekday.join'))
+}
+
 function scheduleItem(value: unknown, t: Translate, locale: string): DetailItem | null {
-  if (!detailRecord(value) || !nonempty(value.id) || !nonempty(value.prompt)
-    || typeof value.scheduledAt !== 'string' || value.deliveryMode !== 'session-local'
-    || (value.state !== 'scheduled' && value.state !== 'overdue')) return null
+  if (!detailRecord(value) || !nonempty(value.id) || typeof value.scheduledAt !== 'string') return null
+  const title = nonempty(value.title) ? value.title : value.prompt
+  if (!nonempty(title)) return null
+  const state = value.status ?? value.state
+  if (value.status === undefined) {
+    if (!nonempty(value.prompt) || (value.deliveryMode !== 'host' && value.deliveryMode !== 'session-local')
+      || (state !== 'scheduled' && state !== 'overdue')) return null
+  } else if (!nonempty(value.title) || (state !== 'active' && state !== 'paused' && state !== 'ended')) return null
   const date = new Date(value.scheduledAt)
   if (!Number.isFinite(date.getTime()) || date.toISOString() !== value.scheduledAt) return null
   let frequency: string
   switch (value.kind) {
+    case 'rrule': {
+      if (typeof value.rrule !== 'string') return null
+      const rule = value.rrule.split('\n').find(line => line.startsWith('RRULE:'))?.slice('RRULE:'.length)
+      if (!nonempty(rule)) return null
+      frequency = t('detail.schedule.custom')
+      break
+    }
     case 'at': frequency = t('detail.schedule.once'); break
     case 'after':
       if (!count(value.afterSeconds) || value.afterSeconds === 0) return null
@@ -90,17 +127,40 @@ function scheduleItem(value: unknown, t: Translate, locale: string): DetailItem 
       if (!count(value.everySeconds) || value.everySeconds === 0) return null
       frequency = t('detail.schedule.every', { interval: interval(value.everySeconds, t) })
       break
+    case 'daily':
+      if (!nonempty(value.time) || !nonempty(value.timeZone)) return null
+      frequency = t('detail.schedule.daily', { time: shortTime(value.time), zone: value.timeZone })
+      break
+    case 'weekly': {
+      const days = weekdayText(value.weekdays, t)
+      if (!nonempty(value.time) || !nonempty(value.timeZone) || days === undefined) return null
+      frequency = t('detail.schedule.weekly', { days, time: shortTime(value.time), zone: value.timeZone })
+      break
+    }
+    case 'cron':
+      if (!nonempty(value.expression) || !nonempty(value.timeZone)) return null
+      frequency = t('detail.schedule.cron', { expression: value.expression, zone: value.timeZone })
+      break
     default: return null
   }
   const dateText = formatDate(date, locale, value.scheduledAt)
   return {
-    title: value.prompt,
+    title,
     fields: [
       { label: t('detail.schedule.when'), value: dateText },
       { label: t('detail.schedule.frequency'), value: frequency },
-      { label: t('detail.state'), value: t(`detail.schedule.${value.state}`) },
+      { label: t('detail.state'), value: t(`detail.schedule.${state}`) },
     ],
   }
+}
+
+function single(item: DetailItem | null): ToolDetailsModel | null {
+  return item === null ? null : { items: [item] }
+}
+
+function deletedTask(value: unknown, t: Translate): ToolDetailsModel | null {
+  if (!detailRecord(value) || !nonempty(value.id) || value.deleted !== true) return null
+  return { items: [{ title: value.id, fields: [{ label: t('detail.state'), value: t('detail.schedule.deleted') }] }] }
 }
 
 /**
@@ -115,6 +175,9 @@ export function detailsCardModel(block: ToolCallBlock, t: Translate, locale: str
   const call = parsedToolCall(block)
   if (call === null) return null
   const text = singleResultText(block)
+  if (call.name === 'subagent' || call.name === 'subagent_fork') {
+    return subagentDetails(call.args, text, block.meta, t)
+  }
   if (text === undefined) return null
   const value = detailJson(text)
   const details = controlDetails(call.name, call.args, text, value, t) ?? inspectionDetails(call.name, call.args, text, value, t, locale)
@@ -124,23 +187,23 @@ export function detailsCardModel(block: ToolCallBlock, t: Translate, locale: str
     case 'create_goal':
     case 'get_goal':
     case 'update_goal': return goalDetail(value, t)
-    case 'schedule_create': {
-      const item = scheduleItem(value, t, locale)
-      return item === null ? null : { items: [item] }
-    }
+    // Retain readers for results in stored Sessions.
+    case 'schedule_create':
+    case 'schedule_update':
+    case 'schedule_view': return single(scheduleItem(value, t, locale))
+    case 'schedule_edit': return deletedTask(value, t) ?? single(scheduleItem(value, t, locale))
     case 'schedule_list': {
-      if (!Array.isArray(value)) return null
+      const entries = Array.isArray(value) ? value : detailRecord(value) ? value.items : undefined
+      if (!Array.isArray(entries)) return null
       const items: DetailItem[] = []
-      for (const entry of value) {
+      for (const entry of entries) {
         const item = scheduleItem(entry, t, locale)
         if (item === null) return null
         items.push(item)
       }
       return { items, summary: t('detail.schedule.count', { count: items.length }), empty: t('detail.schedule.empty') }
     }
-    case 'schedule_delete':
-      if (!detailRecord(value) || !nonempty(value.id) || value.deleted !== true) return null
-      return { items: [{ title: value.id, fields: [{ label: t('detail.state'), value: t('detail.schedule.deleted') }] }] }
+    case 'schedule_delete': return deletedTask(value, t)
     default: return null
   }
 }

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 /** Browser type, Slot, locale, and HMR disposal through the real registries. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ShortcutRegistry } from '@deepseek-ai/dsh-client-shortcuts/src/client/registry.ts'
+import type { ShortcutCommand, ShortcutPlatform } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { Context } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { SidebarRightTabRegistry } from '@deepseek-ai/dsh-client-ui-sidebar-right/src/client/tab-registry.ts'
@@ -9,7 +11,7 @@ import { BrowserTitle } from '../src/client/view/BrowserTitle.tsx'
 import type { BrowserInjected } from '../src/client/browser/BrowserController.ts'
 import { BROWSER_ID, BROWSER_KIND } from '../src/client/definition.tsx'
 import { apply, inject } from '../src/client/index.ts'
-import { en, zh } from '../src/client/locales.ts'
+import { en, ja, zh, es, fr, de, ru, pt } from '../src/client/locales.ts'
 import { createBrowserStore } from '../src/client/browser/store.ts'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-dockkit'
 import type { DesktopBrowserBridge, DesktopBrowserLeaseId } from '../src/types.ts'
@@ -30,7 +32,7 @@ interface Recorded {
   component: unknown
 }
 
-async function boot() {
+async function boot(platform: ShortcutPlatform = 'macos', runtime: 'desktop' | 'web' = 'desktop') {
   const ctx = new Context()
   contexts.push(ctx)
   const tabs = new SidebarRightTabRegistry(ctx)
@@ -51,15 +53,20 @@ async function boot() {
       return () => { dictionaries.delete(namespace) }
     }),
   }
-  ctx.provide('sidebarRightTabs', tabs as never)
   const openTabs = createSnapshotStore<readonly { sessionId: string; tabId: TabId }[]>([])
-  ctx.provide('sidebarRight', { openTabs } as never)
+  const target = { sessionId: 'session', paneId: 'pane' }
+  const sidebar = { openTabs, commandTarget: vi.fn<() => typeof target | undefined>(() => target),
+    openTabFromTarget: vi.fn() }
+  const registry = new ShortcutRegistry(runtime, platform)
+  ctx.provide('sidebarRight', sidebar as never)
+  ctx.provide('shortcuts', { register: (command: ShortcutCommand) => registry.register(command) } as never)
+  ctx.provide('sidebarRightTabs', tabs as never)
   ctx.provide('workspaces', { list: createSnapshotStore({ phase: 'ready', items: [] }) } as never)
   ctx.provide('slots', slots as never)
   ctx.provide('locale', locale as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
-  return { tabs, registered, dictionaries, fiber, openTabs }
+  return { tabs, registered, dictionaries, fiber, openTabs, registry, sidebar, target }
 }
 
 describe('ui-sidebar-browser apply', () => {
@@ -118,7 +125,7 @@ describe('ui-sidebar-browser apply', () => {
     expect(definition?.title('sidebar://browser')).toBe('type.label')
     expect(definition?.guide?.map(entry => [entry.order, entry.title(), entry.description?.()]))
       .toEqual([[30, 'guide.title', 'guide.description']])
-    expect(dictionaries.get('sidebarBrowser')).toEqual({ zh, en })
+    expect(dictionaries.get('sidebarBrowser')).toEqual({ zh, en, ja, es, fr, de, ru, pt })
     expect(dictionaries.get('sidebarBrowser')).toMatchObject({
       zh: { 'guide.description': '浏览网页' },
       en: { 'guide.description': 'Browse web pages' },
@@ -133,6 +140,31 @@ describe('ui-sidebar-browser apply', () => {
     const browser = injectFace('session', { replace: vi.fn(), forget: vi.fn() }) as BrowserInjected
     expect(browser.keyedHooks.browserState('missing')).toBeUndefined()
     expect(typeof browser.mount).toBe('function')
+  })
+
+  it.each(['macos', 'windows'] as const)('opens the resolved Browser target with the %s default and releases the shortcut', async (platform) => {
+    const h = await boot(platform)
+    try {
+      expect(h.registry.catalog.getSnapshot()[0]?.keys).toEqual(platform === 'macos' ? ['⌘', 'T'] : ['Ctrl', '+', 'T'])
+      expect(h.tabs.get(BROWSER_KIND)?.guide?.[0]?.commandId).toBe('browser.new')
+      const gesture = { code: 'KeyT', control: platform === 'windows', meta: platform === 'macos',
+        alt: false, shift: false, repeat: false, composing: false, defaultPrevented: false }
+      const context = { region: 'page' as const, modal: null, target: null }
+      const consume = vi.fn()
+      expect(h.registry.dispatch(gesture, context, consume).status).toBe('handled')
+      expect(h.sidebar.openTabFromTarget).toHaveBeenCalledExactlyOnceWith('browser', h.target)
+      h.registry.dispatch({ ...gesture, repeat: true }, context, consume)
+      expect(h.sidebar.openTabFromTarget).toHaveBeenCalledOnce()
+      h.sidebar.commandTarget.mockReturnValue(undefined)
+      expect(h.registry.dispatch(gesture, context, consume).status).toBe('blocked')
+    } finally { await h.fiber.dispose() }
+    expect(h.registry.catalog.getSnapshot()).toEqual([])
+  })
+
+  it('publishes the macOS Web Browser default', async () => {
+    const h = await boot('macos', 'web')
+    try { expect(h.registry.catalog.getSnapshot()[0]?.binding).toEqual({ code: 'KeyT', modifiers: ['alt', 'meta'] }) }
+    finally { await h.fiber.dispose() }
   })
 
   it('removes every registration when the plugin is disposed', async () => {

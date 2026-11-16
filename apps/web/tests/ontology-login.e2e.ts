@@ -133,7 +133,6 @@ describe('web e2e: Ontology login', () => {
       scaffold = await launchWebScaffold({
         extraOverlayPath: ONTOLOGY_BUNDLE_PATCH,
         extraInstallAnchors: [ONTOLOGY_BUNDLE_MANIFEST],
-        browserSessionTransport: 'bearer',
       })
       browser = await chromium.launch()
       page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })

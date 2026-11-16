@@ -20,20 +20,21 @@ import type {
 
 export { ClientModuleSystem }
 export { tearDownEntryFiber } from './entry-lifecycle.ts'
+export type { ClientReleaseChange } from './release-change.ts'
 export type { ClientEntries, ClientEntryState } from './entries.ts'
 export { exactPackageSpecifier, parseBootManifest, parseDshClient, stripClientSuffix } from './manifest.ts'
 export type {
   BootManifest, BootModuleRow, BootPluginRow, ClientBootstrapModule, ClientBundleRegistration,
   ClientModuleCreateOptions, ClientModuleLoader, ClientModuleLoaderTarget, ClientModuleRecord,
   ClientModuleSystemOptions, DshWindow,
-  WebBootEntry, WebBootGraph,
+  WebBootEntry, WebBootGraph, WebBootRelease,
 } from './manifest.ts'
 
 /**
  * Build the live module system from the HTML facade's materialized modules bundle.
  * @param target - Stable registration facade whose pending queue becomes the live sink.
  * @param bootstrapModule - This bundle's id and already-materialized exports.
- * @param options - Raw boot graph, platform seed, and optional bundle transport.
+ * @param options - Raw boot graph, delivered manifests, and optional bundle transport.
  * @returns The created module system.
  */
 export function createClientModuleSystem(
@@ -47,6 +48,7 @@ export function createClientModuleSystem(
     registrationTarget: target,
     bootstrapModule,
     ...(options.loadBundle === undefined ? {} : { loadBundle: options.loadBundle }),
+    ...(options.resolveAsset === undefined ? {} : { resolveAsset: options.resolveAsset }),
   })
 }
 

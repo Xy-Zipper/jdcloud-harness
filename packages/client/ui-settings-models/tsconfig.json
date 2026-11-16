@@ -8,8 +8,15 @@
     "src"
   ],
   "references": [
-    { "path": "../../host/webserver" },
-    { "path": "../../../vendor/schemastery" },
+    {
+      "path": "../../util/text-search"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
     {
       "path": "../../../vendor/cordis"
     },
@@ -33,6 +40,9 @@
     },
     {
       "path": "../../api/remotes/tsconfig.client.json"
+    },
+    {
+      "path": "../product-analytics/tsconfig.client.json"
     }
   ]
 }
