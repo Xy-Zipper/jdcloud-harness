@@ -149,7 +149,7 @@ const DATA_PARAMETER = {
     type: 'object' as const,
     required: true as const,
     additionalProperties: true as const,
-    description: 'Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; '
+    description: 'Field-code to JSON-value map. Match each field writeType and enum returned by jdcloud_lowcode_describe; '
       + 'single-select values are id strings and multi-select values are arrays of id strings.',
   },
 }
@@ -290,10 +290,7 @@ export function registerLowcodeTools(
     isConcurrencySafe: () => true,
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
-      const fields = parseFields(await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
-        path: `/api/visualdev/base/fields/${encodeURIComponent(menu.menuId)}`,
-        method: 'GET',
-      }, exec.signal))
+      const fields = await readLiveFields(ctx, menu.menuId, exec.signal)
       return renderResult({ menu, fields }, config.maxOutputBytes)
     },
     presentCall: args => present('Describe JDCloud function', 'read', args.menu_id),
@@ -461,10 +458,7 @@ export function registerLowcodeTools(
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
       requirePermission(menu, 'addData')
-      const fields = parseFields(await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
-        path: `/api/visualdev/base/fields/${encodeURIComponent(menu.menuId)}`,
-        method: 'GET',
-      }, exec.signal))
+      const fields = await readLiveFields(ctx, menu.menuId, exec.signal, args.data)
       requireCreateFields(args.data, fields)
       requireFieldValueTypes(args.data, fields)
       const result = menu.type === 4
@@ -495,10 +489,7 @@ export function registerLowcodeTools(
     async execute(args, exec) {
       const menu = await requireMenu(ctx, snapshots, exec, args.menu_id)
       requirePermission(menu, 'editData')
-      const fields = parseFields(await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
-        path: `/api/visualdev/base/fields/${encodeURIComponent(menu.menuId)}`,
-        method: 'GET',
-      }, exec.signal))
+      const fields = await readLiveFields(ctx, menu.menuId, exec.signal, args.data)
       const { data, omitted } = omitEmptyAutomaticFields(args.data, fields)
       requireFieldValueTypes(data, fields)
       if (Object.keys(data).length === 0) {
@@ -860,11 +851,55 @@ interface SafeField {
   readonly fullName: string
   readonly required: boolean
   readonly writeType?: FieldWriteType
+  readonly enum?: readonly string[]
   readonly children?: readonly SafeField[]
 }
 
+/** Read live static option ids from formData; the fields endpoint reports only component value types. */
+async function readLiveFields(ctx: Context, menuId: string, signal: AbortSignal, data?: Record<string, JsonValue>): Promise<SafeField[]> {
+  const raw = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+    path: `/api/visualdev/base/fields/${encodeURIComponent(menuId)}`, method: 'GET',
+  }, signal)
+  const fields = parseFields(raw)
+  const pending = [...fields]
+  for (const field of pending) pending.push(...field.children ?? [])
+  if (!pending.some(field => ['select', 'radio', 'checkbox'].includes(field.jdcloudKey))) return fields
+  if (data !== undefined) requireFieldValueTypes(omitEmptyAutomaticFields(data, fields).data, fields)
+  const base = await ctx.jdcloudAuthController.requestAuthenticated<unknown>({
+    path: `/api/visualdev/base/${encodeURIComponent(menuId)}`, method: 'GET',
+  }, signal)
+  const value = isRecord(base) ? base.formData : undefined
+  const form: unknown = typeof value === 'string' ? JSON.parse(value) : value
+  if (!isRecord(form)) throw new Error('JDCloud form definition is invalid')
+  return parseFields(raw, staticFieldEnums(form.fields))
+}
+
+/** Keep static stored values distinct from labels and dynamic-selector previews, including child tables. */
+function staticFieldEnums(definitions: unknown, prefix = '', result = new Map<string, readonly string[]>()): ReadonlyMap<string, readonly string[]> {
+  if (!Array.isArray(definitions)) throw new Error('JDCloud form fields are invalid')
+  for (const definition of definitions) {
+    if (!isRecord(definition) || !isRecord(definition.__config__)) throw new Error('JDCloud form field is invalid')
+    const config = definition.__config__
+    const code = typeof definition.__vModel__ === 'string' ? `${prefix}${definition.__vModel__}` : prefix
+    if (config.dataType === 'static' && ['select', 'radio', 'checkbox'].includes(String(config.jdcloudKey))) {
+      const options = isRecord(definition.__slot__) ? definition.__slot__.options : undefined
+      if (!Array.isArray(options)) throw new Error(`JDCloud static options for ${code} are invalid`)
+      const key = isRecord(config.props) && typeof config.props.value === 'string' ? config.props.value : 'id'
+      result.set(code, options.map((option) => {
+        if (!isRecord(option)) throw new Error(`JDCloud static option for ${code} is invalid`)
+        const id = option[key]
+        if (typeof id !== 'string' || id.trim() === '') throw new Error(`JDCloud static option id for ${code} is invalid`)
+        return id
+      }))
+    }
+    if (config.children !== undefined)
+      staticFieldEnums(config.children, config.jdcloudKey === 'table' ? `${code}.` : prefix, result)
+  }
+  return result
+}
+
 /** Parse and redact field definitions returned by JDCloud. */
-function parseFields(value: unknown): SafeField[] {
+function parseFields(value: unknown, enums: ReadonlyMap<string, readonly string[]> = new Map(), prefix = ''): SafeField[] {
   if (!Array.isArray(value)) throw new Error('JDCloud field response is invalid')
   return value.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`JDCloud field ${String(index)} is invalid`)
@@ -872,7 +907,7 @@ function parseFields(value: unknown): SafeField[] {
     const jdcloudKey = requireText(Reflect.get(entry, 'jdcloudKey'), `field ${JSON.stringify(enCode)} jdcloudKey`)
     const fullName = requireText(Reflect.get(entry, 'fullName'), `field ${JSON.stringify(enCode)} fullName`)
     const children = Reflect.get(entry, 'children')
-    const parsedChildren = children === undefined || children === null ? undefined : parseFields(children)
+    const parsedChildren = children === undefined || children === null ? undefined : parseFields(children, enums, `${prefix}${enCode}.`)
     const rawValue = Reflect.get(entry, 'value')
     let fieldValue: string | undefined
     if (rawValue === undefined || rawValue === null || (typeof rawValue === 'string' && rawValue.trim() === '')) {
@@ -881,6 +916,7 @@ function parseFields(value: unknown): SafeField[] {
       fieldValue = requireText(rawValue, `field ${JSON.stringify(enCode)} value`)
     }
     const writeType = fieldWriteType(jdcloudKey, fieldValue)
+    const choices = enums.get(`${prefix}${enCode}`)
     return {
       enCode,
       ...fieldValue === undefined ? {} : { value: fieldValue },
@@ -888,6 +924,7 @@ function parseFields(value: unknown): SafeField[] {
       fullName,
       required: Reflect.get(entry, 'required') === true,
       ...writeType === undefined ? {} : { writeType },
+      ...choices === undefined ? {} : { enum: choices },
       ...parsedChildren === undefined ? {} : { children: parsedChildren },
     }
   })
@@ -925,6 +962,13 @@ function collectInvalidFieldValues(
     const code = codePrefix === '' ? field.enCode : `${codePrefix}.${field.enCode}`
     if (field.writeType !== undefined && !matchesWriteType(value, field.writeType)) {
       invalid.push(`${label} (${code}) must be ${field.writeType}`)
+      continue
+    }
+    // Optional single selects may be cleared; every non-empty supplied id must be a live static option.
+    const choices = field.enum
+    if (choices !== undefined && value !== '' && (Array.isArray(value) ? value : [value])
+      .some(item => typeof item !== 'string' || !choices.includes(item))) {
+      invalid.push(`${label} (${code}) must use one of ${JSON.stringify(choices)}`)
       continue
     }
     if (field.jdcloudKey !== 'table' || field.children === undefined || !Array.isArray(value)) continue

@@ -1,4 +1,5 @@
 import { unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 /** JDCloud bundle rows must activate through the real Cordis Loader. */
 
@@ -15,7 +16,7 @@ import * as ExternalApi from '@deepseek-ai/dsh-api-external'
 import * as Media from '@deepseek-ai/dsh-creation-studio-media'
 import AgentRegistry, { agentEvents, type Agent } from '../../../core/agent/src/index.ts'
 import { createInboxStub } from '../../../test-support/agent-loop-testkit/src/index.ts'
-import { createAssistantMessage, createUserMessage } from '../../../llm/llm/src/index.ts'
+import { createAssistantMessage, createUserMessage, ToolCallId } from '../../../llm/llm/src/index.ts'
 import { Session, SessionId } from '../../../core/session/src/index.ts'
 import SessionProjectionRegistry from '../../../session/session-projection/src/index.ts'
 import SystemPrompt from '../../../core/system-prompt/src/index.ts'
@@ -469,9 +470,10 @@ describe('JDCloud login through a real Loader composition', () => {
     ])
   })
 
-  it('checks the tenant before fetching current-user capabilities for one browser prompt', async () => {
+  it('checks the tenant before publishing capabilities and enforces live static options through the loaded write tools', async () => {
     const requestPaths: string[] = []
-    const fetcher = vi.fn((input: string | URL | Request): Promise<Response> => {
+    const writes: unknown[] = []
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : String(input))
       requestPaths.push(url.pathname)
       switch (url.pathname) {
@@ -489,7 +491,7 @@ describe('JDCloud login through a real Loader composition', () => {
             },
             userPermission: { systemAdministrator: true },
             menuList: [
-              { id: 'form-1', parentId: '-1', fullName: '打卡记录', type: 3, agentPermissions: ['readData'] },
+              { id: 'form-1', parentId: '-1', fullName: '项目素材', type: 3, agentPermissions: ['readData', 'addData', 'editData'] },
               { id: 'board-1', parentId: '-1', fullName: '打卡看板', type: 6 },
             ],
           }))
@@ -512,6 +514,20 @@ describe('JDCloud login through a real Loader composition', () => {
               fullName: 'IT部门',
             }],
           }]))
+        case '/api/visualdev/base/fields/form-1':
+          return Promise.resolve(json([
+            { enCode: 'category', value: 'string', jdcloudKey: 'select', fullName: '素材分类' },
+            { enCode: 'purpose', value: 'string', jdcloudKey: 'select', fullName: '引用用途' },
+          ]))
+        case '/api/visualdev/base/form-1':
+          return Promise.resolve(json({ formData: JSON.stringify({ fields: [
+            { __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static' }, __slot__: { options: [{ id: '需求附件' }, { id: '参考图片' }] } },
+            { __vModel__: 'purpose', __config__: { jdcloudKey: 'select', dataType: 'static' }, __slot__: { options: [{ id: '需求附件' }, { id: '参考图' }] } },
+          ] }) }))
+        case '/api/visualdev/form/create':
+          if (typeof init?.body !== 'string') throw new Error('Expected a JSON create request')
+          writes.push(JSON.parse(init.body))
+          return Promise.resolve(json({ _id: 'new-material' }))
         default:
           throw new Error(`unexpected JDCloud request: ${url.pathname}`)
       }
@@ -527,6 +543,7 @@ describe('JDCloud login through a real Loader composition', () => {
 
     const agent = runningAgent(context)
     context.agents.register(agent)
+    agent.session.append('turn/start', { turn: 1 })
     const admission = vi.fn(() => Promise.resolve())
     await context.waterfall('api-session/prompt-admission', {
       sessionId: agent.id,
@@ -562,5 +579,19 @@ describe('JDCloud login through a real Loader composition', () => {
     expect(JSON.stringify(decision)).toContain('研发部')
     expect(JSON.stringify(decision)).toContain('Current Tenant')
     expect(JSON.stringify(decision)).not.toContain('board-1')
+    let sequence = 0
+    const call = (name: string, data: unknown) => context.agents.withInitiator(agent, () => executeToolFixture(context, {
+      name, arguments: data, agent, callId: ToolCallId(`enum-call-${String(++sequence)}`), signal,
+    }))
+    const described = await call('jdcloud_lowcode_describe', { menu_id: 'form-1' })
+    expect(JSON.stringify(described.content)).toContain('enum')
+    for (const data of [{ category: '参考视频' }, { purpose: '参考视频' }]) {
+      const rejected = await call('jdcloud_lowcode_create', { menu_id: 'form-1', data })
+      expect(rejected.isError && rejected.error.info?.code).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    }
+    expect(writes).toEqual([])
+    const data = { category: '需求附件', purpose: '需求附件' }
+    expect((await call('jdcloud_lowcode_create', { menu_id: 'form-1', data })).isError).toBe(false)
+    expect(writes).toEqual([{ menuId: 'form-1', data: JSON.stringify(data) }])
   })
 })

@@ -319,7 +319,7 @@ The JDCloud bundle ships media execution; Skills are installed separately. Tool 
     },
     "data": {
       "type": "object",
-      "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
+      "description": "Field-code to JSON-value map. Match each field writeType and enum returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
       "additionalProperties": true
     }
   },
@@ -707,7 +707,7 @@ The JDCloud bundle ships media execution; Skills are installed separately. Tool 
     },
     "data": {
       "type": "object",
-      "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
+      "description": "Field-code to JSON-value map. Match each field writeType and enum returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
       "additionalProperties": true
     }
   },

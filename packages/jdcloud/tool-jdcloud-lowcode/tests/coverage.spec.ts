@@ -909,6 +909,90 @@ describe('query validation, defaults, and bounded rendering', () => {
 })
 
 describe('write-tool failures and table partial completion', () => {
+  it.each(['jdcloud_lowcode_create', 'jdcloud_lowcode_update'])('rejects invented material enums before %s and accepts the stored option ids', async (name) => {
+    const fields = [
+      { enCode: 'category', value: 'string', jdcloudKey: 'select', fullName: '素材分类' },
+      { enCode: 'purpose', value: 'string', jdcloudKey: 'select', fullName: '引用用途' },
+    ]
+    const definitions = [
+      { __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static', props: { value: 'id' } },
+        __slot__: { options: [{ id: '需求附件', fullName: '需求附件' }, { id: '参考图片', fullName: '参考图片' }] } },
+      { __vModel__: 'purpose', __config__: { jdcloudKey: 'select', dataType: 'static', props: { value: 'id' } },
+        __slot__: { options: [{ id: '需求附件', fullName: '需求附件' }, { id: '参考图', fullName: '参考图' }] } },
+    ]
+    const mounted = await toolHarness({ response: request => request.path.includes('/fields/') ? fields
+      : request.path === '/api/visualdev/base/form-1' ? { formData: JSON.stringify({ fields: definitions }) } : { ok: true } })
+    for (const data of [{ category: '参考视频' }, { category: '参考图' }, { purpose: '参考视频' }, { purpose: '参考图片' }]) {
+      const result = await mounted.call(name, { menu_id: 'form-1', record_id: 'row-1', data })
+      expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+      expect(resultText(result)).toContain('需求附件')
+    }
+    expect(mounted.requests.every(request => request.method === 'GET')).toBe(true)
+    for (const data of [{ category: '参考图片', purpose: '参考图' }, { category: '需求附件', purpose: '需求附件' }]) {
+      expect((await mounted.call(name, { menu_id: 'form-1', record_id: 'row-1', data })).isError).toBe(false)
+      expect(mounted.requests.at(-1)?.body).toMatchObject({ data: JSON.stringify(data) })
+    }
+  })
+
+  it('describes stored enum ids separately from labels and refreshes them before writing', async () => {
+    const fields = [{ enCode: 'category', value: 'string', jdcloudKey: 'select', fullName: '分类' }]
+    let choices = [{ code: 'reference-image', text: '参考图片' }]
+    const mounted = await toolHarness({ response: request => request.path.includes('/fields/') ? fields : {
+      formData: { fields: [{ __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static', props: { value: 'code' } }, __slot__: { options: choices } }] },
+    } })
+    const described = await mounted.call('jdcloud_lowcode_describe', { menu_id: 'form-1' })
+    expect(resultText(described)).toContain('"enum":["reference-image"]')
+    choices = [{ code: 'attachment', text: '需求附件' }]
+    const result = await mounted.call('jdcloud_lowcode_update', { menu_id: 'form-1', record_id: 'row-1', data: { category: 'reference-image' } })
+    expect(errorCode(result)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(result)).toContain('attachment')
+    expect(mounted.requests.every(request => request.method === 'GET')).toBe(true)
+  })
+
+  it('checks static multi-select ids in their child table and leaves dynamic selectors and empty optional selections available', async () => {
+    const fields = [
+      { enCode: 'purpose', value: 'string', jdcloudKey: 'radio', fullName: 'Purpose' },
+      { enCode: 'owner', value: 'string', jdcloudKey: 'select', fullName: 'Owner' },
+      { enCode: 'number', value: 'string', jdcloudKey: 'billRule', fullName: 'Automatic number' },
+      { enCode: 'details', jdcloudKey: 'table', fullName: 'Details', children: [
+        { enCode: 'tags', value: 'array', jdcloudKey: 'checkbox', fullName: 'Tags' },
+      ] },
+    ]
+    const definitions = [
+      { __vModel__: 'purpose', __config__: { jdcloudKey: 'radio', dataType: 'static' }, __slot__: { options: [{ id: 'input' }] } },
+      { __vModel__: 'owner', __config__: { jdcloudKey: 'select', dataType: 'dynamic' }, __slot__: { options: [{ id: 'preview-user' }] } },
+      { __vModel__: 'details', __config__: { jdcloudKey: 'table', children: [
+        { __config__: { jdcloudKey: 'row', children: [
+          { __vModel__: 'tags', __config__: { jdcloudKey: 'checkbox', dataType: 'static' }, __slot__: { options: [{ id: 'reference' }] } },
+        ] } },
+      ] } },
+    ]
+    const mounted = await toolHarness({ response: request => request.path.includes('/fields/') ? fields
+      : request.path === '/api/visualdev/base/form-1' ? { formData: { fields: definitions } } : { ok: true } })
+    const invalid = await mounted.call('jdcloud_lowcode_update', { menu_id: 'form-1', record_id: 'row-1', data: { details: [{ tags: ['invented'] }] } })
+    expect(errorCode(invalid)).toBe('JDCLOUD_LOWCODE_FIELD_TYPE')
+    expect(resultText(invalid)).toContain('Details[1].Tags (details[1].tags)')
+    expect(mounted.requests.every(request => request.method === 'GET')).toBe(true)
+    const valid = await mounted.call('jdcloud_lowcode_update', { menu_id: 'form-1', record_id: 'row-1', data: { number: null, purpose: '', owner: 'live-user', details: [{ tags: ['reference'] }, { tags: [] }] } })
+    expect(valid.isError).toBe(false)
+    expect(mounted.requests.at(-1)?.body).toMatchObject({ data: JSON.stringify({ purpose: '', owner: 'live-user', details: [{ tags: ['reference'] }, { tags: [] }] }) })
+  })
+
+  it.each([
+    { formData: 'invalid json' },
+    { formData: null },
+    { formData: { fields: null } },
+    { formData: { fields: [null] } },
+    { formData: { fields: [{ __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static' } }] } },
+    { formData: { fields: [{ __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static' }, __slot__: { options: [null] } }] } },
+    { formData: { fields: [{ __vModel__: 'category', __config__: { jdcloudKey: 'select', dataType: 'static' }, __slot__: { options: [{ id: '' }] } }] } },
+  ])('does not write when the live option definition cannot be read (%j)', async (base) => {
+    const fields = [{ enCode: 'category', value: 'string', jdcloudKey: 'select', fullName: 'Category' }]
+    const mounted = await toolHarness({ response: request => request.path.includes('/fields/') ? fields : base })
+    expect((await mounted.call('jdcloud_lowcode_update', { menu_id: 'form-1', record_id: 'row-1', data: { category: 'invented' } })).isError).toBe(true)
+    expect(mounted.requests.every(request => request.method === 'GET')).toBe(true)
+  })
+
   it.each([
     ['jdcloud_lowcode_create', { menu_id: 'form-1', data: {
       department: [{ id: 'department-1', fullName: 'Engineering' }],

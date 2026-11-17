@@ -311,7 +311,7 @@ Create one form record or start one workflow. Host execution requires addData an
     },
     "data": {
       "type": "object",
-      "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
+      "description": "Field-code to JSON-value map. Match each field writeType and enum returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
       "additionalProperties": true
     }
   },
@@ -699,7 +699,7 @@ Update one JDCloud record. Host execution requires editData, rejects values that
     },
     "data": {
       "type": "object",
-      "description": "Field-code to JSON-value map. Match each field writeType returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
+      "description": "Field-code to JSON-value map. Match each field writeType and enum returned by jdcloud_lowcode_describe; single-select values are id strings and multi-select values are arrays of id strings.",
       "additionalProperties": true
     }
   },

@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.3/jdcloud-static-selection-values/guide.md
+/:
+  en: 84dd8e10bea3b959
+  zh: a4f040573f67a82b
+/jdcloud-static-selections-require-stored-option-ids:
+  en: 3d22be927f8b56da
+  zh: 8ca6acdd8c490080
+/jdcloud-static-selections-require-stored-option-ids/change:
+  en: de26005e26594e4e
+  zh: 21e711af11ef2875
+/jdcloud-static-selections-require-stored-option-ids/migration:
+  en: 508b258cf67fcbec
+  zh: 9dd7a6e614784b5c

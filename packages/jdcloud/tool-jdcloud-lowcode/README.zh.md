@@ -82,6 +82,8 @@ Host 会在每次操作前检查当前轮次、当前租户和菜单成员关系
 
 建表支持 `text`、`textarea`、`number`、`switch`、`single_select`、`multi_select`、`date` 和 `time` 字段。选择字段要求明确的存储值，授权对象列表必须非空，工具因此不能自行构造授权范围。生成的[工具目录](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-jdcloud-lowcode)负责完整 schema。
 
+对于静态 `select`、`radio` 和 `checkbox` 组件，描述结果还会返回 `enum`，按配置的选项值属性从实时 `formData` 读取存储 id，而非显示标签。新增和更新会重新读取选项；提供的 id 不在枚举中时，在修改任何记录前返回 `JDCLOUD_LOWCODE_FIELD_TYPE` 并列出允许的 id。子表选择字段也执行该校验。非必填单选可以用空字符串清空；动态选择器不会拿预览选项校验。实时表单定义无法读取时，操作停止且不修改记录。
+
 ### 失败与恢复
 
 任何认证请求返回 `600`、`601` 或 `602` 时都会删除已存储登录，并以需要认证失败；Web 登录页是恢复路径。其他业务错误或传输失败会保留登录。非管理员建表会在发起 JDCloud 数据请求前返回 `JDCLOUD_LOWCODE_ADMIN_REQUIRED`。成员名称响应缺少当前用户、Prompt 刷新时部门选择器响应无效，或者角色搜索时角色选择器响应无效，都会使当前操作失败。无法再解析的部门或角色 id（例如已删除角色的 id）会从 `currentMember` 中省略，其余已查到的选择值仍会发布。如果当前租户用户 scope 与快照不同，工具不会发起 JDCloud 数据请求，并返回 `JDCLOUD_LOWCODE_TENANT_CHANGED`；用户需提交新的浏览器 Prompt 以刷新能力。未知菜单、陈旧轮次快照、缺失的数据或管理员授权、持久化用户消息中不存在的附件 id、存在歧义的短附件摘要、无效上传响应，以及未通过实时组件类型校验的记录值，都会在依赖它们的修改前失败。无效值返回 `JDCLOUD_LOWCODE_FIELD_TYPE`；新增时缺失值返回 `JDCLOUD_LOWCODE_REQUIRED_FIELDS`，两者都包含易读的字段标签和代码。
