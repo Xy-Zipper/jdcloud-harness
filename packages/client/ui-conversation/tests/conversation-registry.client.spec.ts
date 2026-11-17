@@ -153,6 +153,26 @@ async function bootRegistries(): Promise<{
 }
 
 describe('Conversation registries', () => {
+  it('keeps View actions hidden until every caller releases its policy', async () => {
+    const { uiConversation, ctx } = await bootRegistries()
+    const changed = vi.fn()
+    const off = uiConversation.viewActionsSuppressed.subscribe(changed)
+    expect(uiConversation.viewActionsSuppressed.getSnapshot()).toBe(false)
+    const releaseFirst = uiConversation.suppressViewActions()
+    const releaseSecond = uiConversation.suppressViewActions()
+    expect(uiConversation.viewActionsSuppressed.getSnapshot()).toBe(true)
+    releaseFirst()
+    releaseFirst()
+    expect(uiConversation.viewActionsSuppressed.getSnapshot()).toBe(true)
+    releaseSecond()
+    expect(uiConversation.viewActionsSuppressed.getSnapshot()).toBe(false)
+    expect(changed).toHaveBeenCalled()
+    off()
+    uiConversation.suppressViewActions()
+    await ctx.fiber.dispose()
+    expect(uiConversation.viewActionsSuppressed.getSnapshot()).toBe(false)
+  })
+
   it('publishes open turns without an active view and detaches when the Session scope ends', async () => {
     const { uiConversation, binding } = await bootRegistries()
     const conversation = uiConversation.binding(binding)

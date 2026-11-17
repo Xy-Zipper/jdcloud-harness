@@ -1,0 +1,3 @@
+- tablist:
+  - tab "对话" [selected]
+  - tab "轨迹"

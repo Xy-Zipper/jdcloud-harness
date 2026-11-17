@@ -55,7 +55,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required after the generated JDCloud Remote namespace is mounted. */
 export const uiInject = [
   'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
-  'sidebarPanels', 'uiWorkspace',
+  'sidebarPanels', 'uiWorkspace', 'uiConversation',
 ]
 
 /** Null occupant that shadows one administrator-only single slot. */
@@ -66,6 +66,7 @@ function HiddenAdministratorControl(): null {
 /** Install administrator-only slot shadows as one lifecycle. */
 function installAdministratorControlShadows(ctx: ClientContext): () => void {
   const disposers = [
+    ctx.uiConversation.suppressViewActions(),
     ctx.slots.inject('sidebar.settings', () => ctx.slots.register({
       name: 'sidebar.settings', priority: ADMIN_CONTROL_PRIORITY,
     }, HiddenAdministratorControl)),

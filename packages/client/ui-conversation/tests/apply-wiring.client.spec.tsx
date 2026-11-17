@@ -70,6 +70,10 @@ describe('target-neutral Conversation apply wiring', () => {
       b.runtime.slots.register({ name: 'conversation.session.header.views.actions', id: 'probe' }, (() => null) as never)
       expect(actions.getSnapshot()).toBe(true)
       await vi.waitFor(() => { expect(changed).toHaveBeenCalled() })
+      const release = b.runtime.ctx.uiConversation.suppressViewActions()
+      expect(actions.getSnapshot()).toBe(false)
+      release()
+      expect(actions.getSnapshot()).toBe(true)
       await b.runtime.dispose()
     } finally {
       localStorage.clear()

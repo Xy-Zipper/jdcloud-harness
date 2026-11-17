@@ -740,21 +740,23 @@ describe('ConversationRoot resident composer', () => {
     expect(b.actionsOwner().entries.map(entry => entry.id)).toEqual(['timeline'])
   })
 
-  it('keeps an unpinned View selected without exposing its tab', () => {
+  it('keeps previously unpinned Views reachable when customization is hidden', () => {
     const viewTabs: ViewTab[] = [
       { id: 'chat', label: 'Chat' },
       { id: 'trajectory', label: 'Trajectory' },
       { id: 'timeline', label: 'Timeline' },
     ]
-    const b = mount(sessionSnapshotOf(), undefined, undefined, { viewTabs, unpinnedViews: ['chat', 'trajectory', 'removed-view'] })
+    const b = mount(sessionSnapshotOf(), undefined, undefined, {
+      viewTabs, unpinnedViews: ['chat', 'trajectory', 'removed-view'],
+    })
     act(() => { b.store.actions.setView('trajectory') })
     const tabs = (): HTMLElement[] => within(b.view.getByRole('tablist')).getAllByRole('tab')
     expect(tabs().map(tab => [tab.textContent, tab.getAttribute('aria-selected')])).toEqual([
-      ['Chat', 'false'], ['Timeline', 'false'],
+      ['Chat', 'false'], ['Trajectory', 'true'], ['Timeline', 'false'],
     ])
     expect(b.view.getByTestId('view-trajectory')).toBeTruthy()
     act(() => { b.store.actions.setView('chat') })
-    expect(tabs().map(tab => tab.textContent)).toEqual(['Chat', 'Timeline'])
+    expect(tabs().map(tab => tab.textContent)).toEqual(['Chat', 'Trajectory', 'Timeline'])
   })
 
   it('keeps the tab row and More after the tabs while every other View is unpinned', () => {

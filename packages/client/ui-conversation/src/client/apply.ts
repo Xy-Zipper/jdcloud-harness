@@ -234,8 +234,13 @@ export function apply(ctx: Context, config: Config = Config({})): void {
   const conversationViews = createSnapshotStore<readonly ViewTab[]>(viewTabs())
   const viewPins = createViewPins()
   const viewActions = {
-    getSnapshot: () => slots.entriesOfSlot('conversation.session.header.views.actions').length > 0,
-    subscribe: (listener: () => void) => slots.subscribe('conversation.session.header.views.actions', listener),
+    getSnapshot: () => !uiConversation.viewActionsSuppressed.getSnapshot()
+      && slots.entriesOfSlot('conversation.session.header.views.actions').length > 0,
+    subscribe: (listener: () => void) => {
+      const offEntries = slots.subscribe('conversation.session.header.views.actions', listener)
+      const offPolicy = uiConversation.viewActionsSuppressed.subscribe(listener)
+      return () => { offPolicy(); offEntries() }
+    },
   }
   const bindings = new Set<SessionBinding>()
   const trackedBindings = new WeakSet<SessionBinding>()

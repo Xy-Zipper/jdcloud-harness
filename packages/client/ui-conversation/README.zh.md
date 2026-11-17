@@ -94,6 +94,8 @@ composer 在挂载、切换 Session 和解除锁定时使用共享的[文字输�
 
 root 作用域的 `conversation.session.header.views.actions` list 有注册项时，标签行中的 View 标签之后显示带提示框的**更多会话视图**按钮。它打开的菜单以该 list 的注册项为菜单行。每个注册项接收 `entries`（按注册顺序的头部之外的 View，含 `id`、`label`、`pinned` 与 `active`；不含 Chat）、在本 Session 选择 View 的 `onOpen(id)`、`onPinnedChange(id, pinned)`，以及关闭菜单的 `onDismiss()`。头部在内存中保存所有 Session 共用的已收起 View id 列表；标签栏不显示已收起的 View，并将已注册的 Chat 放在首位，确保它始终留在更多菜单外。插件重新加载时 Pin 选择重置，不读取旧 localStorage 值。标签栏是否显示按可用 View 计算，不按已固定的 View 计算，因此其他 View 全部收起时，标签栏和“更多”仍然显示。收起当前激活的 View 会立即隐藏其标签，但不会切走其内容。更多菜单仅包含头部之外的 View，通过 `active` 标识当前 View。头部读取当前行可用宽度，为更多按钮与内边距预留 48px，每个标签估算 120px，其余 View 按注册顺序进入更多。单个 ResizeObserver 观察标签行，使窗口缩放和侧栏展开能够更新分组；当前选中项变化不改变顺序。标签行移除时断开观察。如果环境没有 ResizeObserver，仍按初始宽度计算，但不继续观察。当前 View 收起时，更多按钮高亮。每个标签按字符宽度估算文本宽度；只有估算结果超过 88px 单元格时，才通过提示框提供全名。至少保留一个优先展示的外部标签。未注册 View 的 id 保留在内存 Pin 列表中，直到插件重新加载。
 
+组合插件可以调用 `ctx.uiConversation.suppressViewActions()` 隐藏视图标签后的定制菜单。最后一项策略释放或其调用方卸载后恢复菜单；隐藏期间所有视图都通过标签保持可访问，即使之前已取消固定。
+
 输入框注册「文件」命令动作，负责其标题、可用性和原生文件选择器回调。菜单可用性与实际调用都读取已挂载输入框当前的附件接收策略。输入框卸载或锁定后该动作不可用，插件 dispose（资源释放）时移除注册。回调绑定留在输入模块内部。
 
 输入框通过会话作用域的 `useAccess` 钩子读取所在 Session 的访问答案：访问快照不含 `session/prompt` 时隐藏发送，不含 `session/cancel` 时隐藏停止，附件接收跟随 `fileUploads/upload`。没有 Session 的输入框尚无答案，保留普通控件。发送与停止都只对按钮生效——键盘提交或 Esc-Esc 序列仍会到达 Host，由 Host 拒绝并上报失败。这些界面判断不替代 Host 授权。

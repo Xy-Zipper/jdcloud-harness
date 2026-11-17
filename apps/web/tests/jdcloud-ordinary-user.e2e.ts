@@ -12,6 +12,7 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type {} from '@deepseek-ai/dsh-client-modules'
 import type {} from '@deepseek-ai/dsh-permission-presets'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
   launchWebScaffold, watchConsole, webSnapshotMode, type WebScaffold,
@@ -302,6 +303,43 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
     ])
   }, 60_000)
 
+  it('keeps Chat and Trajectory reachable without the customization menu for ordinary accounts', async () => {
+    const agent = scaffold.ctx.agents.list()[0]
+    if (agent === undefined) throw new Error('connected JDCloud workspace did not create an Agent')
+    agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: '检查会话视图' }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    await page.getByRole('tab', { name: '轨迹', exact: true }).waitFor()
+    expect(await page.getByRole('button', { name: '更多会话视图', exact: true }).count()).toBe(0)
+    const tabs = '[data-conversation-tabs]'
+    await compareOrRefreshGolden(join(SNAPSHOT_DIR, 'view-actions.expected.md'),
+      await captureStableAria(page, tabs, scaffold.workspaceCwd), MODE)
+    await page.screenshot({ path: '.artifacts/jdcloud-ordinary-view-actions.png' })
+    await page.setViewportSize({ width: 430, height: 900 })
+    await page.getByRole('tab', { name: '轨迹', exact: true }).click()
+    await page.getByRole('tab', { name: '对话', exact: true }).click()
+    expect(await page.getByRole('button', { name: '更多会话视图', exact: true }).count()).toBe(0)
+    await page.setViewportSize({ width: 1680, height: 1000 })
+  })
+
+  it('serves a decodable JDCloud tab icon in light and dark themes', async () => {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme })
+      const icon = await page.evaluate(async () => {
+        const link = [...document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')]
+          .find(candidate => matchMedia(candidate.media).matches)
+        if (link === undefined) throw new Error('active favicon is missing')
+        const source = await (await fetch(link.href)).text()
+        const image = new Image()
+        image.src = link.href
+        await image.decode()
+        return { source, width: image.naturalWidth }
+      })
+      expect(icon.source).toContain('data-jdcloud-brand-mark="true"')
+      expect(icon.width).toBeGreaterThan(0)
+    }
+    await page.emulateMedia({ colorScheme: null })
+  })
 
   it('keeps Settings as a single bottom button for administrators', async () => {
     jdcloud.setAdministrator(true)
@@ -318,6 +356,26 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
       const position = await settings.boundingBox()
       expect(position?.y).toBeGreaterThan(800)
       expect(await adminPage.getByRole('button', { name: /账户与设置/ }).count()).toBe(0)
+      await adminPage.getByRole('button', { name: '添加工作区', exact: true }).click()
+      await adminPage.getByRole('dialog', { name: '选择工作区目录' }).waitFor()
+      await adminPage.keyboard.press('Escape')
+      const directories = await readdir(join(scaffold.workspaceCwd, '.jdcloud-users'), { withFileTypes: true })
+      const directory = directories.find(entry => entry.isDirectory() && entry.name !== '.dsh')
+      if (directory === undefined) throw new Error('administrator workspace root is missing')
+      const root = join(scaffold.workspaceCwd, '.jdcloud-users', directory.name)
+      await connectFreshWorkspaceZh(adminPage, root, 'administrator-workspace')
+      const agent = scaffold.ctx.agents.list().find(candidate => candidate.session.header.cwd === join(root, 'administrator-workspace'))
+      if (agent === undefined) throw new Error('administrator Session was not created')
+      agent.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: '检查管理员会话菜单' }], source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      const more = adminPage.getByRole('button', { name: '更多会话视图', exact: true })
+      await more.waitFor()
+      await more.click()
+      await adminPage.getByRole('menuitem', { name: '创建你的插件', exact: true }).waitFor()
+      await adminPage.screenshot({ path: '.artifacts/jdcloud-administrator-view-actions.png' })
+      await adminPage.keyboard.press('Escape')
+      await adminPage.getByRole('menu').waitFor({ state: 'hidden' })
       await settings.click()
       await adminPage.getByRole('dialog').waitFor()
       await adminPage.screenshot({ path: '.artifacts/jdcloud-settings-button.png' })
@@ -334,6 +392,7 @@ describe('web e2e: JDCloud ordinary-user controls', () => {
       'controls.expected.md',
       'lowcode-actions.expected.md',
       'session-controls.expected.md',
+      'view-actions.expected.md',
     ])
   })
 })

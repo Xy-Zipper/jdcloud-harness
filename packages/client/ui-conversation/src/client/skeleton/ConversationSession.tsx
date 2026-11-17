@@ -135,7 +135,8 @@ export function ConversationSessionHeader({
   const { visibleTabs, moreTabs } = useMemo(() => {
     const preferred = [
       ...tabs.filter(tab => tab.id === FIXED_VIEW_ID),
-      ...tabs.filter(tab => tab.id !== FIXED_VIEW_ID && !unpinned.includes(tab.id)),
+      // Without customization, every View remains reachable through its tab.
+      ...tabs.filter(tab => tab.id !== FIXED_VIEW_ID && (!hasEntryActions || !unpinned.includes(tab.id))),
     ]
     const visibleTabs = hasEntryActions ? preferred.slice(0, visibleViewLimit) : preferred
     const visibleIds = new Set(visibleTabs.map(tab => tab.id))

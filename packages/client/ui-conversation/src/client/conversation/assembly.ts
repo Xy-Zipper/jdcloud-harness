@@ -211,8 +211,30 @@ export class UiConversation extends Service {
   readonly userText: UserTextRegistry
   /** Plugin-owned handlers for selection and context-menu gestures. */
   readonly interactions: ConversationInteractionRegistry
+  private readonly viewActionSuppressions = createSnapshotStore(0)
+  /** Whether a composed policy currently hides the View tab row's More menu. */
+  readonly viewActionsSuppressed: ObservableSnapshot<boolean> = {
+    getSnapshot: () => this.viewActionSuppressions.getSnapshot() > 0,
+    subscribe: listener => this.viewActionSuppressions.subscribe(listener),
+  }
   private readonly bindings = new WeakMapWithValues<SessionBinding, BindingRecord>()
   private readonly images: HistoricalImageCache
+
+  /**
+   * Hide View customization until the caller releases its policy or unloads.
+   * @returns idempotent disposer restoring visibility after the final policy releases.
+   */
+  suppressViewActions(): () => void {
+    this.viewActionSuppressions.set(this.viewActionSuppressions.getSnapshot() + 1)
+    let active = true
+    const release = (): void => {
+      if (!active) return
+      active = false
+      this.viewActionSuppressions.set(this.viewActionSuppressions.getSnapshot() - 1)
+    }
+    this.ctx.effect(() => release, 'ui-conversation: View customization policy')
+    return release
+  }
 
   /**
    * @param ctx - owning Client context.

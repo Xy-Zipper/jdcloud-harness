@@ -87,6 +87,8 @@ async function bench(authenticated = false, administrator = true) {
   ctx.provide('remote', remote as never)
   ctx.provide('remote.jdcloudAuth', remote.jdcloudAuth as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
+  const suppressViewActions = vi.fn(() => vi.fn())
+  ctx.provide('uiConversation', { suppressViewActions } as never)
   const tabFilters = new Set<(kind: string) => boolean>()
   const terminal = { id: 'test/terminal', kind: 'terminal', title: () => 'Terminal' }
   let visibleTerminal: typeof terminal | undefined = terminal
@@ -149,6 +151,7 @@ async function bench(authenticated = false, administrator = true) {
       return [...panelFilters].every(filter => filter(id))
     },
     clearSelection,
+    suppressViewActions,
     expire() {
       currentAuthenticated = false
       recordListener?.('jdcloud-auth-controller/login')
@@ -216,7 +219,7 @@ describe('JDCloud login browser plugin', () => {
     expect(clientInject).toEqual(['remote'])
     expect(uiInject).toEqual([
       'remote', 'remote.jdcloudAuth', 'slots', 'locale', 'commandUi', 'sidebarRightTabs',
-      'sidebarPanels', 'uiWorkspace',
+      'sidebarPanels', 'uiWorkspace', 'uiConversation',
     ])
   })
 
@@ -233,6 +236,7 @@ describe('JDCloud login browser plugin', () => {
       expect(b.slots.entries(name)[0]?.options.priority).toBe(-100)
     }
     expect(b.commandAvailable('model')).toBe(false)
+    expect(b.suppressViewActions).toHaveBeenCalledOnce()
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.tabs.guide()).toHaveLength(0)
     expect(b.tabs.get('terminal')).toBeUndefined()
@@ -241,6 +245,7 @@ describe('JDCloud login browser plugin', () => {
     expect(b.commandAvailable('plan')).toBe(true)
     await fiber.dispose()
     expect(b.commandAvailable('model')).toBe(true)
+    expect(b.suppressViewActions.mock.results[0]?.value).toHaveBeenCalledOnce()
     expect(b.commandAvailable('permission')).toBe(true)
     expect(b.tabs.get('terminal')?.kind).toBe('terminal')
     expect(b.panelAvailable('plugins')).toBe(true)
@@ -259,6 +264,7 @@ describe('JDCloud login browser plugin', () => {
     b.setAdministrator(true)
     await account?.switchCorp('corp-next')
     expect(b.slots.entries('sidebar.settings')).toHaveLength(0)
+    expect(b.suppressViewActions.mock.results[0]?.value).toHaveBeenCalledOnce()
     expect(b.slots.entries('conversation.input.model')).toHaveLength(0)
     expect(b.slots.entries('conversation.input.permission')).toHaveLength(0)
     expect(b.slots.entries('conversation.hero.agentPreset')).toHaveLength(0)
@@ -272,6 +278,7 @@ describe('JDCloud login browser plugin', () => {
     const updatedEntry = b.slots.entries('sidebar.account').find(candidate => candidate.component === AccountSeat)
     await ((updatedEntry?.inject as (() => JdcloudAccountInjected) | undefined)?.().switchCorp('corp-current'))
     expect(b.slots.entries('sidebar.settings')[0]?.options.priority).toBe(-100)
+    expect(b.suppressViewActions).toHaveBeenCalledTimes(2)
     expect(b.commandAvailable('model')).toBe(false)
     expect(b.commandAvailable('permission')).toBe(false)
     expect(b.tabs.get('terminal')).toBeUndefined()
