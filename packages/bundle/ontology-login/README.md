@@ -36,7 +36,7 @@ pnpm dsh plugin --profile web add ./packages/bundle/ontology-login
 pnpm dsh plugin --profile web remove @deepseek-ai/dsh-ontology-login
 ```
 
-To switch the Web profile from JDCloud to Ontology, run `pnpm run plugins:ontology`. The script skips JDCloud plugins that are not installed, so it can be run repeatedly.
+To switch the Web profile from JDCloud to Ontology, run `pnpm run plugins:ontology`. The script reads the profile's dependency declarations directly, so it can remove JDCloud after switching branches even when its local package link is broken. It skips undeclared JDCloud plugins and can be run repeatedly.
 
 Set the required Runtime address before launching the profile:
 

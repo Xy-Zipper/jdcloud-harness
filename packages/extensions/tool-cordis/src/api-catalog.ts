@@ -2509,7 +2509,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         signature: 'async owns(kind: \'session\' | \'workspace\', id: string, expectedScopeKey?: string): Promise<boolean>',
         description: 'Check whether a durable Session or Workspace belongs to an Ontology user scope.',
         parameters: [{ name: 'kind', description: 'Durable resource kind.' }, { name: 'id', description: 'Durable resource identifier.' }, { name: 'expectedScopeKey', description: 'Optional opening scope retained by a live feed.' }],
-        returns: 'Whether the resource belongs to the selected scope.',
+        returns: 'Whether the resource or an unclaimed subagent\'s ancestor belongs to the selected scope.',
       },
       {
         signature: 'async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown>',
@@ -3622,19 +3622,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Host service backing `ctx.remote.skills` without activating a cold Agent.',
     methods: [
       {
-        signature: 'async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>',
+        signature: '@Remote async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>',
         description: 'List the current account\'s personal Skills and every shared built-in Skill without requiring a Session.',
         parameters: [{ name: 'signal', description: 'Caller cancellation for directory reads.' }],
         returns: 'Account Skill metadata and the scopes this account may mutate.',
       },
       {
-        signature: 'async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>',
+        signature: '@Remote async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>',
         description: 'Install one personal or shared built-in Skill for an authenticated account without requiring a Session.',
         parameters: [{ name: 'request', description: 'Managed scope and bounded Skill folder files.' }, { name: 'signal', description: 'Caller cancellation checked before each file publication.' }],
         returns: 'Installed Skill metadata.',
       },
       {
-        signature: 'async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>',
+        signature: '@Remote async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>',
         description: 'Delete one personal or administrator-managed built-in Skill without requiring a Session.',
         parameters: [{ name: 'request', description: 'Managed scope and Skill name.' }, { name: 'signal', description: 'Caller cancellation checked before removal.' }],
         returns: 'Deletion confirmation.',
@@ -8303,7 +8303,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OntologyAuthStatus',
-    declaration: 'export type OntologyAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyModelingContext;\n};',
+    declaration: 'export type OntologyAuthStatus = {\n    readonly authenticated: false;\n    readonly baseUrl: string;\n} | {\n    readonly authenticated: true;\n    readonly baseUrl: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyProjectContext;\n};',
   },
   {
     name: 'OntologyLoginRequest',
@@ -8314,12 +8314,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OntologyModelingContext {\n    readonly projectId: string;\n    readonly projectName: string;\n    readonly mode: \'modeling\';\n}',
   },
   {
+    name: 'OntologyProjectContext',
+    declaration: 'export type OntologyProjectContext = OntologyModelingContext | OntologyRuntimeContext;',
+  },
+  {
+    name: 'OntologyRuntimeContext',
+    declaration: 'export interface OntologyRuntimeContext {\n    readonly projectId: string;\n    readonly projectName: string;\n    readonly mode: \'runtime\';\n}',
+  },
+  {
     name: 'OntologyRuntimeIdentity',
     declaration: 'export interface OntologyRuntimeIdentity {\n    readonly userId: string;\n    readonly username: string;\n    readonly displayName: string;\n    readonly accountType: OntologyAccountType;\n    readonly authorizationVersion: string;\n}',
   },
   {
     name: 'OntologyRuntimeSessionTransfer',
-    declaration: 'export interface OntologyRuntimeSessionTransfer {\n    readonly accessToken: string;\n    readonly accessTokenExpiresAt: string;\n    readonly refreshToken: string;\n    readonly refreshTokenExpiresAt: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyModelingContext;\n}',
+    declaration: 'export interface OntologyRuntimeSessionTransfer {\n    readonly accessToken: string;\n    readonly accessTokenExpiresAt: string;\n    readonly refreshToken: string;\n    readonly refreshTokenExpiresAt: string;\n    readonly user: OntologyRuntimeIdentity;\n    readonly context?: OntologyProjectContext;\n}',
   },
   {
     name: 'OptionalSessionSeq',

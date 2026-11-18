@@ -82,6 +82,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
    * @param signal - Caller cancellation for directory reads.
    * @returns Account Skill metadata and the scopes this account may mutate.
    */
+  @Remote
   async listAccount(signal: AbortSignal): Promise<AccountSkillListValue> {
     this.throwIfCancelled(signal, 'listing')
     const owner = scopeOwner(this.ctx)
@@ -103,6 +104,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
    * @param signal - Caller cancellation checked before each file publication.
    * @returns Installed Skill metadata.
    */
+  @Remote
   async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue> {
     this.throwIfCancelled(signal, 'installation')
     const owner = scopeOwner(this.ctx)
@@ -124,6 +126,7 @@ export class SessionSkillCatalog extends TypertRemoteService {
    * @param signal - Caller cancellation checked before removal.
    * @returns Deletion confirmation.
    */
+  @Remote
   async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue> {
     return this.deleteManaged(request, undefined, signal)
   }

@@ -33,6 +33,8 @@ When Harness runs in an iframe, the root Slot shows a localized session-transfer
 
 An iframe URL with `ontologyEmbed=1` accepts a top-level `context: { projectId, projectName, mode: 'modeling' }` beside the transferred `session`. After the Host validates that Project, the page renders a compact native Chat, project history, and a New conversation action that reuses an available blank Session. History lists only conversations with content; unused blank Sessions remain stored. Native file, image, and document attachment controls retain their existing upload and analysis path. A successful handoff acknowledges the validated `projectId` and `mode`; a committed successful `ontology_add_draft_resources` or `ontology_update_draft_bindings` result sends `ontology/draft-updated` to the exact parent origin.
 
+The full assistant accepts `mode: 'runtime'` in the same Project context and retains the full workspace interface. Each successful handoff acknowledges both the Project id and mode so the parent can confirm a project switch.
+
 -----
 
 <a id="understand-the-implementation"></a>

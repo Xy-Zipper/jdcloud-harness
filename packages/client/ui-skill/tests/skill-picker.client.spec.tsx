@@ -269,7 +269,7 @@ describe('SkillPickerView', () => {
       loadCatalog={() => Promise.resolve({
         skills: catalog,
         installScopes: ['personal', 'built-in'],
-        managedSkills: [],
+        managedSkills: [{ name: 'account-helper', description: '账号技能', modelInvocable: true, scope: 'personal' }],
       })}
       t={t}
     />)
@@ -279,6 +279,10 @@ describe('SkillPickerView', () => {
     await screen.findByRole('dialog', { name: '技能管理' })
     expect(screen.getByRole('tab', { name: '我的技能' })).toBeDefined()
     expect(screen.getByRole('tab', { name: '内置技能' })).toBeDefined()
+    const installed = screen.getByRole('heading', { name: '已安装技能' })
+    expect(screen.getByRole('button', { name: '选择文件夹' }).compareDocumentPosition(installed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('button', { name: '导入技能' }).compareDocumentPosition(installed) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('account-helper')).toBeDefined()
   })
 
   it('shows catalog loading failures and a retryable empty state', async () => {

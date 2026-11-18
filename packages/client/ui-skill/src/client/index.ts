@@ -179,16 +179,27 @@ export function apply(ctx: ClientContext): void {
   // locale service's own fallback ladder; candidate-time reads stay plain text.
   const t = ctx.locale.bind(NS)
 
-  const injectedFor = (sessionId: SessionId): SkillPickerInjected => ({
-    available: sessions.subagentAddress(sessionId) === undefined,
-    loadCatalog: () => fetchCatalog(sessionId).promise,
+  // Settings manages account folders directly; composer discovery remains Session-scoped.
+  const injectedFor = (sessionId: SessionId | undefined): SkillPickerInjected => ({
+    available: sessionId === undefined || sessions.subagentAddress(sessionId) === undefined,
+    loadCatalog: async () => {
+      if (sessionId !== undefined) return fetchCatalog(sessionId).promise
+      const result = await skills.listAccount()
+      if (!result.ok) throw new Error(`skills/listAccount failed: ${result.error.code}: ${result.error.message}`)
+      return { ...result.value, managedSkills: result.value.skills }
+    },
     installSkill: async (
       scope: SkillInstallScope,
       files: readonly SkillInstallFile[],
     ): Promise<SkillInstallOutcome> => {
       let result: Awaited<ReturnType<typeof skills.create>>
       try {
-        result = await skills.create({ sessionId, scope, files })
+        if (sessionId === undefined) {
+          if (scope === 'project') return { ok: false, error: { code: 'skill/forbidden' } }
+          result = await skills.createAccount({ scope, files })
+        } else {
+          result = await skills.create({ sessionId, scope, files })
+        }
       } catch (error: unknown) {
         // Transport failures do not carry a RemoteResult for the dialog to classify.
         console.error('[ui-skill] skill installation transport failed:', error)
@@ -207,6 +218,10 @@ export function apply(ctx: ClientContext): void {
             ...reason === undefined ? {} : { reason },
           },
         }
+      }
+      if (sessionId === undefined) {
+        clearAll()
+        return { ok: true, skill: result.value.skill }
       }
       const current = fetches.get(sessionId)?.settled ?? {
         skills: [],
@@ -236,7 +251,9 @@ export function apply(ctx: ClientContext): void {
     deleteSkill: async (scope: SkillManagedScope, name: string): Promise<SkillDeleteOutcome> => {
       let result: Awaited<ReturnType<typeof skills.delete>>
       try {
-        result = await skills.delete({ sessionId, scope, name })
+        result = sessionId === undefined
+          ? await skills.deleteAccount({ scope, name })
+          : await skills.delete({ sessionId, scope, name })
       } catch (error: unknown) {
         console.error('[ui-skill] skill deletion transport failed:', error)
         return { ok: false, error: { code: 'transport/failure' } }
@@ -246,7 +263,8 @@ export function apply(ctx: ClientContext): void {
         return { ok: false, error: { code: result.error.code } }
       }
       // The next read must rediscover a lower-priority Skill with the same name.
-      invalidate(sessionId)
+      if (sessionId === undefined) clearAll()
+      else invalidate(sessionId)
       return { ok: true }
     },
   })
@@ -258,26 +276,13 @@ export function apply(ctx: ClientContext): void {
     inject: injectedFor,
   }, SkillPicker))
 
-  const settingsInjected = (): SkillPickerInjected => {
-    const session = Object.values(sessions.list.getSnapshot().byId)
-      .find(row => (row.retainedBy.mainView ?? 0) > 0
-        && sessions.subagentAddress(row.id) === undefined)
-    if (session !== undefined) return injectedFor(session.id)
-    return {
-      available: false,
-      loadCatalog: () => Promise.reject(new Error('skill settings require an open main Session')),
-      installSkill: () => Promise.resolve({ ok: false, error: { code: 'session/not-found' } }),
-      deleteSkill: () => Promise.resolve({ ok: false, error: { code: 'session/not-found' } }),
-    }
-  }
-
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'skills',
     order: 30,
     label: () => t('settings.nav'),
     locale: NS,
-    inject: settingsInjected,
+    inject: () => injectedFor(undefined),
   }, SkillSettingsSection))
 
   const source = {

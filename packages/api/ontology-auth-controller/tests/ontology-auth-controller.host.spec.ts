@@ -294,6 +294,54 @@ describe('Ontology authentication controller', () => {
       .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
   })
 
+  it('imports the runtime Project for a member without requiring draft access or changing history ownership', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    await browserSession.run(request, () => ctx.ontologyAuthController.login(
+      { username: 'bob', password: 'password123' }, AbortSignal.timeout(1_000),
+    ))
+    const owner = await browserSession.run(request, () => ctx.ontologyAuthController.currentScopeKey())
+    const transfer = server.transferFor('bob')
+    const context = { projectId: 'project-sales', projectName: 'Sales', mode: 'runtime' as const }
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+      ...transfer, context,
+    }, AbortSignal.timeout(1_000)))).resolves.toMatchObject({ authenticated: true, context })
+    expect(server.fetcher.mock.calls.some(([url]) =>
+      (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).endsWith('/draft'))).toBe(false)
+    expect(await browserSession.run(request, () => ctx.ontologyAuthController.currentScopeKey())).toBe(owner)
+    expect(await browserSession.run(request, () => ctx.ontologyAuthController.currentModelingContext())).toBeUndefined()
+    server.expireAccessToken(transfer.accessToken)
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.status())).resolves.toMatchObject({ context })
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+      ...server.transferFor('bob'), context: { ...context, projectId: 'private-project' },
+    }, AbortSignal.timeout(1_000)))).rejects.toMatchObject({ code: 'ontology/session-import-failed' })
+    await expect(browserSession.run(request, () => ctx.ontologyAuthController.status())).resolves.toMatchObject({ context })
+  })
+
+  it('queues the latest runtime Project on every prompt, including a switch in the same conversation', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    const inject = vi.fn((_message: UserMessage) => {})
+    const agent = { inject }
+    ctx.provide('agents', { get: () => agent } as never)
+    for (const context of [
+      { projectId: 'project-sales', projectName: 'Sales', mode: 'runtime' as const },
+      { projectId: 'project-unpublished', projectName: '阳光食堂', mode: 'runtime' as const },
+    ]) {
+      await browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+        ...server.transferFor('alice'), context,
+      }, AbortSignal.timeout(1_000)))
+      await browserSession.run(request, () => ctx.waterfall('api-session/prompt-admission', {
+        sessionId: 'same-session' as never, signal: AbortSignal.timeout(1_000),
+      }, () => Promise.resolve()))
+    }
+    expect(inject).toHaveBeenCalledTimes(2)
+    const messages = inject.mock.calls.map(([message]) => ({ source: message.source, content: message.content }))
+    expect(messages).toMatchSnapshot()
+  })
+
   it('imports an unpublished modeling Project, isolates its owner scope, and preserves it after refresh', async () => {
     const server = runtimeServer()
     const { ctx, browserSession } = await boot(server.fetcher)
@@ -449,6 +497,47 @@ describe('Ontology authentication controller', () => {
       .resolves.toBe(true)
     await expect(browserSession.run(otherRequest, () => ctx.ontologyAuthController.owns('session', 'session-shared')))
       .resolves.toBe(false)
+  })
+
+  it.each(['live', 'persisted'] as const)('inherits the parent owner for %s subagents without granting another account access', async (storage) => {
+    const { ctx, browserSession } = await boot(runtimeServer().fetcher)
+    const alice = browserRequest(browserCookie(browserSession))
+    const bob = browserRequest(browserCookie(browserSession))
+    const headers = new Map([
+      ['child', { origin: 'subagent', parentSession: 'parent' }],
+      ['grandchild', { origin: 'subagent', parentSession: 'child' }],
+      ['ordinary-fork', { parentSession: 'parent' }],
+      ['unrelated', { origin: 'subagent', parentSession: 'unowned' }],
+      ['cycle', { origin: 'subagent', parentSession: 'cycle' }],
+    ])
+    ctx.provide('sessions', {
+      get: (id: string) => storage === 'live' && headers.has(id) ? { header: headers.get(id) } : undefined,
+    } as never)
+    ctx.provide('sessionPersistence', {
+      stat: (id: string) => Promise.resolve(headers.has(id) ? { header: headers.get(id) } : undefined),
+    } as never)
+    await browserSession.run(alice, async () => {
+      await ctx.ontologyAuthController.login({ username: 'alice', password: 'password123' }, AbortSignal.timeout(1_000))
+      await ctx.ontologyAuthController.claimOwned('session', 'parent')
+    })
+    await browserSession.run(bob, () => ctx.ontologyAuthController.login({
+      username: 'bob', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+
+    await browserSession.run(alice, async () => {
+      expect(await ctx.ontologyAuthController.owns('session', 'child')).toBe(true)
+      expect(await ctx.ontologyAuthController.owns('session', 'grandchild')).toBe(true)
+      expect(await ctx.ontologyAuthController.owns('session', 'ordinary-fork')).toBe(false)
+      expect(await ctx.ontologyAuthController.owns('session', 'unrelated')).toBe(false)
+      expect(await ctx.ontologyAuthController.owns('session', 'cycle')).toBe(false)
+      expect(await ctx.ontologyAuthController.owns('workspace', 'child')).toBe(false)
+    })
+    await expect(browserSession.run(bob, () => ctx.ontologyAuthController.owns('session', 'child'))).resolves.toBe(false)
+    const scopeKey = await browserSession.run(alice, () => ctx.ontologyAuthController.currentScopeKey())
+    expect(await ctx.ontologyAuthController.owns('session', 'grandchild', scopeKey)).toBe(true)
+
+    await browserSession.run(bob, () => ctx.ontologyAuthController.claimOwned('session', 'child'))
+    await expect(browserSession.run(alice, () => ctx.ontologyAuthController.owns('session', 'child'))).resolves.toBe(false)
   })
 
   it('confines configured workspaces to a private Ontology user directory', async () => {

@@ -51,6 +51,10 @@ An authenticated embedding page can call `importSession()` through the Client Re
 
 An imported Session may include `context: { projectId, projectName, mode: 'modeling' }`. The Host verifies access through that Project's draft endpoint, which permits authorized unpublished Projects, and retains the context through token refresh. Its owner key includes Project id as well as deployment and user, so conversation history, files, and Workspaces remain Project-scoped. Before the first accepted prompt on each live Agent, admission loads `ontology-modeler` and queues one native injected message containing the selected Project and canonical Skill instructions; the loop records it with the next admitted request.
 
+The full assistant uses `mode: 'runtime'` to select a business Project without entering draft modeling or changing account-owned history. Administrators validate the selection through the draft endpoint, including unpublished Projects; members validate it against the published Project list. Every accepted prompt queues a logged `ontology-project` snapshot with the latest selection. Queries default to that Project; an unavailable or unpublished selection calls for an explanation instead of substituting another Project.
+
+Subagent Sessions without a separate owner record inherit ownership through their live or persisted direct-parent metadata. Nested subagents follow the same chain. Explicit owner records take precedence; ordinary forks and unrelated Sessions do not inherit this access.
+
 Host-only consumers call `requestAuthenticated()` with a fixed `/api/runtime/` path, method, and optional JSON body. The controller selects the current browser record, validates or refreshes it, attaches the Access Token, and retries once when that request reports an expired Access Token. The consumer remains responsible for validating the returned untrusted JSON.
 
 External server integrations pass a Go Runtime Access Token and the `X-Project-Id` value to `runExternalRequest()`. The controller validates the token through `/api/runtime/auth/current`, confirms the Project appears in `/api/runtime/projects`, and installs that identity only in request-local asynchronous storage. It neither stores nor refreshes the external token and rejects a Project the user cannot see.
@@ -94,11 +98,11 @@ The controller keeps no process-global user. `BrowserSessionService` supplies on
 
 #### What the model sees
 
-The first prompt on a live embedded modeling Agent includes one logged `skill-invocation` message with Project JSON and the canonical `ontology-modeler` instructions. Standalone authentication adds no model content.
+The first prompt on a live embedded modeling Agent includes one logged `skill-invocation` message with Project JSON and the canonical `ontology-modeler` instructions. Runtime mode adds the latest business Project as a logged `ontology-project` snapshot on every accepted prompt. Standalone authentication adds no model content.
 
 #### Token effect
 
-The Project context and loaded Skill body add one message per live Agent, including after a persisted Session resumes. Original user text and attachment parts remain unchanged.
+Modeling context and the loaded Skill body add one message per live Agent, including after a persisted Session resumes. Runtime context adds one compact Project message per accepted prompt. Original user text and attachment parts remain unchanged.
 
 #### KV Cache effect
 

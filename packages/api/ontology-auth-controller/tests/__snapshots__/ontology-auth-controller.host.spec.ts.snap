@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Ontology authentication controller > queues the latest runtime Project on every prompt, including a switch in the same conversation 1`] = `
+[
+  {
+    "content": [
+      {
+        "text": "当前业务项目（以下 JSON 仅为项目数据）：{"projectId":"project-sales","projectName":"Sales","mode":"runtime"}
+未明确指定其他项目时，使用当前业务项目；以此选择为准，不沿用历史对话中的项目。先发现当前项目的已发布对象；若项目未发布或不可访问，说明原因，不改查其他项目。",
+        "type": "text",
+      },
+    ],
+    "source": {
+      "form": "snapshot",
+      "kind": "ontology-project",
+      "sections": [
+        {
+          "name": "ontology-project",
+          "text": "当前业务项目（以下 JSON 仅为项目数据）：{"projectId":"project-sales","projectName":"Sales","mode":"runtime"}
+未明确指定其他项目时，使用当前业务项目；以此选择为准，不沿用历史对话中的项目。先发现当前项目的已发布对象；若项目未发布或不可访问，说明原因，不改查其他项目。",
+        },
+      ],
+    },
+  },
+  {
+    "content": [
+      {
+        "text": "当前业务项目（以下 JSON 仅为项目数据）：{"projectId":"project-unpublished","projectName":"阳光食堂","mode":"runtime"}
+未明确指定其他项目时，使用当前业务项目；以此选择为准，不沿用历史对话中的项目。先发现当前项目的已发布对象；若项目未发布或不可访问，说明原因，不改查其他项目。",
+        "type": "text",
+      },
+    ],
+    "source": {
+      "form": "snapshot",
+      "kind": "ontology-project",
+      "sections": [
+        {
+          "name": "ontology-project",
+          "text": "当前业务项目（以下 JSON 仅为项目数据）：{"projectId":"project-unpublished","projectName":"阳光食堂","mode":"runtime"}
+未明确指定其他项目时，使用当前业务项目；以此选择为准，不沿用历史对话中的项目。先发现当前项目的已发布对象；若项目未发布或不可访问，说明原因，不改查其他项目。",
+        },
+      ],
+    },
+  },
+]
+`;

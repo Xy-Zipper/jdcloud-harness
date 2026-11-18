@@ -500,7 +500,7 @@ async claimOwned(kind: 'session' | 'workspace', id: string): Promise<void>
  * @param kind - Durable resource kind.
  * @param id - Durable resource identifier.
  * @param expectedScopeKey - Optional opening scope retained by a live feed.
- * @returns Whether the resource belongs to the selected scope.
+ * @returns Whether the resource or an unclaimed subagent's ancestor belongs to the selected scope.
  */
 async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
 

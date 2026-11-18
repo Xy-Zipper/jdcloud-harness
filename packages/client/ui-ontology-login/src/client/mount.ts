@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {
   OntologyAuthStatus,
   OntologyModelingContext,
+  OntologyProjectContext,
   OntologyRuntimeIdentity,
   OntologyRuntimeSessionTransfer,
 } from '@deepseek-ai/dsh-api-ontology-auth-controller/types'
@@ -30,7 +31,7 @@ interface RuntimeSessionMessage {
   readonly version: 1
   readonly nonce: string
   readonly session: OntologyRuntimeSessionTransfer
-  readonly context?: OntologyModelingContext
+  readonly context?: OntologyProjectContext
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -86,7 +87,7 @@ function installRuntimeSessionBridge(
       if (!active) return
       const context = result.ok && result.value.authenticated ? result.value.context : undefined
       const accepted = result.ok && (message.context === undefined
-        || context?.projectId === message.context.projectId)
+        || (context?.projectId === message.context.projectId && context.mode === message.context.mode))
       if (accepted) {
         resetIdentityView()
         applyStatus(result.value)
@@ -140,13 +141,13 @@ function readRuntimeSessionMessage(value: unknown): RuntimeSessionMessage | unde
 }
 
 /** Validate the management page's selected Project before importing it into the Host. */
-function readModelingContext(value: unknown): OntologyModelingContext | undefined {
-  if (!isRecord(value) || value.mode !== 'modeling') return undefined
+function readModelingContext(value: unknown): OntologyProjectContext | undefined {
+  if (!isRecord(value) || (value.mode !== 'modeling' && value.mode !== 'runtime')) return undefined
   const projectId = nonEmptyString(value.projectId)
   const projectName = nonEmptyString(value.projectName)
   return projectId === undefined || projectName === undefined
     ? undefined
-    : { projectId, projectName, mode: 'modeling' }
+    : { projectId, projectName, mode: value.mode }
 }
 
 /** Validate Runtime tokens and identity without retaining the incoming message object. */
@@ -264,14 +265,14 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   const applyStatus = (status: OntologyAuthStatus): void => {
     if (!active) return
     if (status.authenticated) {
-      if (modeling && (parentOrigin === undefined || status.context === undefined)) {
+      if (modeling && (parentOrigin === undefined || status.context?.mode !== 'modeling')) {
         hideAccount()
         hideModeling()
         showGate()
         return
       }
       hideGate()
-      if (modeling && parentOrigin !== undefined && status.context !== undefined) {
+      if (modeling && parentOrigin !== undefined && status.context?.mode === 'modeling') {
         hideAccount()
         showModeling(status, status.context, parentOrigin)
       } else {

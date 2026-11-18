@@ -1,4 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -6,7 +11,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SESSION_FORMAT_VERSION, type SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-skill'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SessionSkillCatalog } from '../src/skill-catalog.ts'
 import { brandString } from '@deepseek-ai/dsh-brand'
 
@@ -50,6 +55,66 @@ async function context(): Promise<Context> {
 }
 
 describe('SessionSkillCatalog', () => {
+  it('rejects account operations without authenticated Skill access', async () => {
+    const ctx = await context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+    const catalog = new SessionSkillCatalog(ctx)
+    const signal = new AbortController().signal
+    await expect(catalog.listAccount(signal)).rejects.toMatchObject({ code: 'skill/forbidden' })
+    await expect(catalog.createAccount({ scope: 'personal', files: [] }, signal))
+      .rejects.toMatchObject({ code: 'skill/forbidden' })
+    await expect(catalog.deleteAccount({ scope: 'personal', name: 'account-helper' }, signal))
+      .rejects.toMatchObject({ code: 'skill/forbidden' })
+  })
+
+  it.each([false, true])('manages account folders without a Session (administrator: %s)', async (administrator) => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-account-skills-')))
+    onTestFinished(async () => { await rm(root, { recursive: true, force: true }) })
+    const ctx = await context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+    await ctx.plugin(LocalFileSystem, { cwd: root }).await()
+    const observeSession = vi.fn(() => { throw new Error('Account operations must not inspect a Session') })
+    ctx.provide('sessionQuery', { observeSession } as never)
+    const owns = vi.fn(() => { throw new Error('Account operations must not require a Session owner') })
+    ctx.provide('ontologyAuthController', {
+      owns,
+      assertWorkspacePath: () => Promise.resolve(),
+      currentSkillAccess: () => Promise.resolve({
+        userId: 'account', administrator, workspaceRoot: root,
+        personalSkillDirectory: join(root, '.dsh', 'skills'),
+        managedSkillDirectory: join(root, 'shared'),
+      }),
+    } as never)
+    const catalog = new SessionSkillCatalog(ctx)
+    expect(remoteMethods(catalog).map(marker => marker.method)).toEqual(expect.arrayContaining([
+      'listAccount', 'createAccount', 'deleteAccount',
+    ]))
+    const text = '---\nname: account-helper\ndescription: Account helper\n---\nInstructions.\n'
+    const files = [{ path: 'SKILL.md', contentBase64: Buffer.from(text).toString('base64') }]
+    const signal = new AbortController().signal
+    await catalog.createAccount({ scope: 'personal', files }, signal)
+    expect(await readFile(join(root, '.dsh', 'skills', 'account-helper', 'SKILL.md'), 'utf8')).toBe(text)
+    await expect(catalog.listAccount(signal)).resolves.toMatchObject({
+      skills: [{ name: 'account-helper', scope: 'personal' }],
+      installScopes: administrator ? ['personal', 'built-in'] : ['personal'],
+    })
+    if (administrator) {
+      await catalog.createAccount({ scope: 'built-in', files }, signal)
+      expect(await readFile(join(root, 'shared', 'account-helper', 'SKILL.md'), 'utf8')).toBe(text)
+      await catalog.deleteAccount({ scope: 'built-in', name: 'account-helper' }, signal)
+    } else {
+      await expect(catalog.createAccount({ scope: 'built-in', files }, signal))
+        .rejects.toMatchObject({ code: 'skill/forbidden' })
+      await expect(catalog.deleteAccount({ scope: 'built-in', name: 'account-helper' }, signal))
+        .rejects.toMatchObject({ code: 'skill/forbidden' })
+    }
+    await catalog.deleteAccount({ scope: 'personal', name: 'account-helper' }, signal)
+    await expect(catalog.listAccount(signal)).resolves.toMatchObject({ skills: [] })
+    expect(observeSession).not.toHaveBeenCalled()
+    expect(owns).not.toHaveBeenCalled()
+    expect(ctx.agents.list()).toEqual([])
+  })
+
   it('reads a moved cold Session catalog from its recorded current directory without resuming an Agent', async () => {
     const ctx = await context()
     const sessionId = brandString<SessionId>('cold-skills')
@@ -77,6 +142,7 @@ describe('SessionSkillCatalog', () => {
     const catalog = new SessionSkillCatalog(ctx)
 
     await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({
+      installScopes: ['project'], managedSkills: [],
       skills: [{
         name: 'review',
         description: 'Review the current change.',
@@ -113,7 +179,7 @@ describe('SessionSkillCatalog', () => {
       const ensure = vi.spyOn(ctx.workingDirectory, 'ensure')
       const resume = vi.spyOn(ctx.agents, 'resume')
       await expect(new SessionSkillCatalog(ctx).list({ sessionId }, new AbortController().signal))
-        .resolves.toEqual({ skills: [] })
+        .resolves.toEqual({ skills: [], installScopes: ['project'], managedSkills: [] })
       expect(list).toHaveBeenCalledWith({ cwd: expected, scope: undefined })
       expect(ensure).not.toHaveBeenCalled()
       expect(resume).not.toHaveBeenCalled()
@@ -145,14 +211,15 @@ describe('SessionSkillCatalog', () => {
     const catalog = new SessionSkillCatalog(ctx)
 
     await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({
+      installScopes: ['project'], managedSkills: [],
       skills: [{
         name: 'preset-owned',
         description: 'Composed for this Agent.',
         modelInvocable: false,
       }],
     })
-    expect(scopedList).toHaveBeenCalledWith({ cwd: '/live/current', scope: agent })
-    expect(ensureDirectory).toHaveBeenCalledWith(agent, expect.any(AbortSignal))
+    expect(scopedList).toHaveBeenCalledWith({ cwd: '/live/project', scope: agent })
+    expect(ensureDirectory).not.toHaveBeenCalled()
     expect(session.header.cwd).toBe('/live/project')
     expect(acquireScope).not.toHaveBeenCalled()
   })
@@ -173,7 +240,7 @@ describe('SessionSkillCatalog', () => {
     ctx.provide('skills', { list } as never)
     const catalog = new SessionSkillCatalog(ctx)
 
-    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [] })
+    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [], installScopes: ['project'], managedSkills: [] })
     expect(acquireScope).toHaveBeenCalledWith('minimal')
     expect(list).toHaveBeenCalledWith({ cwd: '/cold/project', scope })
     expect(ctx.agents.list()).toEqual([])
@@ -195,7 +262,7 @@ describe('SessionSkillCatalog', () => {
     ctx.provide('skills', { list } as never)
     const catalog = new SessionSkillCatalog(ctx)
 
-    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [] })
+    await expect(catalog.list({ sessionId }, new AbortController().signal)).resolves.toEqual({ skills: [], installScopes: ['project'], managedSkills: [] })
     expect(list).toHaveBeenCalledWith({ cwd: '/cold/project', scope: undefined })
   })
 

@@ -8,7 +8,8 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialRecord, GrantRecord } from '@deepseek-ai/dsh-credentials/types'
@@ -26,6 +27,7 @@ import type {
   OntologyAuthenticatedRequest,
   OntologyLoginRequest,
   OntologyModelingContext,
+  OntologyProjectContext,
   OntologyRuntimeIdentity,
   OntologyRuntimeSessionTransfer,
 } from './types.ts'
@@ -44,7 +46,7 @@ interface BrowserSessionIdentity {
 interface AuthPayload extends OntologyTokenPair {
   readonly version: 1
   readonly baseUrl: string
-  readonly context?: OntologyModelingContext
+  readonly context?: OntologyProjectContext
 }
 
 interface ExternalAuthPayload {
@@ -74,6 +76,13 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Browser-scoped Ontology Runtime authentication state. */
     ontologyAuthController: OntologyAuthController
+  }
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Selected Ontology Project captured at prompt admission. @persistenceAttribution */
+    'ontology-project': { readonly kind: 'ontology-project' } & ContextFormed
   }
 }
 
@@ -121,8 +130,20 @@ export class OntologyAuthController extends TypertRemoteService {
       await next()
       if (state.auth.context !== undefined) {
         const agents = this.ctx.get('agents')
-        const skills = this.ctx.get('skills')
         const agent = agents?.get(request.sessionId)
+        if (state.auth.context.mode === 'runtime') {
+          if (agent === undefined) throw new Error('Ontology project context requires the Agent service')
+          // Every accepted prompt records the current selection, including switches in an existing conversation.
+          const text = `当前业务项目（以下 JSON 仅为项目数据）：${JSON.stringify(state.auth.context)}\n`
+            + '未明确指定其他项目时，使用当前业务项目；以此选择为准，不沿用历史对话中的项目。'
+            + '先发现当前项目的已发布对象；若项目未发布或不可访问，说明原因，不改查其他项目。'
+          agent.inject(createUserMessage({
+            source: { kind: 'ontology-project', form: 'snapshot', sections: [{ name: 'ontology-project', text }] },
+            content: [{ type: 'text', text }],
+          }))
+          return
+        }
+        const skills = this.ctx.get('skills')
         if (agent === undefined || skills === undefined) {
           throw new Error('Ontology modeling requires the Agent and Skill services')
         }
@@ -224,12 +245,19 @@ export class OntologyAuthController extends TypertRemoteService {
         throw new Error('transferred Ontology Runtime Session belongs to a different user')
       }
       if (request.context !== undefined) {
-        const draft = await client.requestAuthenticated(request.accessToken, {
+        // Administrators may select unpublished Projects; members validate through the published roster.
+        const canReadDraft = request.context.mode === 'modeling' || identity.accountType === 'admin'
+        const project = await client.requestAuthenticated(request.accessToken, {
           method: 'GET',
-          path: `/api/runtime/projects/${encodeURIComponent(request.context.projectId)}/draft`,
+          path: canReadDraft
+            ? `/api/runtime/projects/${encodeURIComponent(request.context.projectId)}/draft`
+            : '/api/runtime/projects',
         }, operationSignal)
-        if (typeof draft !== 'object' || draft === null || Array.isArray(draft)) {
-          throw new Error('Ontology modeling draft response is invalid')
+        if (typeof project !== 'object' || project === null || Array.isArray(project)) {
+          throw new Error('Ontology Project response is invalid')
+        }
+        if (!canReadDraft && !readProjectIds(project).includes(request.context.projectId)) {
+          throw new Error('Ontology user cannot access the selected Project')
         }
       }
     } catch (error) {
@@ -327,7 +355,7 @@ export class OntologyAuthController extends TypertRemoteService {
     }
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     if (state.kind !== 'authenticated') return undefined
-    if (state.auth.context !== undefined) {
+    if (state.auth.context?.mode === 'modeling') {
       return createHash('sha256').update(this.baseUrl).update('\0')
         .update(state.auth.context.projectId).update('\0').update(state.auth.user.userId).digest('hex')
     }
@@ -341,7 +369,7 @@ export class OntologyAuthController extends TypertRemoteService {
   async currentModelingContext(): Promise<OntologyModelingContext | undefined> {
     if (this.externalRequests.getStore() !== undefined) return undefined
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
-    return state.kind === 'authenticated' ? state.auth.context : undefined
+    return state.kind === 'authenticated' && state.auth.context?.mode === 'modeling' ? state.auth.context : undefined
   }
 
   /**
@@ -441,17 +469,32 @@ export class OntologyAuthController extends TypertRemoteService {
    * @param kind - Durable resource kind.
    * @param id - Durable resource identifier.
    * @param expectedScopeKey - Optional opening scope retained by a live feed.
-   * @returns Whether the resource belongs to the selected scope.
+   * @returns Whether the resource or an unclaimed subagent's ancestor belongs to the selected scope.
    */
   async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean> {
     const scopeKey = expectedScopeKey ?? await this.currentScopeKey()
     if (scopeKey === undefined) return false
-    const record = await this.ctx.credentials.readRecord(this.ownerKey(kind, id))
-    return record?.kind === 'grant'
-      && typeof record.payload === 'object'
-      && record.payload !== null
-      && Reflect.get(record.payload, 'version') === 1
-      && Reflect.get(record.payload, 'scopeKey') === scopeKey
+    const visited = new Set<string>()
+    let current = id
+    while (!visited.has(current)) {
+      visited.add(current)
+      const record = await this.ctx.credentials.readRecord(this.ownerKey(kind, current))
+      if (record !== undefined) {
+        return record.kind === 'grant'
+          && typeof record.payload === 'object'
+          && record.payload !== null
+          && Reflect.get(record.payload, 'version') === 1
+          && Reflect.get(record.payload, 'scopeKey') === scopeKey
+      }
+      if (kind !== 'session') return false
+      // Delegated Sessions inherit their creator's owner, including children persisted before this browser request.
+      const sessionId = current as SessionId
+      const header = this.ctx.get('sessions')?.get(sessionId)?.header
+        ?? (await this.ctx.get('sessionPersistence')?.stat(sessionId))?.header
+      if (header?.origin !== 'subagent' || header.parentSession === undefined) return false
+      current = header.parentSession
+    }
+    return false
   }
 
   /**
@@ -496,7 +539,7 @@ export class OntologyAuthController extends TypertRemoteService {
     tokens: OntologyTokenPair,
     identity: OntologyRuntimeIdentity,
     client: OntologyClient,
-    context?: OntologyModelingContext,
+    context?: OntologyProjectContext,
   ): Promise<AuthPayload> {
     const auth: AuthPayload = {
       version: 1, baseUrl: this.baseUrl, ...tokens, user: identity,
@@ -693,7 +736,7 @@ function parseAuthRecord(record: CredentialRecord, expectedBaseUrl: string): Aut
 }
 
 /** Validate the durable or wire Project selection before it controls ownership and model context. */
-function parseModelingContext(value: unknown): OntologyModelingContext {
+function parseModelingContext(value: unknown): OntologyProjectContext {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('Ontology modeling context is invalid')
   }
@@ -701,7 +744,7 @@ function parseModelingContext(value: unknown): OntologyModelingContext {
   const projectName: unknown = Reflect.get(value, 'projectName')
   const mode: unknown = Reflect.get(value, 'mode')
   if (typeof projectId !== 'string' || projectId.trim() === ''
-    || typeof projectName !== 'string' || projectName.trim() === '' || mode !== 'modeling') {
+    || typeof projectName !== 'string' || projectName.trim() === '' || (mode !== 'modeling' && mode !== 'runtime')) {
     throw new Error('Ontology modeling context is invalid')
   }
   return { projectId, projectName, mode }

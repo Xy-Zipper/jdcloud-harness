@@ -33,6 +33,8 @@ Harness 在 iframe 中运行时，根 Slot 会显示本地化会话中转页，�
 
 带有 `ontologyEmbed=1` 的 iframe URL 接受与传入 `session` 并列的顶层 `context: { projectId, projectName, mode: 'modeling' }`。Host 校验该 Project 后，页面会显示紧凑的原生 Chat、项目历史会话和复用可用空白 Session 的“新建会话”操作。历史列表只展示有内容的会话，未使用的空白 Session 仍保留存储。原生文件、图片和文档附件控件沿用现有上传与分析流程。交接成功后会确认已校验的 `projectId` 和 `mode`；已提交的成功 `ontology_add_draft_resources` 或 `ontology_update_draft_bindings` 结果会向精确父页面 Origin 发送 `ontology/draft-updated`。
 
+完整助手在相同的 Project 上下文中接受 `mode: 'runtime'`，并保留完整工作区界面。每次成功交接都会确认 Project id 和模式，供父页面确认项目切换。
+
 -----
 
 <a id="understand-the-implementation"></a>

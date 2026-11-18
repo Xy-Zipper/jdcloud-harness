@@ -8,6 +8,7 @@ import { AccountSeat, type OntologyAccountInjected } from '../src/client/Account
 import { EmbeddedSessionPage } from '../src/client/EmbeddedSessionPage.tsx'
 import { installOntologyLoginUi, uiInject } from '../src/client/mount.ts'
 import { ModelingConversation } from '../src/client/ModelingConversation.tsx'
+import type { OntologyProjectContext } from '@deepseek-ai/dsh-api-ontology-auth-controller/types'
 
 /** Assemble real slots around a controllable Ontology Remote double. */
 async function bench(authenticated = false) {
@@ -32,11 +33,7 @@ async function bench(authenticated = false) {
       accountType: 'admin' as const, authorizationVersion: '1',
     },
   }
-  let importedContext: {
-    readonly projectId: string
-    readonly projectName: string
-    readonly mode: 'modeling'
-  } | undefined
+  let importedContext: OntologyProjectContext | undefined
   const status = vi.fn(() => Promise.resolve({
     ok: true as const,
     value: loggedIn ? { ...authenticatedValue, ...(importedContext === undefined ? {} : { context: importedContext }) } : {
@@ -47,11 +44,7 @@ async function bench(authenticated = false) {
     loggedIn = true
     return Promise.resolve({ ok: true as const, value: authenticatedValue })
   })
-  const importSession = vi.fn((request?: { readonly context?: {
-    readonly projectId: string
-    readonly projectName: string
-    readonly mode: 'modeling'
-  } }) => {
+  const importSession = vi.fn((request?: { readonly context?: OntologyProjectContext }) => {
     loggedIn = true
     importedContext = request?.context
     return Promise.resolve({
@@ -110,7 +103,7 @@ describe('Ontology login browser plugin', () => {
     await fiber.dispose()
   })
 
-  it('imports a Runtime Session only from the embedding page origin', async () => {
+  it.each([undefined, { projectId: 'canteen', projectName: '阳光食堂', mode: 'runtime' as const }])('imports a Runtime Session only from the embedding page origin with context %j', async (context) => {
     const originalParent = Object.getOwnPropertyDescriptor(window, 'parent')
     const parent = { postMessage: vi.fn() }
     Object.defineProperty(window, 'parent', { configurable: true, value: parent })
@@ -141,6 +134,7 @@ describe('Ontology login browser plugin', () => {
       }
       const message = {
         type: 'ontology/runtime-session', version: 1, nonce: 'nonce-1', session,
+        ...(context === undefined ? {} : { context }),
       }
       window.dispatchEvent(new MessageEvent('message', {
         data: message, origin: 'https://attacker.example.com', source: parent as never,
@@ -151,12 +145,16 @@ describe('Ontology login browser plugin', () => {
       window.dispatchEvent(new MessageEvent('message', {
         data: message, origin: 'https://admin.example.com', source: parent as never,
       }))
-      await vi.waitFor(() => { expect(b.importSession).toHaveBeenCalledWith(session) })
+      await vi.waitFor(() => {
+        expect(b.importSession).toHaveBeenCalledWith({ ...session, ...(context === undefined ? {} : { context }) })
+      })
       expect(b.clearSelection).toHaveBeenCalledOnce()
       expect(b.slots.entries('root').some(candidate => candidate.component === EmbeddedSessionPage)).toBe(false)
       expect(b.slots.entries('root').some(candidate => candidate.component === LoginPage)).toBe(false)
+      expect(b.slots.entries('root').some(candidate => candidate.component === ModelingConversation)).toBe(false)
       expect(parent.postMessage).toHaveBeenCalledWith({
         type: 'ontology/runtime-session-result', version: 1, nonce: 'nonce-1', ok: true,
+        ...(context === undefined ? {} : { projectId: context.projectId, mode: context.mode }),
       }, 'https://admin.example.com')
       await fiber.dispose()
     } finally {

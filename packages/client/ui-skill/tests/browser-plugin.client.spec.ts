@@ -28,6 +28,7 @@ import type { ClientSessionContext, InputTriggerSource } from '@deepseek-ai/dsh-
 import { apply, inject } from '../src/client/index.ts'
 import { SkillRow as SkillToolRow } from '../src/client/SkillRow.tsx'
 import { SkillReference, type SkillReferenceInjected } from '../src/client/SkillReference.tsx'
+import type { SkillPickerInjected } from '../src/client/SkillPicker.tsx'
 import { UserTextRegistry } from '../../ui-conversation/src/client/conversation/user-text-registry.ts'
 
 type SkillRow = { name: string; description: string; whenToUse?: string; path?: string; modelInvocable?: boolean }
@@ -52,6 +53,7 @@ function providePresentation(ctx: Context): PresentationCapture {
     children: {
       'tool.call.toolview': { kind: 'keyed', scope: 'session' },
       'conversation.user.text.node': { kind: 'keyed', scope: 'session', inline: true },
+      'settings.section': { kind: 'list', scope: 'root' },
     },
   } as never, () => null)
   const capture: PresentationCapture = {
@@ -123,6 +125,39 @@ const req = (query: string, signal?: AbortSignal) =>
   ({ query, position: 'leading' as const, drilled: false, signal: signal ?? new AbortController().signal })
 
 describe('apply', () => {
+  it('manages account skills from Settings without reading or retaining a Session', async () => {
+    const ctx = new Context()
+    onTestFinished(async () => { await ctx.fiber.dispose() })
+    ctx.provide('sidebarRight', { openResource: vi.fn() })
+    ctx.provide('inputTriggers', { registerSource: () => () => {} })
+    const readSessions = vi.fn(() => { throw new Error('Settings must not read Session state') })
+    ctx.provide('sessions', { list: { getSnapshot: readSessions } } as never)
+    const skill = { name: 'account-helper', description: 'Account skill', modelInvocable: true }
+    const managedSkill = { ...skill, scope: 'personal' as const }
+    const listAccount = vi.fn(() => Promise.resolve({ ok: true as const, value: {
+      skills: [managedSkill], installScopes: ['personal', 'built-in'] as const,
+    } }))
+    const createAccount = vi.fn(() => Promise.resolve({ ok: true as const, value: { skill } }))
+    const deleteAccount = vi.fn(() => Promise.resolve({ ok: true as const, value: {
+      deleted: true as const, scope: 'personal' as const, name: skill.name,
+    } }))
+    new TestRemote(ctx, { skills: { listAccount, createAccount, deleteAccount } })
+    const presentation = providePresentation(ctx)
+    await ctx.plugin({ inject: [...inject], apply }).await()
+    const entry = presentation.slots.entries('settings.section')[0]
+    const injected = entry?.inject?.() as SkillPickerInjected & Record<string, unknown>
+    expect(injected.available).toBe(true)
+    await expect(injected.loadCatalog()).resolves.toEqual({
+      skills: [managedSkill], managedSkills: [managedSkill], installScopes: ['personal', 'built-in'],
+    })
+    const files = [{ path: 'SKILL.md', contentBase64: 'Zm9sZGVy' }]
+    await expect(injected.installSkill('personal', files)).resolves.toEqual({ ok: true, skill })
+    expect(createAccount).toHaveBeenCalledWith({ scope: 'personal', files })
+    await expect(injected.deleteSkill('personal', skill.name)).resolves.toEqual({ ok: true })
+    expect(deleteAccount).toHaveBeenCalledWith({ scope: 'personal', name: skill.name })
+    expect(readSessions).not.toHaveBeenCalled()
+  })
+
   it('declares the services it binds', () => {
     expect(inject).toEqual(['inputTriggers', 'sessions', 'slots', 'locale', 'remote', 'remote.skills', 'sidebarRight', 'uiConversation'])
   })

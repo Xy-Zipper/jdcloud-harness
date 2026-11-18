@@ -33,7 +33,9 @@ Ordinary-session candidates come from the `skills/list` Remote; the host serves 
 
 ### The skill tool row
 
-The composer Skill button opens a searchable catalog and inserts `/name` at the saved cursor position. Its manager imports one complete Skill folder into a Host-authorized project, personal, or built-in scope; only administrators can modify built-in Skills. The Skills section in Settings uses the same account permissions and requires an open ordinary Session. Personal and built-in Skills can be deleted from the manager; project Skills remain managed through workspace files.
+The composer Skill button opens a searchable catalog and inserts `/name` at the saved cursor position. Its manager imports one complete Skill folder into a Host-authorized project, personal, or built-in scope; only administrators can modify built-in Skills. The Skills section in Settings uses authenticated account access without opening or creating a Session. Personal and built-in Skills can be deleted from the manager; project Skills remain managed through workspace files.
+
+The manager has a fixed 640px height capped by the available modal area. Folder selection and Import sit above the installed Skills; only that list scrolls, while the heading, scope, import controls, and Cancel stay visible.
 
 The `preparing` stage shows only the skill icon and title, with no requested skill name or expansion. The `start` and `result` stages use the recorded arguments and output described below; preparation does not consult the installed catalog.
 

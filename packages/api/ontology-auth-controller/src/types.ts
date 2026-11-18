@@ -37,6 +37,16 @@ export interface OntologyModelingContext {
   readonly mode: 'modeling'
 }
 
+/** Project selected for published business queries in the full assistant. */
+export interface OntologyRuntimeContext {
+  readonly projectId: string
+  readonly projectName: string
+  readonly mode: 'runtime'
+}
+
+/** Management selection shared by the full assistant and draft-modeling assistant. */
+export type OntologyProjectContext = OntologyModelingContext | OntologyRuntimeContext
+
 /** Runtime tokens transferred from an authenticated Ontology management page. */
 export interface OntologyRuntimeSessionTransfer {
   readonly accessToken: string
@@ -44,7 +54,7 @@ export interface OntologyRuntimeSessionTransfer {
   readonly refreshToken: string
   readonly refreshTokenExpiresAt: string
   readonly user: OntologyRuntimeIdentity
-  readonly context?: OntologyModelingContext
+  readonly context?: OntologyProjectContext
 }
 
 /** Host-only request to one fixed Ontology Runtime endpoint. */
@@ -64,5 +74,5 @@ export type OntologyAuthStatus =
     readonly authenticated: true
     readonly baseUrl: string
     readonly user: OntologyRuntimeIdentity
-    readonly context?: OntologyModelingContext
+    readonly context?: OntologyProjectContext
   }

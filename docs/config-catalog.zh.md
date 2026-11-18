@@ -264,7 +264,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-ontology-auth-controller`
 
 - `inject`: `credentials` · `browserSession`
-- `source`: [`packages/api/ontology-auth-controller/src/index.ts:62`](../packages/api/ontology-auth-controller/src/index.ts)
+- `source`: [`packages/api/ontology-auth-controller/src/index.ts:64`](../packages/api/ontology-auth-controller/src/index.ts)
 
 ```ts config-catalog
 /** Ontology authentication controller configuration. */

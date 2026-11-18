@@ -56,9 +56,9 @@ export interface SkillPickerCatalog {
 
 /** Business operations injected by the ui-skill slot registration. */
 export interface SkillPickerInjected {
-  /** Whether the addressed Session supports direct human skill invocation. */
+  /** Whether this surface supports Skill operations; Settings uses authenticated account access. */
   readonly available: boolean
-  /** Load the user-invocable catalog for the current Session. */
+  /** Load the Session catalog or the account-managed Settings catalog. */
   readonly loadCatalog: () => Promise<SkillPickerCatalog>
   /** Install one complete Skill folder in an authorized persistent target. */
   readonly installSkill: (
@@ -400,13 +400,9 @@ export function SkillPickerView({
       description={t('manager.description')}
       closeLabel={t('manager.close')}
       className={css.manager ?? ''}
+      contentClassName={css.managerContent ?? ''}
       footer={(
-        <>
-          <Button variant="outline" onClick={closeManager} disabled={saving}>{t('manager.cancel')}</Button>
-          <Button variant="primary" onClick={save} disabled={!canInstall || saving}>
-            {saving ? t('manager.saving') : t('manager.save')}
-          </Button>
-        </>
+        <Button variant="outline" onClick={closeManager} disabled={saving}>{t('manager.cancel')}</Button>
       )}
     >
       <div className={css.importPanel}>
@@ -428,33 +424,6 @@ export function SkillPickerView({
           </div>
           {installScope !== null && <span className={css.scopeHint}>{t(`manager.scopeHint.${installScope}`)}</span>}
         </div>
-        {installScope !== 'project' && (
-          <div className={css.managedSection}>
-            <h3>{t('manager.installed')}</h3>
-            {visibleManagedSkills.length === 0 && (
-              <p className={css.managedEmpty}>{t('manager.installedEmpty')}</p>
-            )}
-            {visibleManagedSkills.map(skill => (
-              <div key={`${skill.scope}:${skill.name}`} className={css.managedSkill}>
-                <span className={css.managedSkillCopy}>
-                  <strong>{skill.name}</strong>
-                  <span>{skill.description}</span>
-                </span>
-                <Button
-                  variant="toolbar"
-                  size="sm"
-                  className={css.deleteButton}
-                  aria-label={t('manager.deleteButton', { name: skill.name })}
-                  icon={<IconTrashOutlineRegular size={14} />}
-                  onClick={() => {
-                    setDeleteError(null)
-                    setDeleteTarget(skill)
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -465,21 +434,57 @@ export function SkillPickerView({
         />
         <div className={css.dropHint}>
           <IconSkillOutlineRegular size={24} />
-          <strong>{folderName ?? t('manager.importPrompt')}</strong>
-          <span>{importFiles === null
-            ? t('manager.importHint')
-            : t('manager.selectedFiles', { count: String(importFiles.length) })}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={saving}
-            onClick={() => { fileInputRef.current?.click() }}
-          >
-            {t('manager.chooseFolder')}
-          </Button>
+          <div className={css.importCopy}>
+            <strong>{folderName ?? t('manager.importPrompt')}</strong>
+            <span>{importFiles === null
+              ? t('manager.importHint')
+              : t('manager.selectedFiles', { count: String(importFiles.length) })}</span>
+          </div>
+          <div className={css.importActions}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={saving}
+              onClick={() => { fileInputRef.current?.click() }}
+            >
+              {t('manager.chooseFolder')}
+            </Button>
+            <Button variant="primary" size="sm" onClick={save} disabled={!canInstall || saving}>
+              {saving ? t('manager.saving') : t('manager.save')}
+            </Button>
+          </div>
         </div>
+        {managerError !== null && <p className={css.managerError} role="alert">{managerError}</p>}
+        {installScope !== 'project' && (
+          <div className={css.managedSection}>
+            <h3>{t('manager.installed')}</h3>
+            <div className={css.managedList}>
+              {visibleManagedSkills.length === 0 && (
+                <p className={css.managedEmpty}>{t('manager.installedEmpty')}</p>
+              )}
+              {visibleManagedSkills.map(skill => (
+                <div key={`${skill.scope}:${skill.name}`} className={css.managedSkill}>
+                  <span className={css.managedSkillCopy}>
+                    <strong>{skill.name}</strong>
+                    <span>{skill.description}</span>
+                  </span>
+                  <Button
+                    variant="toolbar"
+                    size="sm"
+                    className={css.deleteButton}
+                    aria-label={t('manager.deleteButton', { name: skill.name })}
+                    icon={<IconTrashOutlineRegular size={14} />}
+                    onClick={() => {
+                      setDeleteError(null)
+                      setDeleteTarget(skill)
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-      {managerError !== null && <p className={css.managerError} role="alert">{managerError}</p>}
     </Modal>
   ) : null
 

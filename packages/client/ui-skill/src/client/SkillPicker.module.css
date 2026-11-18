@@ -210,17 +210,30 @@
 
 .manager {
   width: min(520px, 100%);
+  height: 640px;
+  max-height: 100%;
   border-radius: 16px;
+}
+
+/* Keep the heading, import controls, and footer outside the scrolling skill list. */
+.managerContent {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .importPanel {
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
   gap: 14px;
 }
 
 .scopeField {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 7px;
 }
@@ -266,8 +279,22 @@
 
 .managedSection {
   display: flex;
+  flex: 1;
+  min-height: 0;
   flex-direction: column;
   gap: 6px;
+}
+
+.managedList {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--dsw-alias-border-l3) transparent;
+  scrollbar-width: thin;
 }
 
 .managedSection h3 {
@@ -291,6 +318,7 @@
 
 .managedSkill {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
   min-height: 46px;
@@ -340,20 +368,37 @@
 }
 
 .dropHint {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  flex: none;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 176px;
-  padding: 20px;
+  gap: 10px;
+  padding: 12px;
   border: 0.5px dashed var(--dsw-alias-border-l3);
   border-radius: 10px;
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-tertiary);
-  text-align: center;
   font-size: 12px;
   line-height: 18px;
+}
+
+.importCopy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.importActions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.importPanel > .managerError {
+  flex: none;
+  margin: 0;
 }
 
 .dropHint strong {

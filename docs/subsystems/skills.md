@@ -256,7 +256,7 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
  * @param signal - Caller cancellation for directory reads.
  * @returns Account Skill metadata and the scopes this account may mutate.
  */
-async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>
+@Remote async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>
 
 /**
  * Install one personal or shared built-in Skill for an authenticated account without requiring a Session.
@@ -264,7 +264,7 @@ async listAccount(signal: AbortSignal): Promise<AccountSkillListValue>
  * @param signal - Caller cancellation checked before each file publication.
  * @returns Installed Skill metadata.
  */
-async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
+@Remote async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): Promise<SkillInstallValue>
 
 /**
  * Delete one personal or administrator-managed built-in Skill without requiring a Session.
@@ -272,7 +272,7 @@ async createAccount(request: AccountSkillInstallRequest, signal: AbortSignal): P
  * @param signal - Caller cancellation checked before removal.
  * @returns Deletion confirmation.
  */
-async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
+@Remote async deleteAccount(request: AccountSkillDeleteRequest, signal: AbortSignal): Promise<SkillDeleteValue>
 
 /**
  * List the user-invocable skills visible to one Session composition.

@@ -51,6 +51,10 @@ kind: "package-reference"
 
 导入的 Session 可以包含 `context: { projectId, projectName, mode: 'modeling' }`。Host 通过该 Project 的草稿接口校验访问权限，因此支持已授权但尚未发布的 Project，并在 Token 刷新后保留上下文。其归属键包含 Project id、部署地址与用户，从而按 Project 隔离对话历史、文件和 Workspace。每个存活 Agent 首次接收已接受 Prompt 前，准入流程会加载 `ontology-modeler`，并排入一条原生注入消息，其中包含选中的 Project 与规范化的 skill 指令；agent loop 会在下一次请求准入时记录它。
 
+完整助手通过 `mode: 'runtime'` 选择业务 Project，不进入草稿建模，也不改变账号归属的历史。管理员通过草稿接口校验选择，支持未发布的 Project；成员通过已发布 Project 列表校验。每个已接受 Prompt 都会排入一条已记录的 `ontology-project` 快照，包含最新选择。查询默认使用该 Project；若选择不可访问或尚未发布，应说明原因，而不替换为其他 Project。
+
+没有独立归属记录的子智能体 Session 通过存活或持久化的直接父会话元数据继承归属。嵌套子智能体沿同一关系查找。显式归属记录优先；普通分叉与无关 Session 不会继承这项访问权限。
+
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
 外部服务集成把 Go Runtime Access Token 与 `X-Project-Id` 的值传给 `runExternalRequest()`。Controller 通过 `/api/runtime/auth/current` 校验 Token，确认 `/api/runtime/projects` 中包含该 Project，并且只在请求级异步存储中设置身份。它不会保存或刷新外部 Token，并拒绝用户不可见的 Project。
@@ -94,11 +98,11 @@ Controller 不保存进程全局用户。`BrowserSessionService` 提供请求本
 
 #### 模型看到什么
 
-存活的内嵌建模 Agent 在首次 Prompt 中会包含一条已记录的 `skill-invocation` 消息，其中包含 Project JSON 与规范化的 `ontology-modeler` 指令。独立登录不会增加模型内容。
+存活的内嵌建模 Agent 在首次 Prompt 中会包含一条已记录的 `skill-invocation` 消息，其中包含 Project JSON 与规范化的 `ontology-modeler` 指令。Runtime 模式在每个已接受 Prompt 中通过已记录的 `ontology-project` 快照提供最新业务 Project。独立登录不会增加模型内容。
 
 #### Token 影响
 
-Project 上下文和加载的 skill 正文会为每个存活 Agent 增加一条消息，包括持久化 Session 恢复后的 Agent。原始用户文本与附件部分保持不变。
+建模上下文和加载的 Skill 正文会为每个存活 Agent 增加一条消息，包括持久化 Session 恢复后的 Agent。Runtime 上下文为每个已接受 Prompt 增加一条精简 Project 消息。原始用户文本与附件部分保持不变。
 
 #### KV Cache 影响
 
