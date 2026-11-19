@@ -91,6 +91,7 @@ const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Respo
   [`${API_PREFIX}/workspaces/create`, workspacesCreate],
   [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
   [`${API_PREFIX}/sessions/history`, sessionHistory],
+  [`${API_PREFIX}/sessions/delete`, sessionDelete],
   [`${API_PREFIX}/sessions/questions/answer`, answerSessionQuestion],
   [`${API_PREFIX}/sessions/cancel`, cancelSession],
   [`${API_PREFIX}/sessions/create`, sessionCreate],
@@ -211,6 +212,15 @@ async function workspaceFilesList(ctx: Context, request: Request): Promise<Respo
     if (workspaceId === null || workspaceId === '') throw badRequest('workspaceId query parameter is required')
     const path = url.searchParams.get('path') ?? ''
     return ctx.workspaceFiles.listWorkspace(workspaceId, path, request.signal)
+  })
+}
+
+/** Delete the current identity's inactive session and its owned attachments. */
+async function sessionDelete(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'DELETE') return methodNotAllowed('DELETE')
+  return authenticated(ctx, request, () => {
+    const sessionId = requiredValue(new URL(request.url).searchParams.get('sessionId') || undefined, 'sessionId query parameter is required')
+    return ctx.sessionController.delete({ sessionId: brandString<SessionId>(sessionId) })
   })
 }
 
@@ -384,7 +394,7 @@ async function sessionFile(ctx: Context, request: Request): Promise<Response> {
   })
 }
 
-/** Stage one bounded raw file for an owned Session; the receipt is accepted only by that Session. */
+/** Stage an attachment for an owned Session. The optional media type follows the browser image upload protocol. */
 async function sessionFileUpload(ctx: Context, request: Request): Promise<Response> {
   if (request.method !== 'POST') return methodNotAllowed('POST')
   return authenticated(ctx, request, async () => {
@@ -403,7 +413,11 @@ async function sessionFileUpload(ctx: Context, request: Request): Promise<Respon
     const uploads = ctx.get('fileUploads')
     if (uploads === undefined) throw badRequest('Session file uploads are unavailable')
     const name = url.searchParams.get('name') ?? 'attachment'
-    return uploads.uploadStream({ sessionId, name, data: requestFileChunks(request), signal: request.signal })
+    const mediaType = optionalString(url.searchParams.get('mediaType') ?? undefined, 'mediaType')
+    const upload = { sessionId, name, data: requestFileChunks(request), signal: request.signal }
+    return mediaType === undefined
+      ? uploads.uploadStream(upload)
+      : uploads.uploadImageStream({ ...upload, mediaType })
   })
 }
 
@@ -945,7 +959,7 @@ function errorStatus(errorCode: string): number {
   if (errorCode === 'jdcloud/auth-required' || errorCode === 'ontology/auth-required') return 401
   if (errorCode.includes('forbidden') || errorCode === 'skill/forbidden') return 403
   if (errorCode.includes('not-found')) return 404
-  if (errorCode === 'skill/already-exists') return 409
+  if (errorCode === 'skill/already-exists' || errorCode === 'session/delete-active') return 409
   if (errorCode === 'gateway/bad-request' || errorCode === 'skill/invalid') return 400
   if (errorCode === 'gateway/cancelled') return 499
   return 500

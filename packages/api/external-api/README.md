@@ -30,6 +30,7 @@ English | [中文](README.zh.md)
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse one child directory and Workspace. |
 | `GET` | `/api/external/v1/workspaces/files` | List one Workspace directory. |
 | `GET` | `/api/external/v1/sessions/history` | Read text history for a Session owned by the current identity. |
+| `DELETE` | `/api/external/v1/sessions/delete` | Delete an inactive, owned Session using the `sessionId` query parameter. |
 | `POST` | `/api/external/v1/sessions/questions/answer` | Answer an owned foreground question without a new model prompt. |
 | `POST` | `/api/external/v1/sessions/cancel` | Request cancellation of the owned Session's active Agent turn. |
 | `POST` | `/api/external/v1/sessions/create` | Create a Session without invoking a model. |
@@ -42,7 +43,7 @@ All requests carry `Authorization: Bearer <token>`. JDCloud requires the low-cod
 
 `POST /api/external/v1/skills/upload` accepts `multipart/form-data` with one text field named `scope` (`personal` or `built-in`) and one `.zip` file field named `file`. The archive may place `SKILL.md` at its root or inside one wrapping directory; every archived file must belong to that Skill folder. The endpoint rejects the former JSON file-array body and applies the existing Skill path, file-count, expanded-size, metadata, and administrator checks.
 
-File reads accept `sessionId/path`, reuse Session ownership and Workspace filesystem policies, and reject partial previews. Session creation accepts `workspaceId`. Uploads accept `sessionId/name` queries and raw `application/octet-stream` bytes under the 30 MiB request cap. Pass the returned `receiptId` through the same Session's `/chat.fileReceiptIds`; the existing Session services continue to own attachment admission and persistence.
+File reads accept `sessionId/path`, reuse Session ownership and Workspace filesystem policies, and reject partial previews. Session creation accepts `workspaceId`. Uploads accept `sessionId/name` queries and raw `application/octet-stream` bytes under the 30 MiB request cap. Set the optional `mediaType` query to a supported image MIME type, such as `image/png`, to stage a validated prompt image and receive its `image` reference. Omitting `mediaType` stages the original bytes and returns a `file` reference. Pass either `receiptId` through the same Session's `/chat.fileReceiptIds`.
 
 Attachment content reads accept `sessionId/attachmentId`, verify ownership and a matching durable user-message file reference, and return raw `application/octet-stream` bytes with `no-store` and `nosniff`. Older references are found through authorized history pages. Reads are capped at 30 MiB and complete integrity checks before returning bytes; missing references, storage failures, or oversized files return the existing JSON error response without partial file content. No model request is submitted.
 

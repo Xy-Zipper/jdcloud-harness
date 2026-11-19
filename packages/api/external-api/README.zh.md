@@ -30,6 +30,7 @@ kind: "package-reference"
 | `POST` | `/api/external/v1/workspaces/create` | 创建或复用一个子目录和工作区。 |
 | `GET` | `/api/external/v1/workspaces/files` | 查询工作区目录内容。 |
 | `GET` | `/api/external/v1/sessions/history` | 查询当前身份拥有的 Session 文本历史。 |
+| `DELETE` | `/api/external/v1/sessions/delete` | 按查询参数 `sessionId` 删除当前身份拥有的闲置 Session。 |
 | `POST` | `/api/external/v1/sessions/questions/answer` | 回答所属 Session 的前台问题，不提交新的模型 prompt。 |
 | `POST` | `/api/external/v1/sessions/cancel` | 请求停止所属 Session 当前运行的 Agent 轮次。 |
 | `POST` | `/api/external/v1/sessions/create` | 创建 Session，不调用模型。 |
@@ -42,7 +43,7 @@ kind: "package-reference"
 
 `POST /api/external/v1/skills/upload` 接受 `multipart/form-data`：一个名为 `scope` 的文本字段（`personal` 或 `built-in`），以及一个名为 `file` 的 `.zip` 文件字段。压缩包可以把 `SKILL.md` 放在根目录，也可以放在一层包装目录中；压缩包内的所有文件必须属于该 Skill 文件夹。接口不再接受旧的 JSON 文件数组，并继续执行现有的 Skill 路径、文件数量、解压后大小、元数据和管理员权限校验。
 
-文件读取接受 `sessionId/path`，复用 Session 归属及 Workspace 文件读取策略，拒绝不完整的文本预览。创建 Session 接受 `workspaceId`。附件上传接受 `sessionId/name` 查询和 `application/octet-stream` 原始字节，受 30 MiB 请求上限约束；返回的 `receiptId` 放入同一 Session 的 `/chat.fileReceiptIds`，附件准入与持久化继续由 Session 服务处理。
+文件读取接受 `sessionId/path`，复用 Session 归属及 Workspace 文件读取策略，拒绝不完整的文本预览。创建 Session 接受 `workspaceId`。附件上传接受 `sessionId/name` 查询和 `application/octet-stream` 原始字节，受 30 MiB 请求上限约束。将可选查询字段 `mediaType` 设为受支持的图片 MIME 类型（例如 `image/png`），可暂存经过校验的模型输入图片并获取 `image` 引用。省略 `mediaType` 时暂存原始字节并返回 `file` 引用。将任一种 `receiptId` 放入同一 Session 的 `/chat.fileReceiptIds`。
 
 附件内容读取接受 `sessionId/attachmentId`，核验会话归属以及持久用户消息中的文件引用后，以 `application/octet-stream` 返回原始字节，并设置 `no-store/nosniff`。较早的引用通过已授权的历史分页查找。读取上限为 30 MiB，完整性校验结束后才返回字节；引用缺失、存储失败或文件超限时返回现有 JSON 错误响应，不返回部分文件，也不提交模型请求。
 
