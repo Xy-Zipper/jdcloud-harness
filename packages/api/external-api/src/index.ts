@@ -940,7 +940,7 @@ function badRequest(message: string, cause?: unknown): RemoteError {
   )
 }
 
-function methodNotAllowed(allowed: 'GET' | 'POST'): Response {
+function methodNotAllowed(allowed: 'GET' | 'POST' | 'DELETE'): Response {
   return failureResponse(405, 'method_not_allowed', 'Method not allowed', undefined, { allow: allowed })
 }
 
