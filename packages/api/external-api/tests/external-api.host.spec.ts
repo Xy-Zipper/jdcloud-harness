@@ -1,7 +1,13 @@
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import process from 'node:process'
 import { Context } from '@deepseek-ai/cordis'
+import type { WorkspaceCreateValue, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fetchExternalApi } from '../src/index.ts'
@@ -54,6 +60,7 @@ function context(services: {
   readonly skills?: object
   readonly sessions?: object
   readonly workspaces?: object
+  readonly workspaceRoot?: string
   readonly files?: object
   readonly uploads?: object
   readonly attachments?: object
@@ -72,7 +79,7 @@ function context(services: {
       _signal: AbortSignal,
       operation: () => unknown,
     ) => await operation()),
-    workspaceRoot: () => Promise.resolve('C:\\external-workspaces'),
+    workspaceRoot: () => Promise.resolve(services.workspaceRoot ?? 'C:\\external-workspaces'),
   } as never)
   ctx.provide('sessionSkillCatalog', services.skills ?? {
     listAccount: () => Promise.resolve({
@@ -88,6 +95,89 @@ function context(services: {
   if (services.attachments !== undefined) ctx.provide('attachments', services.attachments as never)
   return ctx
 }
+
+describe('POST /workspaces/copy', () => {
+  const route = '/api/external/v1/workspaces/copy'
+  const sourceId = brandString<WorkspaceId>('source-workspace')
+
+  async function fixture(onTestFinished: (cleanup: () => Promise<void>) => void) {
+    const temp = await mkdtemp(join(tmpdir(), 'external-workspace-copy-'))
+    onTestFinished(() => rm(temp, { recursive: true, force: true }))
+    const root = join(await realpath(temp), 'account')
+    const source = join(root, 'source')
+    await mkdir(join(source, 'nested', 'empty'), { recursive: true })
+    const view: WorkspaceView = {
+      workspaceId: sourceId, title: 'source', path: source,
+      sessionIds: [brandString<SessionId>('original-session')], createdAt: '', updatedAt: '',
+    }
+    const listVisible = vi.fn(async () => [view])
+    const create = vi.fn(async ({ path }: { path: string }): Promise<WorkspaceCreateValue> => {
+      expect(await readFile(join(path, 'nested', 'asset.bin'))).toEqual(Buffer.from([0, 255, 10]))
+      return { created: true, workspace: { ...view, workspaceId: brandString<WorkspaceId>(path), path, title: '副本', sessionIds: [] } }
+    })
+    await writeFile(join(source, 'nested', 'asset.bin'), Buffer.from([0, 255, 10]))
+    await writeFile(join(source, '.project'), 'project contents')
+    const ctx = context({ workspaceRoot: root, workspaces: { listVisible, create } })
+    const copy = (id = sourceId, name = '副本', signal?: AbortSignal) => fetchExternalApi(ctx, request(route, {
+      method: 'POST', body: JSON.stringify({ workspaceId: id, name }), signal: signal ?? null,
+    }, { 'content-type': 'application/json' }))
+    return { temp, root, source, copy, listVisible, create, view }
+  }
+
+  it('registers independent copies of nested binary files, dotfiles, and empty directories', async ({ onTestFinished }) => {
+    const { copy, create, root, source } = await fixture(onTestFinished)
+    const responses = await Promise.all([copy(), copy()])
+    const paths = create.mock.calls.map(([{ path }]) => path)
+    expect(new Set(paths).size).toBe(2)
+    for (const response of responses) {
+      expect(response.status).toBe(200)
+      const payload = await response.json() as {
+        code: number
+        data: WorkspaceCreateValue
+      }
+      expect(payload).toMatchObject({ code: 200, data: { created: true, workspace: { title: '副本', sessionIds: [] } } })
+      expect(payload.data.workspace.workspaceId).not.toBe(sourceId)
+    }
+    for (const path of paths) {
+      expect(dirname(dirname(path))).toBe(root)
+      expect(await readFile(join(path, '.project'), 'utf8')).toBe('project contents')
+      expect(await readdir(join(path, 'nested', 'empty'))).toEqual([])
+      await writeFile(join(path, 'nested', 'asset.bin'), 'modified copy')
+    }
+    expect(await readFile(join(source, 'nested', 'asset.bin'))).toEqual(Buffer.from([0, 255, 10]))
+  })
+
+  it('rejects unknown, out-of-account, account-root, and traversal inputs before writing', async ({ onTestFinished }) => {
+    const { copy, create, listVisible, root, temp, view } = await fixture(onTestFinished)
+    const missing = await copy(brandString<WorkspaceId>('other-account'))
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toMatchObject({ errorCode: 'workspace/not-found' })
+    for (const path of [root, temp]) {
+      listVisible.mockResolvedValueOnce([{ ...view, path }])
+      expect((await copy()).status).toBe(400)
+    }
+    expect((await copy(sourceId, '../escape')).status).toBe(400)
+    const controller = new AbortController()
+    controller.abort()
+    expect((await copy(sourceId, 'cancelled', controller.signal)).status).toBe(499)
+    expect(create).not.toHaveBeenCalled()
+    expect(await readdir(root)).toEqual(['source'])
+  })
+
+  // Windows file symlinks require OS privileges that the test runner may lack.
+  it.skipIf(process.platform === 'win32')('removes staged files when a source entry is a symbolic link', async ({ onTestFinished }) => {
+    const { copy, create, root, source, temp } = await fixture(onTestFinished)
+    const outside = join(temp, 'outside')
+    await writeFile(outside, 'private')
+    await symlink(outside, join(source, 'nested', 'link'))
+    const response = await copy()
+    expect(response.status).toBe(422)
+    expect(await response.json()).toMatchObject({ errorCode: 'workspace/copy-unsupported-entry', details: { path: 'nested/link' } })
+    expect(create).not.toHaveBeenCalled()
+    expect(await readdir(root)).toEqual(['source'])
+    expect(await readFile(outside, 'utf8')).toBe('private')
+  })
+})
 
 // External callers use the deployment model; provider changes belong to Harness administration.
 it('does not expose model selection through the external integration API', async () => {

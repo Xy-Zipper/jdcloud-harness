@@ -86,11 +86,14 @@ GPT_API_KEY=实际模型密钥
 GPT_IMAGE_API_KEY=实际图片密钥
 ARK_API_KEY=实际方舟密钥
 JDCLOUD_HARNESS_TRUSTED_HOST=实际域名或服务器IP
+JDCLOUD_HARNESS_STUDIO_TRUSTED_HOST=
 JDCLOUD_HARNESS_PORT=3080
 JDCLOUD_DEFAULT_BASE_URL=http://内部服务地址
 JDCLOUD_IFRAME_PARENT_ORIGIN=http://实际外链页面地址
 TZ=Asia/Hong_Kong
 ```
+
+如果造物片场和 Harness UI 使用两个域名，`JDCLOUD_HARNESS_TRUSTED_HOST` 填 Harness UI 域名，`JDCLOUD_HARNESS_STUDIO_TRUSTED_HOST` 填造物片场页面的域名。两者都要包含非默认端口。留空时只需配置原有的 Harness 域名。网关转发规则见[外部集成 API 部署说明](EXTERNAL_API.zh.md#security-and-deployment)。
 
 造物片场媒体插件随 JDCloud bundle 构建并装入镜像，无需到前端项目打包或单独安装媒体插件。两类媒体密钥可留空；配置后重建容器即可使用。任务回执和上传进度保存在 `data/creation-studio-media`，替换容器时保留该目录。Skill ZIP 继续通过 Skill 管理单独安装，详见[媒体包说明](packages/jdcloud/creation-studio-media/README.zh.md)。
 

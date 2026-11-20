@@ -77,6 +77,7 @@ Runtime 用户必须有权访问指定项目。Ontology 会拒绝 `X-Tenant-Id` 
 | `POST` | `/api/external/v1/skills/delete` | 删除一个个人或内置 Skill。 |
 | `GET` | `/api/external/v1/workspaces` | 查询当前用户和范围内可见的工作区。 |
 | `POST` | `/api/external/v1/workspaces/create` | 在当前账号目录下创建或复用工作区。 |
+| `POST` | `/api/external/v1/workspaces/copy` | 将所属工作区及其中的文件复制到一个新工作区。 |
 | `GET` | `/api/external/v1/workspaces/files` | 查询一个工作区目录的直接子项。 |
 | `GET` | `/api/external/v1/sessions/history` | 查询一个 Session 的文本消息历史。 |
 | `POST` | `/api/external/v1/sessions/create` | 在所属工作区创建 Session，不调用模型。 |
@@ -240,6 +241,21 @@ curl.exe --request POST "http://127.0.0.1:3080/api/external/v1/workspaces/create
 
 当前账号已经拥有对应目录的工作区时，`created` 为 `false`。
 
+<a id="copy-workspace"></a>
+### 复制工作区及文件
+
+向 `POST /api/external/v1/workspaces/copy` 发送请求，使用与创建工作区相同的鉴权和 JSON 请求头。
+
+```json
+{ "workspaceId": "source-workspace-id", "name": "项目副本" }
+```
+
+`workspaceId` 必须归当前账号所有，并指向其工作区根目录以内的子目录。`name` 遵循创建接口的目录名规则，并作为新工作区的初始标题。每次成功调用都会创建独立目录，返回与创建接口相同格式的 JSON。将新的 `data.workspace.workspaceId` 保存到新项目。
+
+复制内容包括普通文件、二进制文件、隐藏文件和子目录（含空目录）。会话、会话附件和造物片场项目记录仍归各自的服务管理。接口直接读取工作区目录，请在项目文件写入完成后调用。
+
+工作区不存在或不属于当前账号时返回 `404`。检测到源文件变动时返回 `409` 和 `workspace/copy-source-changed`。遇到符号链接或特殊文件时返回 `422` 和 `workspace/copy-unsupported-entry`，`details.path` 为工作区内的相对路径。清理未完成的副本失败时返回 `500` 和 `workspace/copy-cleanup-failed`。文件复制完成后注册失败时返回 `500` 和 `workspace/copy-registration-failed`，并在日志中记录留存副本的位置。重试可能创建另一个副本。
+
 ### 查询工作区文件
 
 ```powershell
@@ -388,6 +404,7 @@ JSON 错误通常采用以下结构：
 
 - 不要把平台 Token 写入浏览器存储、URL、源代码或应用日志。
 - 生产环境中，外部项目到 Harness、Harness 到平台服务都应使用 HTTPS。
+- 使用 `/harness-api` 等浏览器同源代理时，剥离挂载前缀，并将原始 `Host`（包括端口）和 `Origin` 原样转发到 Harness。按[反向代理指南](docs/user/guide/public-deployments.zh.md#trust-the-authority-browsers-use)将浏览器访问的域名或 IP 加入 `--trusted-host`。
 - JDCloud 当前允许调用方传入任意语法合法的 HTTP(S) 服务地址，包括私有网络地址。Harness 会把调用方提供的 Token 发送到该地址。只有受信任的调用方才能访问这些接口；公开接口前也可以在可信上游网关中增加目标地址白名单。
 - 资源归属包含平台认证身份，以及 JDCloud 服务地址或 Ontology 项目。仅知道其他范围的工作区或 Session ID，不能直接访问对应资源。
 - 部署代码或 profile 改动后需要重启 Harness。外部 API 不要求配置 `JDCLOUD_DEFAULT_BASE_URL`；该变量只用于浏览器登录页的初始地址。
@@ -401,7 +418,7 @@ JSON 错误通常采用以下结构：
 curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/skills"
 ```
 
-路由注册成功时，因为缺少 Bearer Token，接口会返回 HTTP `401` 和 `{ "code": 401, "errorCode": "unauthorized", ... }`。如果响应不符合数字 envelope，说明当前进程尚未加载当前版本的 External API 插件，或者协议修改后还没有重启。
+请求到达 External API 且缺少 Bearer Token 时，接口返回 HTTP `401` 和 `{ "code": 401, "errorCode": "unauthorized", ... }`。Harness 返回纯文本 `403 forbidden` 表示 WebServer 在校验 Token 前拒绝了请求。检查转发后的 `Host`、`Origin`、`Sec-Fetch-Site` 及配置的 `--trusted-host`。
 
 <a id="dev-note"></a>
 ## 开发备注

@@ -31,6 +31,7 @@ import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/ds
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { unzipSync } from 'fflate'
+import { copyWorkspaceDirectory } from './workspace-copy.ts'
 
 export const name = 'external-api'
 export const inject = [
@@ -89,6 +90,7 @@ const ROUTES = new Map<string, (ctx: Context, request: Request) => Promise<Respo
   [`${API_PREFIX}/skills/delete`, skillsDelete],
   [`${API_PREFIX}/workspaces`, workspacesList],
   [`${API_PREFIX}/workspaces/create`, workspacesCreate],
+  [`${API_PREFIX}/workspaces/copy`, workspacesCopy],
   [`${API_PREFIX}/workspaces/files`, workspaceFilesList],
   [`${API_PREFIX}/sessions/history`, sessionHistory],
   [`${API_PREFIX}/sessions/delete`, sessionDelete],
@@ -190,18 +192,45 @@ async function workspacesCreate(ctx: Context, request: Request): Promise<Respons
   if (request.method !== 'POST') return methodNotAllowed('POST')
   return authenticated(ctx, request, async (authenticator) => {
     const body = await jsonBody(request)
-    const directoryName = requiredString(body['name'], 'name')
-    if (directoryName !== directoryName.trim()
-      || directoryName === '.' || directoryName === '..'
-      || directoryName.endsWith('.') || /[/\\:\0]/u.test(directoryName)) {
-      throw badRequest('name must be one valid directory segment')
-    }
+    const directoryName = workspaceDirectoryName(body['name'])
     const root = await authenticator.workspaceRoot()
     if (root === undefined) throw badRequest('authenticated workspace root is unavailable')
     const path = join(root, directoryName)
     await mkdir(path, { recursive: true })
     return ctx.workspaceController.create({ path })
   })
+}
+
+async function workspacesCopy(ctx: Context, request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST')
+  return authenticated(ctx, request, async (authenticator) => {
+    const body = await jsonBody(request)
+    const workspaceId = brandString<WorkspaceId>(requiredString(body['workspaceId'], 'workspaceId'))
+    const name = workspaceDirectoryName(body['name'])
+    const source = (await ctx.workspaceController.listVisible()).find(workspace => workspace.workspaceId === workspaceId)
+    if (source === undefined) throw new RemoteError('workspace/not-found', 'Source Workspace not found', { workspaceId })
+    const root = await authenticator.workspaceRoot()
+    if (root === undefined) throw badRequest('authenticated workspace root is unavailable')
+    const path = await copyWorkspaceDirectory(root, source.path, name, request.signal).catch((error: unknown) => {
+      if (remoteErrorOf(error)?.code === 'workspace/copy-cleanup-failed') ctx.logger.error(error)
+      throw error
+    })
+    try {
+      return await ctx.workspaceController.create({ path })
+    } catch (error) {
+      // Registration can fail after writing a record. Keep the complete files so that record never points at a removed directory.
+      ctx.logger.error(new Error(`Failed to register copied Workspace at ${JSON.stringify(path)}`, { cause: error }))
+      throw new RemoteError('workspace/copy-registration-failed', 'Files were copied but the new Workspace could not be registered', {}, { cause: error })
+    }
+  })
+}
+
+function workspaceDirectoryName(value: unknown): string {
+  const name = requiredString(value, 'name')
+  if (name !== name.trim() || name === '.' || name === '..' || name.endsWith('.') || /[/\\:\0]/u.test(name)) {
+    throw badRequest('name must be one valid directory segment')
+  }
+  return name
 }
 
 async function workspaceFilesList(ctx: Context, request: Request): Promise<Response> {
@@ -959,8 +988,9 @@ function errorStatus(errorCode: string): number {
   if (errorCode === 'jdcloud/auth-required' || errorCode === 'ontology/auth-required') return 401
   if (errorCode.includes('forbidden') || errorCode === 'skill/forbidden') return 403
   if (errorCode.includes('not-found')) return 404
-  if (errorCode === 'skill/already-exists' || errorCode === 'session/delete-active') return 409
+  if (errorCode === 'skill/already-exists' || errorCode === 'session/delete-active' || errorCode === 'workspace/copy-source-changed') return 409
   if (errorCode === 'gateway/bad-request' || errorCode === 'skill/invalid') return 400
+  if (errorCode === 'workspace/copy-unsupported-entry') return 422
   if (errorCode === 'gateway/cancelled') return 499
   return 500
 }

@@ -28,6 +28,7 @@ kind: "package-reference"
 | `POST` | `/api/external/v1/skills/delete` | 删除有权限管理的个人或内置 Skill。 |
 | `GET` | `/api/external/v1/workspaces` | 查询可见工作区。 |
 | `POST` | `/api/external/v1/workspaces/create` | 创建或复用一个子目录和工作区。 |
+| `POST` | `/api/external/v1/workspaces/copy` | 复制所属工作区的目录树并注册新工作区。 |
 | `GET` | `/api/external/v1/workspaces/files` | 查询工作区目录内容。 |
 | `GET` | `/api/external/v1/sessions/history` | 查询当前身份拥有的 Session 文本历史。 |
 | `DELETE` | `/api/external/v1/sessions/delete` | 按查询参数 `sessionId` 删除当前身份拥有的闲置 Session。 |
@@ -52,6 +53,8 @@ kind: "package-reference"
 历史响应包含 `pendingQuestions`，提供问题正文、选项、原 `callId` 和 `answerable`。实时历史按可见消息计数，工具事件不会挤掉聊天正文；运行中轮次可向前分页读取至该轮起点，恢复尚未回答的调用。`POST /api/external/v1/sessions/questions/answer` 接受 `sessionId/callId/answers`，校验 Session 归属后只完成仍开放的原提问，不发送新 prompt。关闭或切换客户端视图保留问题。旧 Host 持有的请求仍以 `answerable=false` 显示，须在原 Harness 窗口回答；阻塞调用开放期间不要重启该 Host。
 
 停止请求接受 `{sessionId}`，通过会话历史验证归属后复用 Session Controller 的取消操作。`{accepted:true}` 仅表示受理，客户端须等待历史中的 `running=false` 再发送修正版；已空闲的所属会话不执行额外操作。停止不会回滚已完成工具或取消单独受理的图片、视频任务，原有排队消息仍保留顺序。
+
+复制工作区接受 `workspaceId/name`，复制普通文件和目录后注册新工作区。详见[复制请求和错误说明](../../../EXTERNAL_API.md#copy-workspace)。
 
 <a id="model-experience"></a>
 ## 模型体验

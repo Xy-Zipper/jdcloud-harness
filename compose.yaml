@@ -30,6 +30,7 @@ services:
       # The API trust fence must accept the public domain or IP seen by browsers.
       - --trusted-host
       - ${JDCLOUD_HARNESS_TRUSTED_HOST:?Set JDCLOUD_HARNESS_TRUSTED_HOST to the public domain or IP, including a non-default port}
+      - ${JDCLOUD_HARNESS_STUDIO_TRUSTED_HOST:-${JDCLOUD_HARNESS_TRUSTED_HOST}}
     environment:
       # Every browser user connected to this service shares settings.yaml below this directory.
       DSH_HOME: /var/lib/jdcloud-harness

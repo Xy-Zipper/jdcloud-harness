@@ -77,6 +77,7 @@ The Runtime user must be authorized to access the requested Project. Ontology re
 | `POST` | `/api/external/v1/skills/delete` | Delete one personal or built-in Skill. |
 | `GET` | `/api/external/v1/workspaces` | List Workspaces visible to the current user and scope. |
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse a Workspace under the current account root. |
+| `POST` | `/api/external/v1/workspaces/copy` | Copy an owned Workspace and its files to a new Workspace. |
 | `GET` | `/api/external/v1/workspaces/files` | List direct children of one Workspace directory. |
 | `GET` | `/api/external/v1/sessions/history` | Read text-message history for one Session. |
 | `POST` | `/api/external/v1/sessions/create` | Create a Session in an owned Workspace without invoking a model. |
@@ -240,6 +241,21 @@ Example response:
 
 `created` is `false` when the current account already owns a Workspace for that directory.
 
+<a id="copy-workspace"></a>
+### Copy a Workspace and its files
+
+Send `POST /api/external/v1/workspaces/copy` with the same authentication and JSON headers as Workspace creation.
+
+```json
+{ "workspaceId": "source-workspace-id", "name": "Project copy" }
+```
+
+`workspaceId` must belong to the authenticated account and point to a directory beneath its Workspace root. `name` follows the creation endpoint's directory-name rules and becomes the initial title. Each successful call creates a separate directory and returns the same JSON response format as creation. Store the new `data.workspace.workspaceId` on the new project.
+
+The copy includes regular files, binary files, dotfiles, and subdirectories, including empty ones. Sessions, Session attachments, and Creation Studio project records stay with their original services. Run the copy after project writes have finished because it reads the live directory tree.
+
+An unknown or unowned Workspace returns `404`. A detected source change returns `409` with `workspace/copy-source-changed`. A symbolic link or special file returns `422` with `workspace/copy-unsupported-entry` and a Workspace-relative `details.path`. If cleanup of an incomplete copy fails, the server returns `500` with `workspace/copy-cleanup-failed`. If registration fails after copying, the server returns `500` with `workspace/copy-registration-failed` and logs the retained copy's location. Each retry can create another copy.
+
 ### List Workspace files
 
 ```powershell
@@ -388,6 +404,7 @@ After `/chat` returns HTTP `200`, a later failure appears as an SSE `error` even
 
 - Do not log or store provider Tokens in browser storage, URLs, source code, or application logs.
 - Use HTTPS between the external project, Harness, and the provider service in production.
+- For a same-origin browser proxy such as `/harness-api`, strip the mount prefix and preserve the original `Host` (including its port) and `Origin` all the way to Harness. Add the browser-facing authority to `--trusted-host` as described in the [reverse proxy guide](docs/user/guide/public-deployments.md#trust-the-authority-browsers-use).
 - JDCloud currently permits any syntactically valid HTTP(S) service address, including private-network addresses. Harness sends the supplied Token to that address. Expose these routes only to trusted callers or place a destination allowlist in a trusted upstream gateway.
 - Resource ownership includes the authenticated provider identity and JDCloud service address or Ontology Project. A caller cannot use another scope's Workspace or Session merely by knowing its ID.
 - Restart Harness after deploying code or profile changes. `JDCLOUD_DEFAULT_BASE_URL` is optional for the External API and only supplies the initial browser-login address.
@@ -401,7 +418,7 @@ After starting Harness, verify route registration without sending a real Token:
 curl.exe --request GET "http://127.0.0.1:3080/api/external/v1/skills"
 ```
 
-A registered route returns `{ "code": 401, "errorCode": "unauthorized", ... }` with HTTP `401` because the Bearer Token is missing. A response that does not follow the numeric envelope means the running process has not loaded the current External API plugin or has not been restarted after the protocol changed.
+A request that reaches the External API without a Bearer Token returns HTTP `401` with `{ "code": 401, "errorCode": "unauthorized", ... }`. A plain-text `403 forbidden` from Harness indicates WebServer rejected the request before Token validation. Check the forwarded `Host`, `Origin`, and `Sec-Fetch-Site` headers and the configured `--trusted-host` values.
 
 <a id="dev-note"></a>
 ## Dev Note

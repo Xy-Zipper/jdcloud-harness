@@ -28,6 +28,7 @@ English | [中文](README.zh.md)
 | `POST` | `/api/external/v1/skills/delete` | Delete an authorized personal or built-in Skill. |
 | `GET` | `/api/external/v1/workspaces` | List visible Workspaces. |
 | `POST` | `/api/external/v1/workspaces/create` | Create or reuse one child directory and Workspace. |
+| `POST` | `/api/external/v1/workspaces/copy` | Copy an owned Workspace's directory tree and register a new Workspace. |
 | `GET` | `/api/external/v1/workspaces/files` | List one Workspace directory. |
 | `GET` | `/api/external/v1/sessions/history` | Read text history for a Session owned by the current identity. |
 | `DELETE` | `/api/external/v1/sessions/delete` | Delete an inactive, owned Session using the `sessionId` query parameter. |
@@ -52,6 +53,8 @@ History also returns `running`, read from the live Agent before and after the sn
 The history response includes `pendingQuestions` with question text, options, the original `callId`, and `answerable`. Live history counts visible messages rather than letting tool events displace them; a running turn can read earlier pages back to its start to recover unanswered calls. `POST /api/external/v1/sessions/questions/answer` accepts `sessionId/callId/answers`, verifies Session ownership, and completes only that still-open question without a new prompt. Closing or switching a client view leaves the question active. Requests held by an older Host remain visible with `answerable=false` and must be answered in their original Harness window; do not restart that Host while its blocking call is open.
 
 Cancellation accepts `{sessionId}`, verifies ownership through Session history, and reuses Session Controller cancellation. `{accepted:true}` acknowledges the request; clients must wait for history `running=false` before sending a replacement prompt. An idle owned Session is a no-op. Cancellation does not revert completed tools or cancel separately accepted image or video tasks; existing queued Session work retains its order.
+
+Workspace copy accepts `workspaceId/name` and registers the new Workspace after copying its regular files and directories. See the [copy request and failure reference](../../../EXTERNAL_API.md#copy-workspace).
 
 <a id="model-experience"></a>
 ## Model Experience
