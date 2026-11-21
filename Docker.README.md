@@ -29,6 +29,8 @@ docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
 
 镜像包含当前仓库的 Ontology controller、工具、登录 UI 与 Bundle。不要把 `.env`、`data/` 或其他凭证文件复制进镜像。
 
+Web 品牌默认为 `jdcloud-harness`。如需自定义名称，在构建机的 `.env` 中设置 `ONTOLOGY_PRODUCT_NAME` 后重新构建并导出镜像。侧栏、登录页、浏览器标签页和可安装 Web 应用的名称随镜像发布。
+
 根目录的 `jdcloud-harness.tar` 不会进入 Docker 构建上下文，可以在导出旧镜像后直接重建新镜像。Builder 与 Runtime 均固定使用 pnpm 11.7.0，且运行用户 `node` 可以读取共享 Corepack 安装；容器启动时不会临时下载其他 pnpm 版本。
 
 ## 3. 创建服务器环境配置
@@ -53,7 +55,6 @@ chmod 600 .env
 GPT_API_KEY=实际模型密钥
 ONTOLOGY_HARNESS_TRUSTED_HOST=agent.example.com
 ONTOLOGY_HARNESS_PORT=3080
-ONTOLOGY_PRODUCT_NAME=Ontology Agent
 ONTOLOGY_BASE_URL=https://ontology.example.com
 ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 ONTOLOGY_USER_WORKSPACE_DIR=/workspace/ontology-users
@@ -75,7 +76,7 @@ docker compose ps
 
 `./data` 挂载到容器的 `/var/lib/jdcloud-harness`，用于持久化 Session、设置与凭证存储；命名卷保存 Workspace 文件。`ONTOLOGY_USER_WORKSPACE_DIR` 必须位于已持久化的 `/workspace` 下。不要执行 `docker compose down -v`。
 
-修改 `.env` 后使用以下命令重建容器：
+修改运行时环境变量后使用以下命令重建容器：
 
 ```bash
 docker compose up -d --no-build --pull never --force-recreate

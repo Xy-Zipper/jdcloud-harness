@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { clientBuildEnvironmentDefines } from '../../scripts/client-build-environment.ts'
+import { clientBuildEnvironmentDefines, DEFAULT_CLIENT_TITLE } from '../../scripts/client-build-environment.ts'
 import { productWebBundleIsolation } from './product-isolation.ts'
 import { katexWoff2Fonts } from './katex-fonts.ts'
 
@@ -12,20 +12,33 @@ const src = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url)
 const STANDALONE_ERROR = 'apps/web is not a standalone application: bare Vite cannot inject window.__DSH_BOOT__. '
   + 'From a repository checkout, run `pnpm dsh web`; an installed package uses `dsh web`. '
   + 'For client-plugin HMR, run `pnpm run dev:web`, which starts `dsh web` and the rebuild watchers together.'
-const DEFAULT_CLIENT_TITLE = 'LSY-Agent'
 
-/** Escape build-time text before placing it in the HTML title element. */
+/** Escape a build-supplied title for HTML text and double-quoted attributes. */
 function escapeHtmlText(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** Project the public build title into the initial HTML document. */
-function clientDocumentTitle(): Plugin {
-  const title = escapeHtmlText(process.env.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE)
+/** Give the initial page and installation metadata the selected Web brand. */
+function clientBranding(): Plugin {
+  const title = process.env.DSH_CLIENT_TITLE ?? DEFAULT_CLIENT_TITLE
+  const shortName = process.env.DSH_CLIENT_BUILD_PROFILE === 'official' ? 'DSH' : title
+  const manifestPath = src('./public/manifest.webmanifest')
   return {
-    name: 'dsh-client-document-title',
+    name: 'dsh-client-branding',
     transformIndexHtml(html) {
-      return html.replace('<title>LSY-Agent</title>', `<title>${title}</title>`)
+      return html
+        .replace('<title></title>', () => `<title>${escapeHtmlText(title)}</title>`)
+        .replace('name="apple-mobile-web-app-title" content=""',
+          () => `name="apple-mobile-web-app-title" content="${escapeHtmlText(shortName)}"`)
+    },
+    async generateBundle() {
+      this.addWatchFile(manifestPath)
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>
+      this.emitFile({
+        type: 'asset',
+        fileName: 'manifest.webmanifest',
+        source: `${JSON.stringify({ ...manifest, name: title, short_name: shortName }, null, 2)}\n`,
+      })
     },
   }
 }
@@ -171,7 +184,7 @@ export default defineConfig({
   // directory, and the served index resolves identically from the site root.
   base: './',
   plugins: [
-    rejectStandaloneServe(), clientDocumentTitle(), brandFontLicense(), katexWoff2Fonts(), react(), emitPreviewPage(),
+    rejectStandaloneServe(), clientBranding(), brandFontLicense(), katexWoff2Fonts(), react(), emitPreviewPage(),
     productWebBundleIsolation(src('../..'), src('.')),
   ],
   build: {

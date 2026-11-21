@@ -3,10 +3,12 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { chromium, type Page } from 'playwright'
+import { JSDOM } from 'jsdom'
 import {
   APP_ICON_VARIANTS, ICON_OUTPUT_DIRECTORY, MASKABLE_ARTWORK_SCALE, MASKABLE_SAFE_RADIUS_RATIO,
   TILE_SOURCE, renderAppIcons, tileDocument,
 } from '../scripts/render-app-icons.ts'
+import { readWebClientBuildEnvironment } from './client-build-environment.ts'
 
 const DIST_ROOT = fileURLToPath(new URL('../dist', import.meta.url))
 
@@ -46,12 +48,20 @@ function svgUrl(svg: string): string {
 }
 
 it('ships install metadata with the built web application', async () => {
+  const environment = await readWebClientBuildEnvironment()
+  const title = environment.DSH_CLIENT_TITLE ?? 'jdcloud-harness'
+  const shortName = environment.DSH_CLIENT_BUILD_PROFILE === 'official' ? 'DSH' : title
   const index = await readFile(join(DIST_ROOT, 'index.html'), 'utf8')
+  const { window } = new JSDOM(index)
+  try {
+    expect(window.document.title).toBe(title)
+    expect(window.document.querySelector('meta[name="apple-mobile-web-app-title"]')?.getAttribute('content'))
+      .toBe(shortName)
+  } finally { window.close() }
   expect(index).toContain('<meta name="viewport" content="width=device-width, initial-scale=1" />')
   expect(index).toContain('<link rel="manifest" href="./manifest.webmanifest" />')
   expect(index).toContain('<link rel="apple-touch-icon" href="./apple-touch-icon.png" />')
   expect(index).toContain('<meta name="mobile-web-app-capable" content="yes" />')
-  expect(index).toContain('<meta name="apple-mobile-web-app-title" content="DSH" />')
   // No `theme-color` here: `ThemePresenter` owns the single metadata node and
   // follows the resolved in-application theme, which a static media query
   // cannot. The manifest's `theme_color` covers the surrounding chrome before
@@ -62,8 +72,8 @@ it('ships install metadata with the built web application', async () => {
   // so only an absent `id`, which defaults to the resolved `start_url`, gives
   // each mount its own identity. `public-mount.e2e.ts` reads the resolved form.
   expect(manifest).toEqual({
-    name: 'DeepSeek Harness',
-    short_name: 'DSH',
+    name: title,
+    short_name: shortName,
     start_url: './',
     scope: './',
     // `standalone` keeps the phone's status bar; `fullscreen` hides it and the

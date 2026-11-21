@@ -4,9 +4,9 @@
 ARG NODE_IMAGE=node:24-bookworm
 FROM ${NODE_IMAGE} AS builder
 
-# Official client artifacts embed this source revision without copying .git into the image.
+# Client artifacts embed this source revision without copying .git into the image.
 ARG DSH_CLIENT_COMMIT_HASH
-ARG DSH_CLIENT_TITLE=Ontology Agent
+ARG DSH_CLIENT_TITLE=jdcloud-harness
 
 # Keep pnpm version files in a path readable by both root and node.
 ENV COREPACK_HOME=/opt/corepack
@@ -23,7 +23,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN test -n "$DSH_CLIENT_COMMIT_HASH" \
   || (echo "DSH_CLIENT_COMMIT_HASH build argument is required" >&2; exit 1)
-RUN DSH_CLIENT_COMMIT_HASH="$DSH_CLIENT_COMMIT_HASH" DSH_CLIENT_TITLE="$DSH_CLIENT_TITLE" pnpm run build:official
+RUN DSH_CLIENT_COMMIT_HASH="$DSH_CLIENT_COMMIT_HASH" DSH_CLIENT_TITLE="$DSH_CLIENT_TITLE" pnpm run build
 
 
 # Keep the complete workspace closure because the private Ontology bundle loads local packages at runtime.

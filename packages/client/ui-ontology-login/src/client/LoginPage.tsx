@@ -32,6 +32,7 @@ export type OntologyLoginPageProps =
 
 /** Render the full-page Ontology credential gate. */
 export function LoginPage({ initialize, login, t }: OntologyLoginPageProps) {
+  const productName = process.env.DSH_CLIENT_TITLE ?? t('brandName')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(true)
@@ -68,14 +69,14 @@ export function LoginPage({ initialize, login, t }: OntologyLoginPageProps) {
         <div className={css.brandGlow} aria-hidden="true" />
         <div className={css.brandContent}>
           <div className={css.mark}><OntologyBrandMark size={56} /></div>
-          <p className={css.eyebrow}>{process.env.DSH_CLIENT_TITLE ?? t('eyebrow')}</p>
+          <p className={css.eyebrow}>{productName}</p>
           <h1 className={css.brandTitle}>{t('description')}</h1>
         </div>
       </section>
       <section className={css.formPanel}>
         <form className={css.card} onSubmit={(event) => { void submit(event) }} noValidate>
           <div className={css.heading}>
-            <h2>{t('title')}</h2>
+            <h2>{t('title', { productName })}</h2>
             <p>{t('description')}</p>
           </div>
 

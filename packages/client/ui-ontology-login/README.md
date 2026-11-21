@@ -29,6 +29,8 @@ Mount this Client plugin through the [`dsh-ontology-login`](../../bundle/ontolog
 
 The plugin registers localized Chinese and English copy, an Ontology graph mark, the guarded root page, and the sidebar account seat. Credential notifications refresh the identity only for the current browser's `ontology-auth-controller/login-*` record; Workspace and Session owner grants preserve the active view.
 
+The sidebar, sign-in page, and embedded session-transfer page use the build-time `DSH_CLIENT_TITLE` as their product name, with `jdcloud-harness` as the default.
+
 When Harness runs in an iframe, the root Slot shows a localized session-transfer page and never exposes the password form. The plugin derives the allowed parent origin from `document.referrer`, announces readiness to that origin, and accepts one versioned `ontology/runtime-session` message from `window.parent`. It validates the message fields, calls the Host `importSession()` Remote method, applies the returned redacted status, and reports only success or failure to the parent.
 
 An iframe URL with `ontologyEmbed=1` accepts a top-level `context: { projectId, projectName, mode: 'modeling' }` beside the transferred `session`. After the Host validates that Project, the page renders a compact native Chat, project history, and a New conversation action that reuses an available blank Session. History lists only conversations with content; unused blank Sessions remain stored. Native file, image, and document attachment controls retain their existing upload and analysis path. A successful handoff acknowledges the validated `projectId` and `mode`; a committed successful `ontology_add_draft_resources` or `ontology_update_draft_bindings` result sends `ontology/draft-updated` to the exact parent origin.

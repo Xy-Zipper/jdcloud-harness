@@ -5,9 +5,8 @@ export const NS = 'ontology.login'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
-  eyebrow: 'Ontology Agent',
-  brandName: 'Ontology Agent',
-  title: '登录本体智能助手',
+  brandName: 'jdcloud-harness',
+  title: '登录 {productName}',
   description: '使用 Ontology 账号登录，访问已授权的项目与业务能力。',
   usernameLabel: '账号',
   usernamePlaceholder: '请输入账号',
@@ -16,7 +15,7 @@ export const zh = {
   submit: '登录',
   submitting: '正在登录…',
   loading: '正在检查登录状态…',
-  embeddedTitle: '正在进入本体智能助手',
+  embeddedTitle: '正在进入 {productName}',
   embeddedDescription: '正在同步当前 Ontology 账号与项目权限，请稍候。',
   embeddedStatus: '正在建立安全会话…',
   modelingTitle: '本体建模助手',
@@ -38,9 +37,8 @@ export const zh = {
 
 /** English dictionary, key-identical to the Chinese source of truth. */
 export const en: Record<OntologyLoginKey, string> = {
-  eyebrow: 'Ontology Agent',
-  brandName: 'Ontology Agent',
-  title: 'Sign in to Ontology Agent',
+  brandName: zh.brandName,
+  title: 'Sign in to {productName}',
   description: 'Use your Ontology account to access authorized projects and business capabilities.',
   usernameLabel: 'Account',
   usernamePlaceholder: 'Enter your account',
@@ -49,7 +47,7 @@ export const en: Record<OntologyLoginKey, string> = {
   submit: 'Sign in',
   submitting: 'Signing in…',
   loading: 'Checking sign-in status…',
-  embeddedTitle: 'Opening Ontology Agent',
+  embeddedTitle: 'Opening {productName}',
   embeddedDescription: 'Synchronizing your Ontology account and project permissions.',
   embeddedStatus: 'Establishing a secure session…',
   modelingTitle: 'Ontology modeling assistant',

@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "jdcloud-harness",
+  "short_name": "jdcloud-harness",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

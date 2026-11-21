@@ -9,7 +9,8 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-const t = (key: OntologyLoginKey): string => zh[key]
+const t = (key: OntologyLoginKey, params?: Record<string, unknown>): string =>
+  zh[key].replace('{productName}', String(params?.productName ?? ''))
 
 /** Render the pure form with registration-owned callbacks. */
 function renderPage(overrides: Partial<OntologyLoginPageProps> = {}) {
@@ -24,6 +25,7 @@ describe('Ontology login page', () => {
     vi.stubEnv('DSH_CLIENT_TITLE', 'Configured Ontology')
     const { login } = renderPage()
     expect(screen.getByText('Configured Ontology')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '登录 Configured Ontology' })).toBeTruthy()
     expect(document.querySelector('[data-ontology-brand-mark="true"]')).not.toBeNull()
     await waitFor(() => { expect(screen.getByLabelText<HTMLInputElement>('账号').disabled).toBe(false) })
 

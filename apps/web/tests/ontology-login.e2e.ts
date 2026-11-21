@@ -16,6 +16,7 @@ import {
   webSnapshotMode,
   type WebScaffold,
 } from './scaffold.ts'
+import { readWebClientBuildEnvironment } from './client-build-environment.ts'
 import { saveFailureShot, ZH_BROWSER_LOCALE } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/ontology-login', import.meta.url))
@@ -28,6 +29,9 @@ const ONTOLOGY_BUNDLE_MANIFEST = fileURLToPath(
   new URL('../../../packages/bundle/ontology-login/package.json', import.meta.url),
 )
 const MODE = webSnapshotMode()
+const environment = await readWebClientBuildEnvironment()
+const productName = environment.DSH_CLIENT_TITLE ?? 'jdcloud-harness'
+const loginHeading = `登录 ${productName}`
 
 interface OntologyServer {
   readonly server: Server
@@ -138,7 +142,7 @@ describe('web e2e: Ontology login', () => {
       page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
       tripwire = watchConsole(page)
       await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
-      await page.getByRole('heading', { name: '登录本体智能助手' }).waitFor({ timeout: 30_000 })
+      await page.getByRole('heading', { name: loginHeading, exact: true }).waitFor({ timeout: 30_000 })
     } catch (error) {
       restoreEnvironment('ONTOLOGY_BASE_URL', originalBaseUrl)
       restoreEnvironment('ONTOLOGY_ALLOW_INSECURE_LOOPBACK', originalAllowInsecureLoopback)
@@ -165,8 +169,9 @@ describe('web e2e: Ontology login', () => {
 
   it('shows the fixed-service login gate and exposes only redacted account state after login', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-ontology-login'))
+    expect(await page.title()).toBe(productName)
     const snapshot = await captureStableAria(page, 'body', scaffold.workspaceCwd, {
-      replacements: [[ontology.baseUrl, '{{ontologyBaseUrl}}']],
+      replacements: [[ontology.baseUrl, '{{ontologyBaseUrl}}'], [productName, '{{productName}}']],
     })
     await compareOrRefreshGolden(LOGIN_EXPECTED, snapshot, MODE)
     expect(await page.getByLabel('Ontology 服务').count()).toBe(0)
@@ -177,6 +182,7 @@ describe('web e2e: Ontology login', () => {
 
     const account = page.getByRole('button', { name: '当前账号 Alice', exact: true })
     await account.waitFor({ timeout: 30_000 })
+    await page.locator('[data-slot="sidebar.brand.name"]').getByText(productName, { exact: true }).waitFor()
     const settings = page.getByRole('button', { name: '设置', exact: true })
     await settings.waitFor({ timeout: 10_000 })
     expect(await page.getByRole('button', { name: '账号菜单', exact: true }).count()).toBe(0)
@@ -193,7 +199,7 @@ describe('web e2e: Ontology login', () => {
     expect(tripwire.pageErrors).toEqual([])
 
     await page.getByRole('menuitem', { name: '退出登录', exact: true }).click()
-    await page.getByRole('heading', { name: '登录本体智能助手' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('heading', { name: loginHeading, exact: true }).waitFor({ timeout: 30_000 })
     expect(ontology.requests).toContain('POST /api/runtime/auth/logout')
   }, 60_000)
 

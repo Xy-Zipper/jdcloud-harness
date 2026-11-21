@@ -51,7 +51,7 @@ export function OntologyBrandMark({ size, className }: OntologyBrandMarkProps) {
 }
 
 /**
- * Render the localized Ontology product name.
+ * Render the build-configured product name with the locale's default.
  * @param props - Slot-provided locale translator.
  * @returns Sidebar wordmark text.
  */
