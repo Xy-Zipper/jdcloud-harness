@@ -524,6 +524,7 @@
       "@deepseek-ai/dsh-office-kit": ["./packages/document/office-kit/src"],
       "@deepseek-ai/dsh-official-bundles": ["./packages/util/official-bundles/src"],
       "@deepseek-ai/dsh-ontology-login": ["./packages/bundle/ontology-login/src"],
+      "@deepseek-ai/dsh-ontology-login/file-assistant": ["./packages/bundle/ontology-login/src/file-assistant.ts"],
       "@deepseek-ai/dsh-output-retention": ["./packages/util/output-retention/src"],
       "@deepseek-ai/dsh-package-manifest": ["./packages/util/package-manifest/src"],
       "@deepseek-ai/dsh-permission-presets": ["./packages/interaction/permission-presets/src"],

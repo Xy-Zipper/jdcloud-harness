@@ -10,7 +10,9 @@ import { Context } from '@deepseek-ai/cordis'
 import Include, { applyEntryPatches, parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader, { type ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import * as ExternalApi from '@deepseek-ai/dsh-api-external'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
+import LlmRuntime, { LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import * as fileAssistant from '@deepseek-ai/dsh-ontology-login/file-assistant'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -27,11 +29,13 @@ import * as ontologyTool from '../../../ontology/tool-ontology/src/index.ts'
 let directory: string | undefined
 let ctx: Context | undefined
 const socketFetch = globalThis.fetch
+const fileAssistantPackage = '@deepseek-ai/dsh-ontology-login/file-assistant'
 
 afterEach(async () => {
   await ctx?.fiber.dispose()
   ctx = undefined
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   if (directory !== undefined) await rm(directory, { recursive: true, force: true })
   directory = undefined
 })
@@ -66,6 +70,10 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     '    ontologyBaseUrl: https://ontology.example.com',
     '    requestTimeoutMs: 15000',
     "- name: '@deepseek-ai/dsh-api-external'",
+    "- name: '@deepseek-ai/dsh-llm'",
+    "- name: '@deepseek-ai/dsh-agent-default-model'",
+    '  config: { provider: fixture, model: file-model }',
+    `- name: '${fileAssistantPackage}'`,
     "- name: '@deepseek-ai/dsh-tool-ontology'",
     "- name: '@deepseek-ai/dsh-client-ui-ontology-login'",
     '',
@@ -107,6 +115,9 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
     ['@deepseek-ai/dsh-tools', ToolRuntime],
     ['@deepseek-ai/dsh-api-ontology-auth-controller', OntologyAuthController],
     ['@deepseek-ai/dsh-api-external', ExternalApi],
+    ['@deepseek-ai/dsh-llm', LlmRuntime],
+    ['@deepseek-ai/dsh-agent-default-model', AgentDefaultModel],
+    [fileAssistantPackage, fileAssistant],
     ['@deepseek-ai/dsh-tool-ontology', ontologyTool],
     ['@deepseek-ai/dsh-client-ui-ontology-login', loginUiModule],
   ])
@@ -168,6 +179,8 @@ describe('Ontology login through a real Loader composition', () => {
       .toBe('@deepseek-ai/dsh-api-ontology-auth-controller')
     expect(rows.find(row => row.id === 'external-api')?.name)
       .toBe('@deepseek-ai/dsh-api-external')
+    expect(rows.find(row => row.id === 'file-assistant')?.name)
+      .toBe(fileAssistantPackage)
     expect(rows.find(row => row.id === 'tool-ontology')?.name)
       .toBe('@deepseek-ai/dsh-tool-ontology')
     expect(rows.find(row => row.id === 'ui-ontology-login')?.name)
@@ -175,6 +188,100 @@ describe('Ontology login through a real Loader composition', () => {
     expect(rows.find(row => row.id === 'ui-settings-models')).toMatchObject({
       config: { welcomeNotice: false, credentialOnboarding: false },
     })
+  })
+
+  it('answers from the submitted excerpts on the configured route and rejects unsupported citations', async () => {
+    const context = await bootComposition(vi.fn())
+    const endpoint = `http://127.0.0.1:${String(context.webServer.port)}/api/internal/file-assistant/answer`
+    const input = { question: '交付日期是哪天？', sources: [{ id: 'S1', text: '11月12日交付。', fileName: '项目.txt' }] }
+    const post = (body: unknown, token = 'test-only') => socketFetch(endpoint, {
+      method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const seen: GenerateOptions[] = []
+    const supported = { answer: '交付日期为11月12日。', sourceIds: ['S1'] }
+    const absent = { answer: '当前所选资料中未找到足够依据。', sourceIds: [] }
+    let output = JSON.stringify(supported)
+    const adapter = new class extends LlmAdapter {
+      async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        seen.push(options)
+        yield { type: 'reasoning-delta', index: 0, text: 'internal reasoning' }
+        yield { type: 'text-delta', index: 1, text: output }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }()
+    context.llm.registerAdapter(['fixture'], adapter)
+    vi.stubEnv('FILE_ASSISTANT_SERVICE_TOKEN', '')
+    expect((await post(input)).status).toBe(503)
+    vi.stubEnv('FILE_ASSISTANT_SERVICE_TOKEN', 'test-only')
+    expect((await post(input, 'browser-token')).status).toBe(401)
+    const auth = { authorization: 'Bearer test-only' }
+    expect((await socketFetch(endpoint, { headers: auth })).status).toBe(405)
+    expect((await socketFetch(endpoint, { method: 'POST', headers: auth, body: 'plain text' })).status).toBe(415)
+    expect((await socketFetch(endpoint, {
+      method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{',
+    })).status).toBe(400)
+    expect((await post({ ...input, sources: Array.from({ length: 9 }, (_, i) => ({
+      id: String(i), fileName: '文件', text: '片段',
+    })) })).status).toBe(400)
+    expect((await post({ ...input, sources: [input.sources[0], input.sources[0]] })).status).toBe(400)
+    await expect((await post({ ...input, sources: [] })).json()).resolves.toEqual(absent)
+    expect(seen).toHaveLength(0)
+    await expect((await post({ ...input, model: 'untrusted', tools: ['shell'] })).json()).resolves.toEqual(supported)
+    expect(seen[0]).toMatchObject({
+      provider: 'fixture', model: 'file-model',
+      messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify(input) }] }],
+    })
+    expect(seen[0]?.tools).toBeUndefined()
+    expect(seen[0]?.sessionId).toBeUndefined()
+    expect(seen[0]?.system).toMatchSnapshot()
+    output = JSON.stringify({ answer: '无依据的猜测', sourceIds: [] })
+    await expect((await post(input)).json()).resolves.toEqual(absent)
+    for (const invalid of [
+      'not JSON', '{"answer":"答复","sourceIds":["S2"]}', '{"answer":"答复","sourceIds":["S1","S1"]}',
+    ]) {
+      output = invalid
+      expect((await post(input)).status).toBe(502)
+    }
+    const qa = { task: 'qa', sources: input.sources }
+    const generated = { questions: [{ question: input.question, answer: supported.answer, sourceIds: ['S1'] }] }
+    output = JSON.stringify(generated)
+    await expect((await post(qa)).json()).resolves.toEqual(generated)
+    expect(seen.at(-1)?.system).toMatchSnapshot('generate cited questions')
+    output = JSON.stringify({ questions: [{ ...generated.questions[0], sourceIds: ['outside'] }] })
+    expect((await post(qa)).status).toBe(502)
+    expect((await post({ ...qa, sources: [] })).status).toBe(400)
+    const extract = { task: 'extract', sources: input.sources }
+    const extracted = {
+      entities: [{ name: '交付', type: '事件', sourceIds: ['S1'] }, { name: '11月12日', type: '日期', sourceIds: ['S1'] }],
+      relations: [{ subject: '交付', predicate: '日期', object: '11月12日', sourceIds: ['S1'] }],
+    }
+    output = JSON.stringify(extracted)
+    await expect((await post(extract)).json()).resolves.toEqual(extracted)
+    expect(seen.at(-1)?.system).toMatchSnapshot('extract cited entities and relations')
+    output = JSON.stringify({ ...extracted, relations: [{ ...extracted.relations[0], object: '11月13日' }] })
+    expect((await post(extract)).status).toBe(502)
+    const transform = { task: 'pipeline', prompt: '提取水库名称', fields: { content: '示例水库' }, outputType: 'entities' }
+    output = JSON.stringify({ value: ['示例水库'] })
+    await expect((await post(transform)).json()).resolves.toEqual({ value: ['示例水库'] })
+    expect(seen.at(-1)?.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: JSON.stringify(transform) }] }])
+    expect(seen.at(-1)?.system).toMatchSnapshot('transform selected pipeline fields')
+    output = ['```json', '{"value":["示例水库"]}', '```'].join('\n')
+    await expect((await post(transform)).json()).resolves.toEqual({ value: ['示例水库'] })
+    output = '提取结果如下：\n' + output
+    await expect((await post(transform)).json()).resolves.toEqual({ error: 'invalid_model_answer' })
+    output = '{"value":[]}'
+    await expect((await post(transform)).json()).resolves.toEqual({ value: [] })
+    output = JSON.stringify({ value: { name: '示例水库' } })
+    expect((await post(transform)).status).toBe(502)
+    await expect((await post({ ...transform, outputType: 'json' })).json()).resolves.toEqual({ value: { name: '示例水库' } })
+    output = '{"value":"摘要"}'
+    await expect((await post({ ...transform, outputType: 'text' })).json()).resolves.toEqual({ value: '摘要' })
+    const entry = [...context.loader.entries()].find(candidate => candidate.options.name === fileAssistantPackage)
+    expect(entry?.fiber).toBeDefined()
+    await entry?.fiber?.dispose()
+    // The remaining /api prefix now checks browser credentials.
+    expect((await post(input)).status).toBe(401)
   })
 
   it('activates the controller and UI node half for password and imported browser-scoped logins', async () => {

@@ -13,6 +13,12 @@ English | [中文](README.zh.md)
 
 The bundle also installs the external API. Those routes accept a Go Runtime Access Token and `X-Project-Id`, validate that the user can see the Project, and isolate personal Skills, Workspaces, and Sessions by Project and user without creating browser login state.
 
+The Go file assistant calls `POST /api/internal/file-assistant/answer` with `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` and JSON `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`. Set the same private service token on both servers. Go authorizes file access and sends up to eight excerpts within a 512 KiB request. The response contains `answer` and unique `sourceIds` from this request. An empty list signals insufficient evidence. A missing service token returns 503, an incorrect token returns 401, and a model failure or invalid citation returns 502.
+
+For a nonempty batch of excerpts, send `task: "qa"` to generate `questions` or `task: "extract"` to extract `entities` and `relations`. These requests contain `task` and `sources`. Every returned row carries `sourceIds` from the supplied batch. Relation endpoints are named entities in the same response.
+
+Pipeline field generation sends `{"task":"pipeline","prompt":"…","fields":{"content":"…"},"outputType":"entities"}` to the same route. The response contains `value`, an array of entity names for `entities`, a string for `text`, or an object for `json`. The prompt includes an example for the selected output type. A single JSON code fence is accepted around a valid result. Only selected fields and the supplied instructions enter the model call.
+
 ## Table of Contents
 
 - [Use this package](#use-this-package)
@@ -85,9 +91,11 @@ The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-
 
 Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, thirteen tool schemas, and validated Runtime results.
 
+Each file question uses the current default model to answer from the submitted excerpts, with a 4,096-token output budget and a 60-second deadline. The model receives just the evidence instructions and that request's data. This route has no tools or conversation history.
+
 #### KV Cache effect
 
-The bundle itself adds no request prefix; the inserted tool package owns prompt and tool-schema changes.
+The file assistant reuses its evidence instructions across calls. The inserted tool package owns prompt and tool-schema changes for interactive Sessions.
 
 ## Known Limitations and Deferred Work
 
@@ -107,4 +115,4 @@ None.
 
 </details>
 
-**Runtime invariant:** No companion is published. Loader validates all six inserted package rows, and each package validates its own state.
+**Runtime invariant:** Loader activates the file assistant as a separate Host plugin in the Ontology profile.

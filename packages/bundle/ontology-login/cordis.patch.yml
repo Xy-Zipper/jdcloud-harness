@@ -37,6 +37,9 @@
     - id: external-api
       name: '@deepseek-ai/dsh-api-external'
 
+    - id: file-assistant
+      name: '@deepseek-ai/dsh-ontology-login/file-assistant'
+
     - id: tool-ontology
       name: '@deepseek-ai/dsh-tool-ontology'
 

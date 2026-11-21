@@ -2921,6 +2921,9 @@ importers:
 
   packages/bundle/ontology-login:
     dependencies:
+      '@deepseek-ai/dsh-agent-default-model':
+        specifier: workspace:*
+        version: link:../../core/agent-default-model
       '@deepseek-ai/dsh-api-external':
         specifier: workspace:*
         version: link:../../api/external-api
@@ -2939,6 +2942,12 @@ importers:
       '@deepseek-ai/dsh-host-directory-picker-browse':
         specifier: workspace:*
         version: link:../../host/directory-picker-browse
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../../host/webserver
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../../llm/llm
       '@deepseek-ai/dsh-tool-ontology':
         specifier: workspace:*
         version: link:../../ontology/tool-ontology
@@ -2955,9 +2964,6 @@ importers:
       '@deepseek-ai/dsh-credentials':
         specifier: workspace:*
         version: link:../../credentials/credentials
-      '@deepseek-ai/dsh-llm':
-        specifier: workspace:*
-        version: link:../../llm/llm
       '@deepseek-ai/dsh-session':
         specifier: workspace:*
         version: link:../../core/session

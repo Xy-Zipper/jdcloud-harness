@@ -18,11 +18,16 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./file-assistant": {
+      "types": "./lib/types/file-assistant.d.ts",
+      "default": "./lib/types/file-assistant.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/types/file-assistant.js",
     "cordis.patch.yml",
     "lib/types/**/*.d.ts",
     "lib/types/**/*.d.ts.map",
@@ -36,11 +41,14 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-agent-default-model": "workspace:*",
     "@deepseek-ai/dsh-api-external": "workspace:*",
     "@deepseek-ai/dsh-api-ontology-auth-controller": "workspace:*",
     "@deepseek-ai/dsh-client-ui-directory-picker-browse": "workspace:*",
     "@deepseek-ai/dsh-client-ui-ontology-login": "workspace:*",
     "@deepseek-ai/dsh-host-directory-picker-browse": "workspace:*",
+    "@deepseek-ai/dsh-host-webserver": "workspace:*",
+    "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-tool-ontology": "workspace:*",
     "@deepseek-ai/dsh-client-connection": "workspace:*"
   },
@@ -52,7 +60,6 @@
     "@deepseek-ai/cordis-plugin-include": "workspace:~",
     "@deepseek-ai/cordis-plugin-loader": "workspace:~",
     "@deepseek-ai/dsh-credentials": "workspace:*",
-    "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-session": "workspace:*",
     "@deepseek-ai/dsh-system-prompt": "workspace:*",
     "@deepseek-ai/dsh-tools": "workspace:*",

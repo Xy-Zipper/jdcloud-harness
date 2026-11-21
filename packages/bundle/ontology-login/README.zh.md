@@ -13,6 +13,12 @@ kind: "package-bundle"
 
 该 bundle 同时安装外部 API。这些路由接受 Go Runtime Access Token 与 `X-Project-Id`，校验用户可见该 Project，并按 Project 与用户隔离个人 Skill、Workspace 和 Session，不会创建浏览器登录状态。
 
+Go 文件助手调用 `POST /api/internal/file-assistant/answer`，携带 `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` 和 JSON 请求体 `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`。两个服务端设置相同的私有令牌。Go 负责文件访问授权，在 512 KiB 以内发送至多八个片段。响应包含 `answer` 和来自本次请求的唯一 `sourceIds`。空数组表示资料不足。未配置服务令牌时返回 503，令牌错误时返回 401，模型失败或引用无效时返回 502。
+
+传入非空片段组时，使用 `task: "qa"` 生成 `questions`，或使用 `task: "extract"` 抽取 `entities` 和 `relations`。请求包含 `task` 和 `sources`。每条结果携带当前批次的 `sourceIds`，关系两端引用同一响应中的实体名称。
+
+数据管道字段生成向同一地址发送 `{"task":"pipeline","prompt":"…","fields":{"content":"…"},"outputType":"entities"}`。响应的 `value` 随类型而变化，`entities` 为实体名数组，`text` 为字符串，`json` 为对象。提示词包含所选输出类型的示例，符合类型的结果可以包在一个 JSON 代码块内。模型调用仅使用所选字段和提示词。
+
 ## 目录
 
 - [使用本包](#use-this-package)
@@ -85,9 +91,11 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 
 通过 `@deepseek-ai/dsh-tool-ontology` 间接影响，该包负责 Ontology 指引、十三个工具 schema 与已校验 Runtime 结果。
 
+每次文件问答使用当前默认模型，根据传入片段作答。输出上限为 4,096 个 token，超时为 60 秒。模型只收到依据文件作答的指令和本次请求的数据，调用不携带工具或对话历史。
+
 #### KV Cache 影响
 
-bundle 本身不增加请求前缀；插入的工具包负责 Prompt 与工具 schema 变化。
+文件助手在多次调用中复用依据文件作答的指令。插入的工具包负责交互式 Session 的 Prompt 与工具 schema。
 
 ## 已知限制与延期工作
 
@@ -107,4 +115,4 @@ bundle 本身不增加请求前缀；插入的工具包负责 Prompt 与工具 s
 
 </details>
 
-**运行时不变式：** 不发布伴生入口。Loader 校验六个插入的 package row，各 package 校验自身状态。
+**运行时不变式：** Loader 在 Ontology profile 中将文件助手加载为独立的 Host 插件。

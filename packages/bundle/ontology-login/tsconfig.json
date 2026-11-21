@@ -8,6 +8,10 @@
     "src"
   ],
   "references": [
-    { "path": "../../../vendor/cordis" }
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../core/agent-default-model" },
+    { "path": "../../client/connection/tsconfig.host.json" },
+    { "path": "../../host/webserver" },
+    { "path": "../../llm/llm" }
   ]
 }

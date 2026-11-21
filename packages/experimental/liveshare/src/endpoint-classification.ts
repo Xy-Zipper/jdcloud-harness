@@ -218,6 +218,10 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'mcpManager/restart': 'owner-only', // owner MCP server management
   'mcpManager/watch': 'owner-only', // owner MCP server management
   'commands/execute': 'owner-only', // owner executes a slash command
+  // Account skill management uses the signed-in owner's private catalog.
+  'skills/createAccount': 'owner-only',
+  'skills/deleteAccount': 'owner-only',
+  'skills/listAccount': 'owner-only',
   'permissionPresets/catalog': 'owner-only', // owner permission presets
   'userQuestions/answer': 'owner-only', // owner answers a pending question
   'userQuestions/attachWait': 'owner-only', // owner answers a pending question

@@ -34,6 +34,8 @@ services:
       # Ontology Runtime is the only application identity and business-data authority.
       ONTOLOGY_BASE_URL: ${ONTOLOGY_BASE_URL:?Set ONTOLOGY_BASE_URL to the HTTPS Ontology Runtime origin}
       ONTOLOGY_REQUEST_TIMEOUT_MS: ${ONTOLOGY_REQUEST_TIMEOUT_MS:-15000}
+      # Shared only with the Go file assistant backend.
+      FILE_ASSISTANT_SERVICE_TOKEN: ${FILE_ASSISTANT_SERVICE_TOKEN:-}
       ONTOLOGY_ALLOW_INSECURE_LOOPBACK: "false"
       ONTOLOGY_USER_WORKSPACE_DIR: ${ONTOLOGY_USER_WORKSPACE_DIR:-/workspace/ontology-users}
       NODE_ENV: production
