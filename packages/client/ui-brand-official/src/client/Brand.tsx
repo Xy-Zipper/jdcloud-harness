@@ -1,5 +1,7 @@
-import { BrandWordmark, FishLogo } from '@deepseek-ai/dsh-client-ui-primitives'
+import { FishLogo } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SidebarBrandMarkOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
+
+const DEFAULT_PRODUCT_NAME = 'LSY-Agent'
 
 /**
  * Render the official mark with the presentation requested by its host surface.
@@ -11,9 +13,9 @@ export function OfficialBrandMark({ size }: SidebarBrandMarkOwnerProps) {
 }
 
 /**
- * Render the official name artwork without its independently slotted mark.
- * @returns the official name wordmark.
+ * Render the build's product name beside the independently slotted mark.
+ * @returns the product name.
  */
 export function OfficialBrandName() {
-  return <BrandWordmark includeMark={false} />
+  return <span>{process.env.DSH_CLIENT_TITLE ?? DEFAULT_PRODUCT_NAME}</span>
 }

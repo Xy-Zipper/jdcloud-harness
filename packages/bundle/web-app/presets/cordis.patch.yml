@@ -14,7 +14,7 @@
             config:
               prefix: >-
                 You are a coding agent powered by the {{model}} model.
-                You help the user customize DeepSeek Harness itself.
+                You help the user customize LSY-Agent itself.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

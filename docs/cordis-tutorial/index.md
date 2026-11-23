@@ -2,7 +2,7 @@
 
 English | [中文](index.zh.md)
 
-Cordis is the plugin framework underneath DeepSeek Harness: a small runtime where every capability — tools, LLM adapters, file access, the agent loop itself — is a plugin mounted into a shared context. This tutorial teaches Cordis hands-on: each chapter is a runnable example you build in a scratch directory inside this repository, ending with a plugin wired into real harness services.
+Cordis is the plugin framework underneath LSY-Agent: a small runtime where every capability — tools, LLM adapters, file access, the agent loop itself — is a plugin mounted into a shared context. This tutorial teaches Cordis hands-on: each chapter is a runnable example you build in a scratch directory inside this repository, ending with a plugin wired into real harness services.
 
 The audience is agent developers. You do not need deep TypeScript experience; the [TypeScript notes](#typescript-notes) below explain the syntax that may be unfamiliar, and every chapter shows the exact commands and expected output.
 
@@ -15,8 +15,8 @@ To write plugins for the harness itself — loaded from a `cordis.yml` and drive
 You need a clone of this repository with dependencies installed; the [development guide](../development.md#setup-tutorial) lists the prerequisites. No API key is needed for this tutorial; every example runs keylessly.
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone --branch jdcloud-main https://github.com/Xy-Zipper/jdcloud-harness.git
+cd jdcloud-harness
 pnpm install
 ```
 

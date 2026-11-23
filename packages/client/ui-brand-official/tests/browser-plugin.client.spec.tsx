@@ -103,7 +103,7 @@ describe('official browser-brand plugin', () => {
 
   it('renders the official name independently from both requested mark sizes', () => {
     const name = render(<OfficialBrandName />)
-    expect(name.container.querySelector('svg')?.getAttribute('viewBox')).toBe('26 0 156 24')
+    expect(name.getByText('LSY-Agent')).toBeTruthy()
     name.unmount()
 
     const mark = render(<OfficialBrandMark size={34} />)

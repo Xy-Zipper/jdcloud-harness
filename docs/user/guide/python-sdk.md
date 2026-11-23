@@ -22,16 +22,16 @@ This tutorial installs the published Python SDK, runs the shipped standalone min
 ::: code-group
 
 ```sh [Linux/macOS]
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone --branch jdcloud-main https://github.com/Xy-Zipper/jdcloud-harness.git
+cd jdcloud-harness
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install deepseek-harness-sdk
 ```
 
 ```powershell [Windows PowerShell]
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-Set-Location deepseek-harness
+git clone --branch jdcloud-main https://github.com/Xy-Zipper/jdcloud-harness.git
+Set-Location jdcloud-harness
 py -3.10 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install deepseek-harness-sdk

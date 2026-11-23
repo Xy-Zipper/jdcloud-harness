@@ -1,85 +1,71 @@
 ---
-description: "在本地构建 JDCloud Harness 镜像，导出到 Linux 服务器并离线启动。"
+description: "在 macOS 或 Windows 构建 jdcloud-harness 镜像，推送到阿里云或导出到 Linux 服务器离线部署。"
 ---
-
-$Env:DSH_CLIENT_COMMIT_HASH = (git rev-parse HEAD).Trim()
-
-Remove-Item Env:DOCKER_BUILDKIT -ErrorAction SilentlyContinue
-
-$Env:http_proxy = "http://127.0.0.1:35347"
-$Env:https_proxy = "http://127.0.0.1:35347"
-
-docker build `
-  --build-arg "DSH_CLIENT_COMMIT_HASH=$Env:DSH_CLIENT_COMMIT_HASH" `
-  --tag jdcloud-harness:local `
-  .
-
-
-# caddy:2-alpine
-# docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
-
-docker image save -o .\jdcloud-harness.tar jdcloud-harness:local
-docker pull caddy:2-alpine
-
-
-
-
- docker load -i jdcloud-harness.tar
-
-
-docker compose up -d --no-build --force-recreate
-
-
-
-
-
-
-
-
 
 # Docker 部署
 
-本地构建镜像，导出为 tar 上传到服务器。服务器加载镜像后使用 Compose 启动；模型配置、登录信息、会话和附件保存在部署目录的 `data/`，更新镜像不会覆盖它们。
+在本机为 `linux/amd64` 服务器构建镜像，可以推送到阿里云镜像仓库，也可以导出为 tar 离线部署。模型配置、登录信息、会话和附件保存在服务器部署目录的 `data/`，更新镜像不会覆盖它们。
+
+默认 Web 产品名称为 `LSY-Agent`。通过 Compose 构建时，可在构建机的 `.env` 中用 `JDCLOUD_PRODUCT_NAME` 覆盖浏览器标题和侧栏名称。用 `docker build` 时，传入 `--build-arg DSH_CLIENT_TITLE=自定义名称`。服务器 `.env` 中的 `JDCLOUD_PRODUCT_NAME` 控制运行时的智能体上下文，修改后重建容器即可。
 
 ## 发布到阿里云镜像仓库
 
-在项目根目录的 PowerShell 中运行[发版脚本](scripts/release-docker.ps1)，将 `1.0.0` 替换为本次版本号；省略 `-Version` 时会提示输入。需要已安装 Git、Docker 已启动，以及本机 `35347` 端口的 HTTP 代理可用。
+安装 Git 并启动 Docker Desktop。在仓库根目录运行对应的发版脚本。示例中的 `7890` 是本机 HTTP 代理端口，按实际配置替换。直接联网或已在 Docker Desktop 配置代理时，可以省略这个参数。
 
-```powershell
-.\scripts\release-docker.ps1 -Version 0.2.1-rc.2-v6
+在 macOS 的终端运行。 [macOS 发版脚本](scripts/release-docker.sh)
+
+```sh
+./scripts/release-docker.sh --version 0.2.2-rc.3-v2 --proxy-port 7890
 ```
 
-脚本删除本地 `jdcloud-harness:local` 标签（不存在则跳过），设置提交哈希及 HTTP/HTTPS 代理并清除 `DOCKER_BUILDKIT`，从当前工作区构建 `jdcloud-harness:local`，以 `萧影科技` 登录，再打标签并推送到 `crpi-is7b7e9g1wrfpsor.cn-guangzhou.personal.cr.aliyuncs.com/lushanyun-docker/jdcloud-harness:1.0.0`。登录需要密码时，在 Docker 提示中输入；脚本不接收或保存密码。环境变量设置保留在当前 PowerShell 进程，构建包含未提交文件。任一步失败即停止，已完成的镜像操作不回滚；推送失败时先检查仓库中的目标标签及 Docker 错误。实际仓库登录和推送由发版操作者验证。
+在 Windows PowerShell 中运行。 [Windows 发版脚本](scripts/release-docker.ps1)
+
+```powershell
+.\scripts\release-docker.ps1 -Version 0.2.2-rc.3-v2 -ProxyPort 7890
+```
+
+脚本从 Git 读取 `HEAD` 作为客户端提交标识，并打包当前工作区中的构建文件，包括未提交的改动。构建成功后，脚本以 `萧影科技` 登录阿里云镜像仓库，按指定版本打标签并推送。请在 Docker 的提示中输入密码。
+
+代理端口参数通过 `host.docker.internal` 提供给构建容器，用于下载 pnpm 和 npm 依赖。如果错误发生在拉取 Node 基础镜像或推送镜像时，请检查 Docker Desktop 的代理设置。 [Docker Desktop 代理设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#proxies)
+
+如果 Apple Silicon 上的构建长时间停在 `Host bundle`，在 Docker Desktop 的 **Settings → General** 中关闭 **Use Rosetta for x86_64/amd64 emulation on Apple Silicon**，应用设置后重试。 [Docker Desktop 通用设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#general)
 
 ## 本地构建并导出
 
-在项目根目录的 PowerShell 中执行。Docker Desktop 必须能访问构建所需的镜像仓库。
+使用 `--build-only` 或 `-BuildOnly` 生成本地 `jdcloud-harness:local` 镜像。此模式无需登录镜像仓库。
 
-```powershell
-cd D:\WebstormProjects\jdcloud-harness
-
-$Env:DSH_CLIENT_COMMIT_HASH = (git rev-parse HEAD).Trim()
-$Env:http_proxy = "http://127.0.0.1:27085"
-$Env:https_proxy = "http://127.0.0.1:27085"
-
-docker compose build jdcloud-harness
-docker pull caddy:2-alpine
-docker image save -o .\jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
+```sh
+./scripts/release-docker.sh --build-only --proxy-port 7890
 ```
 
-如 Docker Desktop 无法拉取镜像，在 Docker Desktop 的代理设置中填写 `http://host.docker.internal:27085` 后重启 Docker Desktop。
+```powershell
+.\scripts\release-docker.ps1 -BuildOnly -ProxyPort 7890
+```
 
-镜像在构建阶段和运行阶段均按根目录 `package.json` 的 `packageManager` 安装 pnpm，避免版本不一致时额外下载 `@pnpm/exe`。若安装依赖时仍出现 registry 网络错误，可在原构建命令中增加 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`；例如 `docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com jdcloud-harness`。更换源仍保留 `--frozen-lockfile` 和锁文件完整性校验。
+离线部署时，同时导出服务器需要的 Caddy 镜像。在 macOS 和 Windows 上均可运行以下命令。
+
+```text
+docker pull --platform linux/amd64 caddy:2-alpine
+docker image save -o jdcloud-harness.tar jdcloud-harness:local caddy:2-alpine
+```
+
+如果 Docker Hub 的镜像加速器无法拉取 Node 基础镜像，可通过 `NODE_IMAGE` 环境变量指定可用的 Node 官方镜像地址。在 macOS 上可用以下命令验证构建。
+
+```sh
+NODE_IMAGE=public.ecr.aws/docker/library/node:24-bookworm ./scripts/release-docker.sh --build-only --proxy-port 7890
+```
+
+镜像在构建阶段和运行阶段均按根目录 `package.json` 的 `packageManager` 安装 pnpm。若手动构建时出现 npm registry 网络错误，可在 Docker 构建命令中增加 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`。构建仍使用 `--frozen-lockfile` 和锁文件完整性校验。
 
 ## 上传并启动
 
 上传 `jdcloud-harness.tar` 和 `compose.yaml` 到服务器部署目录，例如 `/opt/jdcloud-harness`。
 
-```powershell
-scp .\jdcloud-harness.tar .\compose.yaml user@<服务器地址>:/opt/jdcloud-harness/
+```text
+scp jdcloud-harness.tar compose.yaml user@server.example:/opt/jdcloud-harness/
 ```
 
-服务器需要同为 Linux `amd64` 架构。在服务器创建 `.env`：
+将 `user@server.example` 换成服务器的 SSH 用户和地址。服务器需要使用 Linux `amd64` 架构。在服务器创建 `.env`：
 
 ```env
 GPT_API_KEY=实际模型密钥

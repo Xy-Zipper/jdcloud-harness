@@ -59,7 +59,7 @@ interface WebOptions {
 function webCommand(): Command {
   return new Command()
     .name('dsh --profile web')
-    .description('Serve the DeepSeek Harness browser UI.')
+    .description('Serve the LSY-Agent browser UI.')
     .helpOption('-h, --help', 'show this help')
     .option('--host <host>', 'bind address: one concrete IPv4 or IPv6 literal of a local interface; wildcard addresses are rejected')
     .option('--no-open', 'do not open the Web UI in the default browser')

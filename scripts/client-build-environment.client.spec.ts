@@ -115,7 +115,7 @@ describe('client build environment', () => {
     expect(resolveClientBuildEnvironment(parent)).toEqual({
       DSH_CLIENT_BUILD_PROFILE: 'official',
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
-      DSH_CLIENT_TITLE: 'Local title',
+      DSH_CLIENT_TITLE: 'LSY-Agent',
       DSH_CLIENT_VERSION: '1.2.3',
     })
     expect(() => {
@@ -147,7 +147,7 @@ describe('client build environment', () => {
     const parent = {
       DSH_BUILD_CLIENT_PROFILE: 'official',
       DSH_CLIENT_BUILD_PROFILE: 'official',
-      DSH_CLIENT_TITLE: 'DeepSeek Harness',
+      DSH_CLIENT_TITLE: 'LSY-Agent',
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
       DSH_CLIENT_VERSION: '1.2.3',
       DSH_CLIENT_GIT_DIRTY: dirty,
@@ -165,7 +165,7 @@ describe('client build environment', () => {
     expect(resolveClientBuildEnvironment({ ...parent, ...local }, 'official')).toEqual({
       DSH_CLIENT_BUILD_PROFILE: 'official',
       DSH_CLIENT_COMMIT_HASH: COMMIT_HASH.slice(0, 7),
-      DSH_CLIENT_TITLE: 'DeepSeek Harness',
+      DSH_CLIENT_TITLE: 'LSY-Agent',
       DSH_CLIENT_VERSION: '1.2.3',
     })
   })

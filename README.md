@@ -1,22 +1,22 @@
-# DeepSeek Harness
+# LSY-Agent
 
 English | [中文](README.zh.md)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+LSY-Agent (`dsh`) is the JDCloud fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
 
-Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+See the [Docker deployment guide](Docker.README.md) for JDCloud setup and [upstream documentation](https://deepseek-harness.github.io/deepseek-harness/) for the shared framework.
 
 ## Developer preview
 
-DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+LSY-Agent is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
 
 Review the [safety notice](SAFETY.md) before running the project.
 
 ## Run
 
-### Run from `npm`
+### Run the upstream version from `npm`
 
 Install `Node.js`, then run:
 
@@ -31,8 +31,8 @@ The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it
 To run from a repository checkout:
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone --branch jdcloud-main https://github.com/Xy-Zipper/jdcloud-harness.git
+cd jdcloud-harness
 pnpm install
 pnpm run build
 pnpm dsh web

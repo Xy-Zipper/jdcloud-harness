@@ -663,7 +663,7 @@ describe('the shipped Web composition', () => {
         const standardPrefix = standardPersona.find(section => section.name === 'deployment:persona-prefix')
         expect(standardPrefix?.text).toMatch(/^You are a coding agent powered by the .+ model\.$/u)
         expect(cordisPersona).toEqual(standardPersona.map(section => section.name === 'deployment:persona-prefix'
-          ? { ...section, text: `${section.text} You help the user customize DeepSeek Harness itself.` }
+          ? { ...section, text: `${section.text} You help the user customize LSY-Agent itself.` }
           : section))
         const definition = composeEntries([webPatches('Creator persona')])
           .find(row => row.id === 'preset-cordis')!.config as import('@deepseek-ai/dsh-agent-preset-registry').PresetDefinition

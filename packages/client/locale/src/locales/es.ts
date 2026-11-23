@@ -34,7 +34,7 @@ export const es = {
   'collapse': 'Contraer',
   'expand': 'Expandir',
   'back': 'Atrás',
-  'brand.localBuild': 'Compilación local de DSH',
+  'brand.localBuild': 'LSY-Agent',
   'workspace.defaultName': 'Espacio de trabajo predeterminado',
   'unknown': 'Desconocido',
   'none': 'Ninguno',

@@ -33,7 +33,7 @@ export const en = {
   'collapse': 'Collapse',
   'expand': 'Expand',
   'back': 'Back',
-  'brand.localBuild': 'JDCloud Harness',
+  'brand.localBuild': 'LSY-Agent',
   'unknown': 'Unknown',
   'none': 'None',
   'truncated': 'Truncated',

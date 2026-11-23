@@ -26,8 +26,8 @@ Invocations: `dsh --help`
 Usage: dsh [--profile] <name> [options] [app-args...]
        dsh plugin --profile <name> <pnpm-args...>
 
-dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch
-layers under your own overrides.
+dsh: boot an LSY-Agent profile — an ordered stack of plugin-bundle patch layers
+under your own overrides.
 
 Arguments:
   args                           arguments for the booted profile's app (see:
@@ -178,7 +178,7 @@ Invocations: `dsh web --help`, `dsh --profile web --help`
 ```text
 Usage: dsh --profile web [options]
 
-Serve the DeepSeek Harness browser UI.
+Serve the LSY-Agent browser UI.
 
 Options:
   --host <host>                  bind address: one concrete IPv4 or IPv6 literal

@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "LSY-Agent",
+  "short_name": "LSY-Agent",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

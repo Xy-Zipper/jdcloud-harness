@@ -1,0 +1,8 @@
+# Match the permission preset recorded in the Creator Session fixture.
+- id: sandbox-policy
+  config:
+    mode: workspace-write
+    workspaceRoot: !!js process.cwd()
+- id: approval
+  config:
+    policy: ask

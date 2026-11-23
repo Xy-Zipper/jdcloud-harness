@@ -175,7 +175,7 @@ preset 提供一条目录项。没有其他 skill 的会话还会收到目录的
 
 #### 模型看到什么
 
-创造模式预设在共享的编码 Agent 描述句之后添加“You help the user customize DeepSeek Harness itself.”。插件实现和授权规则仍保留在按需加载的 `dsh-doc` skill 中。
+创造模式预设在共享的编码 Agent 描述句之后添加“You help the user customize LSY-Agent itself.”。插件实现和授权规则仍保留在按需加载的 `dsh-doc` skill 中。
 
 #### Token 影响
 

@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`@deepseek-ai/dsh-jdcloud-login` 是面向 Web profile 的可选纯 patch bundle。它把 JDCloud Host 认证 controller、浏览器登录页、侧边栏账号摘要、可写功能选择器、低代码对话工具和 JDCloud Harness Web 品牌作为一个可部署 layer 安装。
+`@deepseek-ai/dsh-jdcloud-login` 是面向 Web profile 的可选纯 patch bundle。它把 JDCloud Host 认证 controller、浏览器登录页、侧边栏账号摘要、可写功能选择器、低代码对话工具和 LSY-Agent Web 品牌作为一个可部署 layer 安装。
 
 该 bundle 同时安装外部 API。这些路由会针对 `JDCLOUD_DEFAULT_BASE_URL` 校验低代码原始 Token，并要求 Token 当前租户与 `X-Tenant-Id` 一致；它们不会复用或修改浏览器登录状态。
 
@@ -44,7 +44,7 @@ JDCLOUD_IFRAME_PARENT_ORIGIN=https://portal.example
 
 默认的窗口打开流程不需要设置 `JDCLOUD_IFRAME_PARENT_ORIGIN`。该变量接受嵌入 `/login/transfer` 的父页面准确 HTTP(S) origin，不能包含路径。只有允许全部网站嵌入转发页时才将其设为 `*`；该配置允许任意网站实施点击劫持。bundle 使用 Connection 的 Bearer 浏览器会话载体，因此跨站 iframe 不依赖第三方 cookie，也可以通过 HTTP 运行。明文 HTTP 无法防止网络观察者或中间节点窃取 bearer 凭证。修改这个运行时变量只要求重启进程或容器，不要求重新构建浏览器资源。
 
-Docker Compose 部署可通过 `JDCLOUD_PRODUCT_NAME` 设置浏览器标题、侧栏产品名、PWA 名称及模型可见的 Web 品牌；默认值为 `LSY-Agent`。浏览器资源会在构建时嵌入标题，因此修改后需要重新构建镜像。
+Docker Compose 部署可通过 `JDCLOUD_PRODUCT_NAME` 设置浏览器标题、侧栏产品名及模型可见的 Web 品牌；默认值为 `LSY-Agent`。浏览器资源会在构建时嵌入标题，因此修改后需要重新构建镜像。
 
 该 bundle 会关闭 Harness 浏览器启动 token，并启用绑定 authority 的 Bearer 浏览器会话。Client 将 token 保存到当前标签页的 `sessionStorage`，把它添加到同源 HTTP 请求，并在 WebSocket 升级时使用短期单次 ticket。因此登录记录按浏览器标签页隔离；同一 JDCloud 租户和用户仍可共享会话与工作区。该 bundle 将每个租户用户的新文件和个人 skill 放在 `/workspace/jdcloud-users/<归属哈希>` 下；`JDCLOUD_USER_WORKSPACE_DIR` 可覆盖持久化父目录。管理员在该父目录的 `.dsh/skills` 中管理所有账号都能发现的内置 skill。旧的 Host 主目录不迁移。工作区选择使用页面内置目录浏览器，从获准的账号目录开始且不能向上越界；工作区登记、会话创建和 skill 变更执行相同的目录限制，但终端命令和通过完整路径读取文件仍不受此限制。该 bundle 不显示内测声明及首次运行自动弹出的 API Key 对话框；模型设置页与手动填写 API Key 的入口保持可用。
 

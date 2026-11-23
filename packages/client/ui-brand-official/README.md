@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package supplies a click-triggered pixel whale on the blank home and gives an `official` client build the DeepSeek Harness sidebar artwork. The shipped Web and Desktop compositions load it by default. Other build profiles retain their existing branding. The hero mark stays on its animated fish fallback. The background owns only temporary canvas resources and adds no model requests.
+This package supplies a click-triggered pixel whale on the blank home and gives an `official` client build the LSY-Agent sidebar identity. The shipped Web and Desktop compositions load it by default. Other build profiles retain their existing branding. The hero mark stays on its animated fish fallback. The background owns only temporary canvas resources and adds no model requests.
 
 ## Table of Contents
 
@@ -25,11 +25,11 @@ This package supplies a click-triggered pixel whale on the blank home and gives 
 <a id="use-this-package"></a>
 ## Use this package
 
-The shipped Web and Desktop compositions already mount this plugin. Home feedback needs no extra installation or enablement; an `official` client build also registers the DeepSeek sidebar artwork.
+The shipped Web and Desktop compositions already mount this plugin. Home feedback needs no extra installation or enablement; an `official` client build also registers the sidebar mark and product name.
 
 ### Choosing the profile
 
-`DSH_CLIENT_BUILD_PROFILE` selects which brand renders. An `official` build shows the official sidebar mark and name; any other value leaves the shell fallbacks — the fish mark and the local-build label — in place. The conversation hero shows the animated hero fish from `dsh-client-ui-conversation` regardless of profile, because that fallback is already the official mark. The plugin still loads and validates in both cases; only the sidebar artwork registration is profile-gated; the home background is shared across build profiles.
+`DSH_CLIENT_BUILD_PROFILE` selects which brand renders. An `official` build shows the sidebar mark and the name from `DSH_CLIENT_TITLE`; any other value leaves the shell fallbacks — the fish mark and the local-build label — in place. The conversation hero shows the animated hero fish from `dsh-client-ui-conversation` regardless of profile, because that fallback is already the official mark. The plugin still loads and validates in both cases; only the sidebar artwork registration is profile-gated; the home background is shared across build profiles.
 
 ### Home feedback
 

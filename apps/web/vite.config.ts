@@ -25,7 +25,7 @@ function clientDocumentTitle(): Plugin {
   return {
     name: 'dsh-client-document-title',
     transformIndexHtml(html) {
-      return html.replace('<title>LSY-Agent</title>', `<title>${title}</title>`)
+      return html.replace(`<title>${DEFAULT_CLIENT_TITLE}</title>`, () => `<title>${title}</title>`)
     },
   }
 }
