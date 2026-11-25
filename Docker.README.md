@@ -33,6 +33,8 @@ Web 品牌默认为 `LSY-Agent`。如需自定义名称，在构建机的 `.env`
 
 根目录的 `jdcloud-harness.tar` 不会进入 Docker 构建上下文，可以在导出旧镜像后直接重建新镜像。Builder 与 Runtime 均固定使用 pnpm 11.7.0，且运行用户 `node` 可以读取共享 Corepack 安装；容器启动时不会临时下载其他 pnpm 版本。
 
+Docker BuildKit 会在本机构建器中缓存 pnpm 下载的依赖，后续构建可复用相同版本的依赖包。首次构建或清理缓存后，构建器仍需访问 npm registry。
+
 ## 3. 创建服务器环境配置
 
 上传镜像、Compose 文件与环境变量模板：

@@ -20,7 +20,9 @@ RUN mkdir -p "$COREPACK_HOME" \
 
 COPY . .
 
-RUN pnpm install --frozen-lockfile
+# Keep downloaded packages on the builder when source changes invalidate this layer.
+RUN --mount=type=cache,id=jdcloud-harness-pnpm,target=/var/cache/pnpm,sharing=locked \
+  pnpm install --frozen-lockfile --prefer-offline --store-dir=/var/cache/pnpm
 RUN test -n "$DSH_CLIENT_COMMIT_HASH" \
   || (echo "DSH_CLIENT_COMMIT_HASH build argument is required" >&2; exit 1)
 RUN DSH_CLIENT_COMMIT_HASH="$DSH_CLIENT_COMMIT_HASH" DSH_CLIENT_TITLE="$DSH_CLIENT_TITLE" pnpm run build
