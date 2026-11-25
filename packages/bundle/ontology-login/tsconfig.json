@@ -9,9 +9,11 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../api/ontology-auth-controller" },
     { "path": "../../core/agent-default-model" },
     { "path": "../../client/connection/tsconfig.host.json" },
     { "path": "../../host/webserver" },
-    { "path": "../../llm/llm" }
+    { "path": "../../llm/llm" },
+    { "path": "../../util/values" }
   ]
 }

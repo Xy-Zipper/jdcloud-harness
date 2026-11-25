@@ -141,6 +141,17 @@ export class OntologyClient {
     request: OntologyAuthenticatedRequest,
     signal: AbortSignal,
   ): Promise<unknown> {
+    return this.decodeJSON(await this.fetchAuthenticated(accessToken, request, signal))
+  }
+
+  /**
+   * Read a Runtime result as a response so the file proxy can stream its body.
+   * @param accessToken - Runtime Access Token retained by the Host.
+   * @param request - Fixed Runtime route with an optional JSON request body.
+   * @param signal - Caller cancellation.
+   * @returns Successful response, with the body still unread.
+   */
+  async fetchAuthenticated(accessToken: string, request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<Response> {
     if (!request.path.startsWith('/api/runtime/')
       || request.path.includes('?')
       || request.path.includes('#')) {
@@ -148,18 +159,24 @@ export class OntologyClient {
     }
     const headers: Record<string, string> = { authorization: `Bearer ${accessToken}` }
     if (request.body !== undefined) headers['content-type'] = 'application/json'
-    return this.requestJSON(`${this.baseUrl}${request.path}`, {
+    const response = await this.fetcher(`${this.baseUrl}${request.path}`, {
       method: request.method,
       headers,
       ...request.body === undefined ? {} : { body: JSON.stringify(request.body) },
-      cache: 'no-store',
+      cache: 'no-store', redirect: 'error',
       signal,
     })
+    if (!response.ok) throw await responseError(response)
+    return response
   }
 
   private async requestJSON(url: string, init: RequestInit): Promise<unknown> {
     const response = await this.fetcher(url, init)
     if (!response.ok) throw await responseError(response)
+    return this.decodeJSON(response)
+  }
+
+  private async decodeJSON(response: Response): Promise<unknown> {
     try {
       return await response.json() as unknown
     } catch {

@@ -438,11 +438,17 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       if (initial !== 'waiting' || this.restorationNavigation?.aborted === true) return
       const workspace = this.workspaces.list.getSnapshot()
       const sessions = this.sessions.list.getSnapshot()
-      if (workspace.phase !== 'ready' || sessions.phase !== 'ready') return
+      if (sessions.phase !== 'ready') return
       if (this.mainReference !== undefined) {
         initial = 'done'
         return
       }
+      const saved = this.selection.getSnapshot()
+      const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
+      // An authorized historical Session does not need the Workspace tree to open its transcript.
+      if (workspace.phase !== 'ready' && summary?.blank !== false) return
+      // The Workspace list may arrive before the authenticated Session list replaces an empty result.
+      if (saved.sessionId !== undefined && saved.subagentAddress === undefined && sessions.ids.length === 0) return
       initial = 'connecting'
       void this.restoreSelection(workspace, sessions).then(
         () => { initial = 'done' },
@@ -473,7 +479,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     const summary = saved.sessionId === undefined ? undefined : sessions.byId[saved.sessionId]
     const workspace = summary === undefined ? undefined
       : workspaces.items.find(item => item.sessionIds.includes(summary.id))
-    if (summary !== undefined && (!summary.blank || workspace === undefined)) {
+    if (summary !== undefined && (!summary.blank || workspace === undefined)
+      && !workspaces.archivedSessionIds.includes(summary.id)) {
       this.replaceMain(summary.id, this.lifetime.signal, 'preserve')
       return
     }

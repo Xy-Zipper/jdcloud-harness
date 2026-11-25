@@ -10,6 +10,7 @@ import { credentialKey } from '../../../credentials/credentials/src/index.ts'
 import { MemoryCredentials } from '../../../credentials/credentials/tests/memory.ts'
 import OntologyAuthController, {
   normalizeOntologyBaseUrl,
+  type OntologyProjectContext,
   type OntologyRuntimeIdentity,
 } from '../src/index.ts'
 
@@ -270,7 +271,7 @@ describe('Ontology authentication controller', () => {
 
     await expect(browserSession.run(importedRequest, () => ctx.ontologyAuthController.importSession(
       transfer, AbortSignal.timeout(1_000),
-    ))).resolves.toMatchObject({ authenticated: true, user: { userId: 'user-alice' } })
+    ))).resolves.toMatchObject({ authenticated: true, user: { userId: 'user-alice' }, preserveSelection: false })
     await expect(browserSession.run(otherRequest, () => ctx.ontologyAuthController.status()))
       .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
 
@@ -292,6 +293,24 @@ describe('Ontology authentication controller', () => {
     }, AbortSignal.timeout(1_000)))).rejects.toMatchObject({ code: 'ontology/session-import-failed' })
     await expect(browserSession.run(request, () => ctx.ontologyAuthController.status()))
       .resolves.toEqual({ authenticated: false, baseUrl: 'https://ontology.example.com' })
+  })
+
+  it('preserves the selected conversation only when the browser imports the same account and Project', async () => {
+    const server = runtimeServer()
+    const { ctx, browserSession } = await boot(server.fetcher)
+    const request = browserRequest(browserCookie(browserSession))
+    const context = { projectId: 'project-sales', projectName: 'Sales', mode: 'runtime' as const }
+    const importFor = (username: 'alice' | 'bob', project: OntologyProjectContext) =>
+      browserSession.run(request, () => ctx.ontologyAuthController.importSession({
+        ...server.transferFor(username), context: project,
+      }, AbortSignal.timeout(1_000)))
+    await expect(importFor('alice', context)).resolves.toMatchObject({ preserveSelection: false })
+    await expect(importFor('alice', { ...context, projectName: 'Renamed' })).resolves.toMatchObject({ preserveSelection: true })
+    await expect(importFor('alice', { ...context, projectId: 'project-unpublished' })).resolves.toMatchObject({ preserveSelection: false })
+    await expect(importFor('alice', context)).resolves.toMatchObject({ preserveSelection: false })
+    await expect(importFor('alice', { ...context, mode: 'modeling' })).resolves.toMatchObject({ preserveSelection: false })
+    await expect(importFor('alice', context)).resolves.toMatchObject({ preserveSelection: false })
+    await expect(importFor('bob', context)).resolves.toMatchObject({ preserveSelection: false })
   })
 
   it('imports the runtime Project for a member without requiring draft access or changing history ownership', async () => {
@@ -499,7 +518,7 @@ describe('Ontology authentication controller', () => {
       .resolves.toBe(false)
   })
 
-  it.each(['live', 'persisted'] as const)('inherits the parent owner for %s subagents without granting another account access', async (storage) => {
+  it.each(['live', 'persisted', 'listed'] as const)('inherits the parent owner for %s subagents without granting another account access', async (storage) => {
     const { ctx, browserSession } = await boot(runtimeServer().fetcher)
     const alice = browserRequest(browserCookie(browserSession))
     const bob = browserRequest(browserCookie(browserSession))
@@ -513,9 +532,12 @@ describe('Ontology authentication controller', () => {
     ctx.provide('sessions', {
       get: (id: string) => storage === 'live' && headers.has(id) ? { header: headers.get(id) } : undefined,
     } as never)
-    ctx.provide('sessionPersistence', {
-      stat: (id: string) => Promise.resolve(headers.has(id) ? { header: headers.get(id) } : undefined),
-    } as never)
+    const stat = vi.fn((id: string) => Promise.resolve(headers.has(id) ? { header: headers.get(id) } : undefined))
+    const list = vi.fn(() => Promise.resolve([...headers].map(([id, header]) => ({ header: { ...header, id } }))))
+    ctx.provide('sessionPersistence', { stat, list } as never)
+    const owns = (id: string, scopeKey?: string) => ctx.ontologyAuthController.owns(
+      'session', id, scopeKey, storage === 'listed' ? headers as never : undefined,
+    )
     await browserSession.run(alice, async () => {
       await ctx.ontologyAuthController.login({ username: 'alice', password: 'password123' }, AbortSignal.timeout(1_000))
       await ctx.ontologyAuthController.claimOwned('session', 'parent')
@@ -525,19 +547,26 @@ describe('Ontology authentication controller', () => {
     }, AbortSignal.timeout(1_000)))
 
     await browserSession.run(alice, async () => {
-      expect(await ctx.ontologyAuthController.owns('session', 'child')).toBe(true)
-      expect(await ctx.ontologyAuthController.owns('session', 'grandchild')).toBe(true)
-      expect(await ctx.ontologyAuthController.owns('session', 'ordinary-fork')).toBe(false)
-      expect(await ctx.ontologyAuthController.owns('session', 'unrelated')).toBe(false)
-      expect(await ctx.ontologyAuthController.owns('session', 'cycle')).toBe(false)
+      expect(await owns('child')).toBe(true)
+      expect(await owns('grandchild')).toBe(true)
+      expect(await owns('ordinary-fork')).toBe(false)
+      expect(await owns('unrelated')).toBe(false)
+      expect(await owns('cycle')).toBe(false)
       expect(await ctx.ontologyAuthController.owns('workspace', 'child')).toBe(false)
     })
-    await expect(browserSession.run(bob, () => ctx.ontologyAuthController.owns('session', 'child'))).resolves.toBe(false)
+    await expect(browserSession.run(bob, () => owns('child'))).resolves.toBe(false)
     const scopeKey = await browserSession.run(alice, () => ctx.ontologyAuthController.currentScopeKey())
-    expect(await ctx.ontologyAuthController.owns('session', 'grandchild', scopeKey)).toBe(true)
+    expect(await owns('grandchild', scopeKey)).toBe(true)
 
+    if (storage === 'listed') {
+      const groups = ['parent', 'child', 'grandchild', 'ordinary-fork', 'missing']
+      const batch = await ctx.ontologyAuthController.ownedSessionIds(groups as never, scopeKey!, AbortSignal.timeout(1000))
+      expect([...batch]).toEqual(['parent', 'child', 'grandchild'])
+      expect(list).toHaveBeenCalledOnce()
+      expect(stat).not.toHaveBeenCalled()
+    }
     await browserSession.run(bob, () => ctx.ontologyAuthController.claimOwned('session', 'child'))
-    await expect(browserSession.run(alice, () => ctx.ontologyAuthController.owns('session', 'child'))).resolves.toBe(false)
+    await expect(browserSession.run(alice, () => owns('child'))).resolves.toBe(false)
   })
 
   it('confines configured workspaces to a private Ontology user directory', async () => {

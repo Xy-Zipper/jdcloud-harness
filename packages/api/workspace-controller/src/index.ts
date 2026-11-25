@@ -56,6 +56,7 @@ declare module '@deepseek-ai/cordis' {
 interface ScopeOwner {
   currentScopeKey(): Promise<string | undefined>
   owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
+  ownedSessionIds(ids: readonly SessionId[], scopeKey: string, signal: AbortSignal): Promise<ReadonlySet<SessionId>>
 }
 
 
@@ -253,13 +254,17 @@ export class WorkspaceController extends TypertRemoteService {
       if (owner !== undefined) {
         const owned = async (kind: 'workspace' | 'session', id: string): Promise<boolean> => scopeKey !== undefined && owner.owns(kind, id, scopeKey)
         if (frame.type === 'baseline') {
-          const items = []
-          for (const item of frame.value.items) if (await owned('workspace', item.workspaceId)) items.push({ ...item, sessionIds: await this.ownedIds('session', item.sessionIds, scopeKey) })
-          const archivedSessionIds = []
-          for (const id of frame.value.archivedSessionIds) if (await owned('session', id)) archivedSessionIds.push(id)
-          const pinnedSessionIds = []
-          for (const id of frame.value.pinnedSessionIds) if (await owned('session', id)) pinnedSessionIds.push(id)
-          frame = { type: 'baseline', value: { items, archivedSessionIds, pinnedSessionIds } }
+          const workspaces: WorkspaceView[] = []
+          for (const item of frame.value.items) if (await owned('workspace', item.workspaceId)) workspaces.push(item)
+          const visibleIds = scopeKey === undefined ? new Set<SessionId>() : await owner.ownedSessionIds([...new Set([
+            ...workspaces.flatMap(item => item.sessionIds), ...frame.value.archivedSessionIds, ...frame.value.pinnedSessionIds,
+          ])], scopeKey, signal)
+          const visibleSession = (id: SessionId): boolean => visibleIds.has(id)
+          frame = { type: 'baseline', value: {
+            items: workspaces.map(item => ({ ...item, sessionIds: item.sessionIds.filter(visibleSession) })),
+            archivedSessionIds: frame.value.archivedSessionIds.filter(visibleSession),
+            pinnedSessionIds: frame.value.pinnedSessionIds.filter(visibleSession),
+          } }
         } else if (frame.type === 'upsert') {
           if (!await owned('workspace', frame.workspace.workspaceId)) continue
           frame = { ...frame, workspace: { ...frame.workspace, sessionIds: await this.ownedIds('session', frame.workspace.sessionIds, scopeKey) } }

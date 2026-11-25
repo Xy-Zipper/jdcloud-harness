@@ -27,7 +27,7 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
   if (clientBuildEnvironment.DSH_CLIENT_BUILD_PROFILE === 'official') {
     expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
-    expect(screen.queryByText('jdcloud-harness')).toBeNull()
+    expect(screen.queryByText('LSY-Agent')).toBeNull()
   } else {
     expect(document.querySelector('svg[viewBox="0 0 23.16 17.04"]')).not.toBeNull()
     const version = clientBuildEnvironment.DSH_CLIENT_VERSION

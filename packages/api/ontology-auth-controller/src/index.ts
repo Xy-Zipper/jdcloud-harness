@@ -8,7 +8,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-commands/types'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
 import { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
@@ -29,6 +29,7 @@ import type {
   OntologyModelingContext,
   OntologyProjectContext,
   OntologyRuntimeIdentity,
+  OntologyRuntimeSessionImport,
   OntologyRuntimeSessionTransfer,
 } from './types.ts'
 
@@ -220,7 +221,7 @@ export class OntologyAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.remoteError('login', error)
     }
-    const auth = await this.replaceAuthentication(tokens, identity, client)
+    const { auth } = await this.replaceAuthentication(tokens, identity, client)
     return authenticatedStatus(auth)
   }
 
@@ -228,13 +229,13 @@ export class OntologyAuthController extends TypertRemoteService {
    * Validate and store a Runtime Session supplied by the authenticated embedding page.
    * @param request - Runtime tokens and their expected identity.
    * @param signal - Caller cancellation combined with the configured request timeout.
-   * @returns Redacted authenticated state.
+   * @returns Redacted authenticated state and whether the conversation scope stayed the same.
    */
   @Remote
   async importSession(
     request: OntologyRuntimeSessionTransfer,
     signal: AbortSignal,
-  ): Promise<OntologyAuthStatus> {
+  ): Promise<OntologyRuntimeSessionImport> {
     validateSessionTransfer(request)
     const client = this.client()
     const operationSignal = this.operationSignal(signal)
@@ -263,8 +264,13 @@ export class OntologyAuthController extends TypertRemoteService {
     } catch (error) {
       throw this.remoteError('import', error)
     }
-    const auth = await this.replaceAuthentication(request, identity, client, request.context)
-    return authenticatedStatus(auth)
+    const { auth, previous } = await this.replaceAuthentication(request, identity, client, request.context)
+    return {
+      ...authenticatedStatus(auth),
+      preserveSelection: previous?.user.userId === identity.userId
+        && previous.context?.projectId === auth.context?.projectId
+        && previous.context?.mode === auth.context?.mode,
+    }
   }
 
   /**
@@ -469,9 +475,15 @@ export class OntologyAuthController extends TypertRemoteService {
    * @param kind - Durable resource kind.
    * @param id - Durable resource identifier.
    * @param expectedScopeKey - Optional opening scope retained by a live feed.
+   * @param listedHeaders - Optional complete persisted inventory already read by the caller.
    * @returns Whether the resource or an unclaimed subagent's ancestor belongs to the selected scope.
    */
-  async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean> {
+  async owns(
+    kind: 'session' | 'workspace',
+    id: string,
+    expectedScopeKey?: string,
+    listedHeaders?: ReadonlyMap<SessionId, SessionHeader>,
+  ): Promise<boolean> {
     const scopeKey = expectedScopeKey ?? await this.currentScopeKey()
     if (scopeKey === undefined) return false
     const visited = new Set<string>()
@@ -490,11 +502,33 @@ export class OntologyAuthController extends TypertRemoteService {
       // Delegated Sessions inherit their creator's owner, including children persisted before this browser request.
       const sessionId = current as SessionId
       const header = this.ctx.get('sessions')?.get(sessionId)?.header
-        ?? (await this.ctx.get('sessionPersistence')?.stat(sessionId))?.header
+        ?? (listedHeaders === undefined
+          ? (await this.ctx.get('sessionPersistence')?.stat(sessionId))?.header
+          : listedHeaders.get(sessionId))
       if (header?.origin !== 'subagent' || header.parentSession === undefined) return false
       current = header.parentSession
     }
     return false
+  }
+
+  /**
+   * Filter one Workspace inventory against its verified opening scope.
+   * @param ids - Session ids from the Workspace baseline.
+   * @param scopeKey - authenticated account scope for the stream.
+   * @param signal - lifetime of the stream generation.
+   * @returns ids visible to that account.
+   */
+  async ownedSessionIds(ids: readonly SessionId[], scopeKey: string, signal: AbortSignal): Promise<Set<SessionId>> {
+    const owned = new Set<SessionId>()
+    if (ids.length === 0) return owned
+    // Unclaimed legacy ids can require ancestor resolution. Read headers once for the whole baseline.
+    const records: readonly { header: SessionHeader }[] = await this.ctx.get('sessionPersistence')?.list({ signal }) ?? []
+    const headers = new Map(records.map(({ header }) => [header.id, header]))
+    for (const id of ids) {
+      signal.throwIfAborted()
+      if (await this.owns('session', id, scopeKey, headers)) owned.add(id)
+    }
+    return owned
   }
 
   /**
@@ -504,11 +538,72 @@ export class OntologyAuthController extends TypertRemoteService {
    * @returns Untrusted JSON for the owning consumer to validate at the wire boundary.
    */
   async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown> {
-    const operationSignal = this.operationSignal(signal)
+    return this.withRuntimeToken(signal, (token, _project, operationSignal) =>
+      this.client().requestAuthenticated(token, request, operationSignal))
+  }
+
+  /**
+   * Search the current Ontology scope for document excerpts.
+   * @param question - Search query derived from the current user turn.
+   * @param signal - Caller cancellation.
+   * @returns Runtime JSON containing only the permitted sources.
+   */
+  async searchKnowledge(question: string, signal: AbortSignal): Promise<unknown> {
+    return this.withRuntimeToken(signal, (token, projectId, operationSignal) =>
+      this.client().requestAuthenticated(token, {
+        method: 'POST', path: '/api/runtime/knowledge/retrieve',
+        body: { question, ...(projectId === undefined ? {} : { projectId }) },
+      }, operationSignal), 28_000)
+  }
+
+  /**
+   * Relay a fixed knowledge route for the authenticated browser.
+   * @param request - Knowledge management, published question, or original-file request.
+   * @param signal - Caller cancellation.
+   * @param project - Project named by a scoped Skill management route.
+   * @returns The upstream body for the proxy to stream.
+   */
+  async fetchKnowledge(request: Omit<OntologyAuthenticatedRequest, 'path'> & { path: `/api/runtime/knowledge/${string}` }, signal: AbortSignal, project?: string): Promise<Response> {
+    const slow = request.path.endsWith('/ask') || request.path.startsWith('/api/runtime/knowledge/files/')
+    return this.withRuntimeToken(signal, (token, selected, operationSignal) => {
+      if (project !== undefined && selected !== undefined && selected !== project) {
+        throw new OntologyApiError(404, 'knowledge_not_found', null, '项目不存在或无权访问。')
+      }
+      return this.client().fetchAuthenticated(token, request, operationSignal)
+    }, slow ? 120_000 : undefined)
+  }
+
+  /**
+   * Forward one public Skill request to the configured Runtime, which validates its own credential.
+   * @param endpoint - An allowlisted delivery route selected by the HTTP plugin.
+   * @param request - Incoming request carrying the external Bearer credential.
+   * @returns Runtime response with its original status and body.
+   */
+  async fetchSkillDelivery(endpoint: 'embed' | 'embed/chat' | `skills/${string}/chat` | `skills/${string}/sessions` | `skills/${string}/sessions/${string}`, request: Request): Promise<Response> {
+    const headers = new Headers()
+    for (const name of ['authorization', 'content-type', 'x-request-id']) {
+      const value = request.headers.get(name)
+      if (value !== null) headers.set(name, value)
+    }
+    const url = new URL(`${this.baseUrl}/api/runtime/skill-delivery/v1/${endpoint}`)
+    url.search = new URL(request.url).search
+    return this.fetcher(url.href, {
+      method: request.method, headers, redirect: 'error',
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(endpoint.endsWith('/chat') ? 120_000 : this.requestTimeoutMs)]),
+      ...(request.method === 'POST' ? { body: await request.text() } : {}),
+    })
+  }
+
+  private async withRuntimeToken<T>(
+    signal: AbortSignal,
+    send: (token: string, project: string | undefined, signal: AbortSignal) => Promise<T>,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<T> {
+    const operationSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
     const external = this.externalRequests.getStore()
     if (external !== undefined) {
       try {
-        return await this.client().requestAuthenticated(external.accessToken, request, operationSignal)
+        return await send(external.accessToken, external.projectId, operationSignal)
       } catch (error) {
         if (error instanceof OntologyApiError && isUnauthenticated(error)) throw authRequired('expired', error)
         throw error
@@ -517,13 +612,13 @@ export class OntologyAuthController extends TypertRemoteService {
     let state = await this.authentication(operationSignal)
     if (state.kind !== 'authenticated') throw authRequired(state.kind)
     try {
-      return await this.client().requestAuthenticated(state.auth.accessToken, request, operationSignal)
+      return await send(state.auth.accessToken, state.auth.context?.projectId, operationSignal)
     } catch (error) {
       if (!(error instanceof OntologyApiError && isUnauthenticated(error))) throw error
     }
     state = await this.authentication(operationSignal)
     if (state.kind !== 'authenticated') throw authRequired(state.kind)
-    return this.client().requestAuthenticated(state.auth.accessToken, request, operationSignal)
+    return send(state.auth.accessToken, state.auth.context?.projectId, operationSignal)
   }
 
   private client(): OntologyClient {
@@ -540,7 +635,7 @@ export class OntologyAuthController extends TypertRemoteService {
     identity: OntologyRuntimeIdentity,
     client: OntologyClient,
     context?: OntologyProjectContext,
-  ): Promise<AuthPayload> {
+  ): Promise<{ auth: AuthPayload; previous: AuthPayload | undefined }> {
     const auth: AuthPayload = {
       version: 1, baseUrl: this.baseUrl, ...tokens, user: identity,
       ...(context === undefined ? {} : { context }),
@@ -557,7 +652,7 @@ export class OntologyAuthController extends TypertRemoteService {
         this.ctx.logger.warn(error)
       })
     }
-    return auth
+    return { auth, previous: replaced }
   }
 
   /** Resolve a stored login, rotating tokens once after Access Token expiry. */

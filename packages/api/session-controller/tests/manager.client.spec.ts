@@ -551,6 +551,19 @@ describe('list lifecycle', () => {
     expect(snapshot.items.map(i => i.sessionId)).toEqual([S2, S1])
   })
 
+  it('replaces an in-flight pre-login list on a credential change', async ({ mock, remote }) => {
+    const empty = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+    remote.session.list.mockReturnValueOnce(empty.promise)
+      .mockResolvedValueOnce(ok({ items: [summary(S1)] as never[] }))
+    const manager = makeManager(mock, remote)
+    const initial = manager.refreshList()
+    const authorized = manager.refreshList({ replace: true })
+    empty.resolve(ok({ items: [] }))
+    await Promise.all([initial, authorized])
+    expect(remote.session.list).toHaveBeenCalledTimes(2)
+    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
+  })
+
   it('replays incremental frames over hydration and never batch-reorders established ids', async ({ mock, remote }) => {
     const first = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
     remote.session.list.mockReturnValue(first.promise)

@@ -1434,6 +1434,27 @@ describe('UiWorkspaceService', () => {
     expect(b.selectPanel.mock.calls).toEqual([[panel]])
   })
 
+  it('restores saved history as soon as the authorized Session list is ready', () => {
+    persistSelection({ sessionId: sid('saved') })
+    const b = bench()
+    b.sessions.list.set(sessionState([summary('saved')]))
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    b.workspaces.list.set(workspaceState([workspace('a', [sid('saved')])]))
+    expect(b.sessions.retain).toHaveBeenCalledOnce()
+  })
+
+  it('keeps a saved Session pending through the empty snapshots before login', async () => {
+    persistSelection({ sessionId: sid('saved') })
+    const b = bench({ workspaces: workspaceState(), sessions: sessionState() })
+    await setImmediate()
+    expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
+    b.workspaces.list.set(workspaceState([workspace('a', [sid('saved')])]))
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    b.sessions.list.set(sessionState([summary('saved')]))
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('saved'), { source: 'mainView' })
+  })
+
   it('restores a persisted subagent address without a parent catalog', () => {
     const address: SubagentAddress = {
       parentSessionId: sid('parent'),

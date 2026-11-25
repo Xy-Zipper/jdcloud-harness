@@ -1,6 +1,6 @@
 {
-  "name": "jdcloud-harness",
-  "short_name": "jdcloud-harness",
+  "name": "LSY-Agent",
+  "short_name": "LSY-Agent",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

@@ -69,6 +69,8 @@ PNG、JPEG、GIF、WebP、BMP、ICO 和 SVG 通过 Blob URL 在 `<img>` 静态�
 
 文档开头的 YAML frontmatter（首行 `---` 开始，以 `---` 或 `...` 结束）在 Markdown 正文上方显示为键值列表。字符串值显示解析后的文本，包括折叠与多行字符串；其他标量、列表、映射与别名保留原始 YAML 写法。无效 YAML 或非映射文档原样显示整个块，没有内容的块不显示。未闭合的块仍按 Markdown 渲染。YAML 解析器位于包内 `client.frontmatter-fields.js` 分块，仅在文档含 frontmatter 时加载；加载期间或加载失败时显示原样块。源文件不会被修改。
 
+Ontology 引用缺少页码时，预览先搜索 PDF 文字层，再按需加载简体中文 OCR Worker 检查候选页面。页面图像保留在浏览器内。可选的位置提示用于确定搜索顺序。
+
 <a id="excel-preview"></a>
 ## Excel 预览
 
@@ -124,6 +126,8 @@ Office Remote 通过 Connection 的 multipart 二进制传输返回原生 `Uint8
 
 <a id="navigation"></a>
 ## 导航
+
+PDF 文本定位器按需加载同一个 Worker，在未记录页码的引用原文中寻找唯一匹配页。
 
 `ctx.sidebarRight.openResource(address, { params: { line } })` 通过 `file` 参数携带 1 起算的源码行号。在 `text-pages` 模式下，owner 顺序加载到该行或 EOF。纯文本与代码渲染器声明 `sourceLines`；Markdown 不声明。未声明 `sourceLines` 的渲染器直接响应导航、不移动正文，之后切换到纯文本或代码也不会重放。`sourceLines` 渲染器尚未画出该行时，导航保持待处理。代码导航直接滚动内部源码视口。落定的行显示一条高亮带，停留 0.6 秒后在 1.4 秒内渐隐；切换换行或调整预览尺寸会提前移除它；重新挂载的 tab 恢复滚动位置时不显示高亮带。字节模式渲染器不消费源码行导航。每个完成的导航 revision 只响应一次。不带 `revealIfOpened: false` 打开同一文件时聚焦已有 tab，并送达新 revision。
 

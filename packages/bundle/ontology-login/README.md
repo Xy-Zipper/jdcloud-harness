@@ -9,15 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-ontology-login` adds browser-isolated Ontology Runtime sign-in, authorized Object and Link reads, confirmed prepared Action execution, account-scoped Workspace browsing, and account presentation to a Web profile. It disables shared Harness launch authentication, enables the tab-scoped browser Bearer session, and installs the Ontology controller, model tools, login UI, and in-app directory picker. Ontology becomes the profile's application identity and authorization layer.
-
-The bundle also installs the external API. Those routes accept a Go Runtime Access Token and `X-Project-Id`, validate that the user can see the Project, and isolate personal Skills, Workspaces, and Sessions by Project and user without creating browser login state.
-
-The Go file assistant calls `POST /api/internal/file-assistant/answer` with `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` and JSON `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`. Set the same private service token on both servers. Go authorizes file access and sends up to eight excerpts within a 512 KiB request. The response contains `answer` and unique `sourceIds` from this request. An empty list signals insufficient evidence. A missing service token returns 503, an incorrect token returns 401, and a model failure or invalid citation returns 502.
-
-For a nonempty batch of excerpts, send `task: "qa"` to generate `questions` or `task: "extract"` to extract `entities` and `relations`. These requests contain `task` and `sources`. Every returned row carries `sourceIds` from the supplied batch. Relation endpoints are named entities in the same response.
-
-Pipeline field generation sends `{"task":"pipeline","prompt":"…","fields":{"content":"…"},"outputType":"entities"}` to the same route. The response contains `value`, an array of entity names for `entities`, a string for `text`, or an object for `json`. The prompt includes an example for the selected output type. A single JSON code fence is accepted around a valid result. Only selected fields and the supplied instructions enter the model call.
+This optional Web profile layer uses Ontology as its application identity and authorization provider. It adds project tools, document citations, and published Skills for browser and server integrations. Add or remove it as a profile bundle. Published Skills use the project and knowledge bases chosen by their administrator.
 
 ## Table of Contents
 
@@ -57,9 +49,21 @@ User workspaces and account-managed Skills default to `$DSH_HOME/account-workspa
 
 ### What you get
 
-The sidebar uses Ontology account controls at the top and a direct Settings button at the bottom. The bundle disables the official account UI and its notifications.
+The sidebar uses Ontology account controls at the top and More at the bottom. More opens Panel settings and, for Ontology administrators, the dedicated Skills page. The bundle disables the official account UI and its notifications.
+
+Agent chat retrieves project documents and displays clickable citations. A published Skill uses its released role and knowledge-base scope for full-page iframes, floating chat widgets, and a server API with key-owned session history. The API returns JSON by default and offers SSE answer deltas on request. See [Knowledge Skill integration](../../../EXTERNAL_API.md#knowledge-skill-integration).
 
 The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-connection/browser-session` as the Connection authentication provider. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
+
+The external Runtime API validates the Go Runtime Access Token and `X-Project-Id`. It isolates personal Skills, Workspaces, and Sessions by project and user.
+
+The Go file assistant calls `POST /api/internal/file-assistant/answer` with `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` and JSON `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`. Set the same private service token on both servers. Go authorizes file access and sends up to eight excerpts within a 512 KiB request. The response contains `answer` and unique `sourceIds` from this request. An empty list signals insufficient evidence. A missing service token returns 503, an incorrect token returns 401, and a model failure or invalid citation returns 502.
+
+For a nonempty batch of excerpts, send `task: "qa"` to generate `questions` or `task: "extract"` to extract `entities` and `relations`. These requests contain `task` and `sources`. Every returned row carries `sourceIds` from the supplied batch. Relation endpoints are named entities in the same response.
+
+Pipeline field generation sends `{"task":"pipeline","prompt":"…","fields":{"content":"…"},"outputType":"entities"}` to the same route. The response contains `value`, an array of entity names for `entities`, a string for `text`, or an object for `json`. A single JSON code fence may wrap the result. The model receives the selected fields and supplied instructions.
+
+Whole-file entity extraction sets `wholeFile: true` and places the selected fields of the file's slices in `fields.rows`. When the configured model supports turning off reasoning, this request uses direct generation. Go matches the returned names to occurrences in the original slices.
 
 -----
 
@@ -90,8 +94,6 @@ The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-
 ## Model Experience
 
 Indirectly, through `@deepseek-ai/dsh-tool-ontology`, which owns the Ontology guidance, thirteen tool schemas, and validated Runtime results.
-
-Each file question uses the current default model to answer from the submitted excerpts, with a 4,096-token output budget and a 60-second deadline. The model receives just the evidence instructions and that request's data. This route has no tools or conversation history.
 
 #### KV Cache effect
 

@@ -2517,6 +2517,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Fixed Runtime API path, method, and optional JSON body.' }, { name: 'signal', description: 'Caller cancellation combined with the configured request timeout.' }],
         returns: 'Untrusted JSON for the owning consumer to validate at the wire boundary.',
       },
+      {
+        signature: 'async searchKnowledge(question: string, signal: AbortSignal): Promise<unknown>',
+        description: 'Search the current Ontology scope for document excerpts.',
+        parameters: [{ name: 'question', description: 'Search query derived from the current user turn.' }, { name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'Runtime JSON containing only the permitted sources.',
+      },
+      {
+        signature: 'async fetchKnowledge(request: Omit<OntologyAuthenticatedRequest, \'path\'> & { path: `/api/runtime/knowledge/${string}` }, signal: AbortSignal): Promise<Response>',
+        description: 'Relay a fixed knowledge route for the authenticated browser.',
+        parameters: [{ name: 'request', description: 'Knowledge management, published question, or original-file request.' }, { name: 'signal', description: 'Caller cancellation.' }],
+        returns: 'The upstream body for the proxy to stream.',
+      },
+      {
+        signature: 'async fetchSkillDelivery(endpoint: \'embed\' | \'embed/chat\' | `skills/${string}/chat`, request: Request): Promise<Response>',
+        description: 'Forward one public Skill request to the configured Runtime, which validates its own credential.',
+        parameters: [{ name: 'endpoint', description: 'An allowlisted delivery route selected by the HTTP plugin.' }, { name: 'request', description: 'Incoming request carrying the external Bearer credential.' }],
+        returns: 'Runtime response with its original status and body.',
+      },
     ],
   },
   {
@@ -10955,7 +10973,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebAuthPolicy',
-    declaration: 'export type WebAuthPolicy = \'anonymous\' | \'required\' | \'deny\';',
+    declaration: 'export type WebAuthPolicy = \'embed\' | \'anonymous\' | \'required\' | \'deny\';',
   },
   {
     name: 'WebAuthRequest',

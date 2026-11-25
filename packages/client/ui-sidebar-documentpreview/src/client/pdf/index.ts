@@ -14,6 +14,18 @@ import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
 /** PDF metadata and keyed body share this package-local implementation identity. */
 export const PDF_BODY_ID = '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/pdf'
 
+/** Locate a cited excerpt in authorized PDF bytes. The optional relative position orders the OCR search. */
+export type PdfExcerptLocator = (
+  data: Uint8Array<ArrayBuffer>, prose: readonly string[], signal: AbortSignal, position?: number,
+) => Promise<number | undefined>
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Lazy PDF text locator for an original with no recorded page. */
+    pdfExcerptLocator: PdfExcerptLocator
+  }
+}
+
 /**
  * Describe the builtin PDF renderer independently from its keyed body slot.
  * @param title - locale-owned implementation name.
@@ -25,6 +37,8 @@ export function pdfBodyDefinition(title: () => string): DocumentPreviewDefinitio
 
 /** @param ctx - context carrying the locale, document registry, and slot registry. */
 export function apply(ctx: Context): void {
+  ctx.provide('pdfExcerptLocator', (data, prose, signal, position) =>
+    import('./pdf.tsx').then(({ locatePdfExcerpt }) => locatePdfExcerpt(data, prose, signal, position)))
   ctx.effect(() => ctx.locale.register('sidebarPdf', { zh, en, ja, es, fr, de, ru, pt }))
   const t = ctx.locale.bind('sidebarPdf')
   ctx.effect(() => ctx.documentPreviews.register(pdfBodyDefinition(() => t('title'))))

@@ -49,7 +49,7 @@ function svgUrl(svg: string): string {
 
 it('ships install metadata with the built web application', async () => {
   const environment = await readWebClientBuildEnvironment()
-  const title = environment.DSH_CLIENT_TITLE ?? 'jdcloud-harness'
+  const title = environment.DSH_CLIENT_TITLE ?? 'LSY-Agent'
   const shortName = environment.DSH_CLIENT_BUILD_PROFILE === 'official' ? 'DSH' : title
   const index = await readFile(join(DIST_ROOT, 'index.html'), 'utf8')
   const { window } = new JSDOM(index)

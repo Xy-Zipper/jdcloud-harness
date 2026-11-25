@@ -373,6 +373,11 @@ export class ClientSessions implements ISessions {
     return this.manager.refreshList()
   }
 
+  /** Start a fresh authorized list read even when the pre-login read is still pending. */
+  refreshAfterCredentialChange(): Promise<void> {
+    return this.manager.refreshList({ replace: true })
+  }
+
   /**
    * Search the Host's visible message-content index. Results stay
    * request-local; the list snapshot remains the metadata authority.

@@ -69,6 +69,8 @@ Initial reads and renderer preparation, including Office conversion, share a cen
 
 A leading YAML frontmatter block, opened by `---` on the first line and closed by `---` or `...`, renders above the Markdown body as a key/value list. String values show their resolved text, including folded and multiline strings; other scalars, lists, mappings, and aliases keep their authored YAML. Invalid YAML and non-mapping documents show the block verbatim, and a block without content shows nothing. An unterminated block remains Markdown. The YAML parser loads in the package-local `client.frontmatter-fields.js` chunk only when a document has frontmatter; the verbatim block stands in while it loads or if it fails to load. The source file is unchanged.
 
+When an Ontology citation has no recorded page, the preview scans PDF text and can then check rendered pages with the bundled Simplified Chinese OCR worker. Its chunk loads only on this fallback. Images remain in the browser. An optional position hint orders the search.
+
 <a id="excel-preview"></a>
 ## Excel preview
 
@@ -124,6 +126,8 @@ The page refresh shortcut reuses the selected preview’s reload operation, incl
 
 <a id="navigation"></a>
 ## Navigation
+
+The PDF text locator loads the same worker on demand to find an unambiguous page in a cited original whose page was never recorded.
 
 `ctx.sidebarRight.openResource(address, { params: { line } })` carries a 1-based source line through the `file` parameters. In `text-pages` mode, the owner loads sequential pages until that line or EOF. Plain-text and code renderers declare `sourceLines`; Markdown does not. A renderer without `sourceLines` answers the navigation without moving the body, and a later switch to plain text or code does not replay it. A navigation stays pending while a `sourceLines` renderer has not drawn the line. Code navigation scrolls the inner source viewport directly. The landed line receives a band that holds for 0.6 s and then fades out over 1.4 s; toggling wrap or resizing the preview removes it early; restoring a remounted tab's scroll position adds no band. Byte-mode renderers do not consume source-line navigation. Each completed navigation revision is answered once. Opening the same file without `revealIfOpened: false` focuses its existing tab and delivers a new revision.
 

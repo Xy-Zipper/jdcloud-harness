@@ -13,6 +13,7 @@
 
 import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
+import type { RootContent } from 'mdast'
 import clsx from 'clsx'
 import { copyKatexAsTex } from './copy-tex.ts'
 import { IncrementalMarkdownParser } from './incremental.ts'
@@ -21,11 +22,39 @@ import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
   wrapBlockChildren,
 } from './render.tsx'
-import type { MarkdownFileMentions, MarkdownLabels, MarkdownPathImages, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
+import type { MarkdownFileMentions, MarkdownLabels, MarkdownPathImages, MarkdownProseRenderer, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
 export type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownLabels, MarkdownPathImages } from './render.tsx'
+
+type MarkdownBodyRun =
+  | { readonly kind: 'text'; readonly value: string; readonly followingCode?: string }
+  | { readonly kind: 'link'; readonly value: string }
+
+/**
+ * @param text - One settled Markdown block.
+ * @returns Body prose and link destinations in display order. A prose run can identify its next inline code sibling.
+ */
+export function markdownBodyRuns(text: string): Iterable<MarkdownBodyRun> {
+  const root = parseGfmWithMath(text)
+  const targets = createReferenceTargets()
+  collectReferenceTargets(root.children, targets)
+  return bodyRuns(root.children, targets.definitions)
+}
+
+function* bodyRuns(nodes: readonly RootContent[], definitions: ReferenceTargets['definitions']): Iterable<MarkdownBodyRun> {
+  for (const [index, node] of nodes.entries()) {
+    if (node.type === 'text') {
+      const next = nodes[index + 1]
+      yield { kind: 'text', value: node.value, ...(next?.type === 'inlineCode' ? { followingCode: next.value } : {}) }
+    } else if (node.type === 'link') yield { kind: 'link', value: node.url }
+    else if (node.type === 'linkReference') {
+      const url = definitions.get(node.identifier.toUpperCase())?.url
+      if (url !== undefined) yield { kind: 'link', value: url }
+    } else if ('children' in node && node.type !== 'footnoteDefinition') yield* bodyRuns(node.children, definitions)
+  }
+}
 
 /** One settled full render: parse with math, resolve references, append the footnote section. */
 function renderSettled(
@@ -34,6 +63,7 @@ function renderSettled(
   fileMentions: MarkdownFileMentions | undefined,
   pathImages: MarkdownPathImages | undefined,
   omitHtml: boolean,
+  renderProse: MarkdownProseRenderer | undefined,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
@@ -44,6 +74,7 @@ function renderSettled(
     fileMentions,
     pathImages,
     omitHtml,
+    renderProse,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -165,8 +196,8 @@ class StreamingRenderer {
  * identity discards the streaming render cache mid-message. `fileMentions`
  * links inline-code tokens its resolver recognizes as real files, and
  * `pathImages` rewrites image destinations that are local file paths into
- * displayable URLs its resolver vouches for. Those two vocabularies are the
- * single streaming gate — they apply to settled renders only, because a
+ * displayable URLs its resolver vouches for. `renderProse` decorates body
+ * text outside links, code, and footnotes. All three apply to settled renders only, because a
  * streaming message's vocabulary is not final and frozen cached elements
  * must not bake in handlers that could go stale. A surrounding
  * `MarkdownDelegateProvider` can delegate ordinary HTTP(S) activation while
@@ -187,13 +218,14 @@ class StreamingRenderer {
  * absolute HTTP(S) images render directly.
  */
 export const MarkdownText = memo(function MarkdownText({
-  text, streaming = false, labels, fileMentions, pathImages, variant = 'body', omitHtml = false, textInteractionSource = false,
+  text, streaming = false, labels, fileMentions, pathImages, renderProse, variant = 'body', omitHtml = false, textInteractionSource = false,
 }: {
   text: string
   streaming?: boolean
   labels: MarkdownLabels
   fileMentions?: MarkdownFileMentions | undefined
   pathImages?: MarkdownPathImages | undefined
+  renderProse?: MarkdownProseRenderer | undefined
   variant?: 'body' | 'compact'
   omitHtml?: boolean
   textInteractionSource?: boolean
@@ -203,14 +235,14 @@ export const MarkdownText = memo(function MarkdownText({
   const children = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, labels, fileMentions, pathImages, omitHtml)
+      return renderSettled(text, labels, fileMentions, pathImages, omitHtml, renderProse)
     }
     if (streamRef.current === null || streamLabelsRef.current !== labels || streamRef.current.omitHtml !== omitHtml) {
       streamRef.current = new StreamingRenderer(labels, omitHtml)
       streamLabelsRef.current = labels
     }
     return streamRef.current.render(text)
-  }, [text, streaming, labels, fileMentions, pathImages, omitHtml])
+  }, [text, streaming, labels, fileMentions, pathImages, omitHtml, renderProse])
   return <div className={clsx(css.markdown, variant === 'compact' && css.compact)}
     data-text-interaction-source={textInteractionSource ? '' : undefined}
     data-markdown-variant={variant === 'compact' ? variant : undefined}

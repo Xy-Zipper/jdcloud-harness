@@ -71,7 +71,9 @@ export function AccountSeat({ wide, status, logout, t }: OntologyAccountSeatProp
         onClose={() => { setOpen(false) }}
         items={items}
         footer={footer}
-        onSelect={(id) => { if (id === LOGOUT_ID) void runLogout() }}
+        onSelect={(id) => {
+          if (id === LOGOUT_ID) void runLogout()
+        }}
         portal
         anchor={(
           <button

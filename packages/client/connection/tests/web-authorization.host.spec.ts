@@ -42,6 +42,30 @@ it('checks anonymous route sources without authenticating their credentials', as
   expect(handler.mock.calls[0]?.[2]).toBeUndefined()
 })
 
+it('admits cross-site requests only to an opted-in embed route on a trusted host', async () => {
+  const { ctx, origin } = await mounted()
+  const authenticate = vi.fn(() => ctx.connection.browserPeer)
+  ctx.connection.authentication.register({ authenticate })
+  const handler = vi.fn<WebRoute['handler']>((_request, response) => { response.end('embed') })
+  ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: '/embed', auth: 'embed', handler }))
+  const cross = { 'sec-fetch-site': 'cross-site', origin: 'https://outside.example' }
+  const response = await fetch(`${origin}/embed`, { headers: cross })
+  expect(response.status).toBe(200)
+  expect(await response.text()).toBe('embed')
+  const denied = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest(`${origin}/embed`, { headers: { ...cross, host: 'untrusted.example' } }, (reply) => {
+      reply.resume()
+      reply.once('end', () => { resolve(reply.statusCode) })
+    })
+    request.once('error', reject)
+    request.end()
+  })
+  expect(denied).toBe(403)
+  expect(handler).toHaveBeenCalledOnce()
+  expect(handler.mock.calls[0]?.[2]).toBeUndefined()
+  expect(authenticate).not.toHaveBeenCalled()
+})
+
 it('authenticates once and passes the selected Peer to shared and custom RPC routes', async () => {
   const { ctx, origin } = await mounted()
   const peer = ctx.connection.createPeer({ principal: { kind: 'owner' } })

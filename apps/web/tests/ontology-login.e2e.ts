@@ -4,6 +4,8 @@ import { mkdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { createAssistantMessage, createToolResultMessage, createUserMessage, type ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
@@ -30,8 +32,13 @@ const ONTOLOGY_BUNDLE_MANIFEST = fileURLToPath(
 )
 const MODE = webSnapshotMode()
 const environment = await readWebClientBuildEnvironment()
-const productName = environment.DSH_CLIENT_TITLE ?? 'jdcloud-harness'
+const productName = environment.DSH_CLIENT_TITLE ?? 'LSY-Agent'
 const loginHeading = `登录 ${productName}`
+const citationSource = {
+  projectId: 'project-unpublished', fileId: 'file-survey', fileName: '房产测量规范.pdf', mediaType: 'application/pdf',
+  knowledgeBaseId: 'kb-survey', documentId: '74edf7c9c1684ec385840dd719d9a82a', chunkId: 'chunk-survey',
+  citationId: 'R-736f5dc7d5', nodeIds: [], text: '分户图用于表示房屋权属范围。',
+}
 
 interface OntologyServer {
   readonly server: Server
@@ -81,6 +88,17 @@ async function startOntologyServer(): Promise<OntologyServer> {
     if (request.method === 'GET' && url.pathname === '/api/runtime/projects/project-unpublished/draft') {
       response.writeHead(200, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ project: { id: 'project-unpublished', name: '未发布项目' }, draft: {} }))
+      return
+    }
+    const filePath = `/api/runtime/knowledge/files/${citationSource.projectId}/${citationSource.fileId}`
+    if (request.method === 'POST' && url.pathname === `${filePath}/page-location`) {
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ page: 22 }))
+      return
+    }
+    if (request.method === 'GET' && url.pathname === `${filePath}/preview`) {
+      response.setHeader('content-type', 'application/pdf')
+      response.end('%PDF-1.4\n')
       return
     }
     if (request.method === 'POST' && url.pathname === '/api/runtime/auth/login') {
@@ -183,10 +201,12 @@ describe('web e2e: Ontology login', () => {
     const account = page.getByRole('button', { name: '当前账号 Alice', exact: true })
     await account.waitFor({ timeout: 30_000 })
     await page.locator('[data-slot="sidebar.brand.name"]').getByText(productName, { exact: true }).waitFor()
-    const settings = page.getByRole('button', { name: '设置', exact: true })
-    await settings.waitFor({ timeout: 10_000 })
+    const more = page.getByTestId('ontology-more-trigger')
+    await more.waitFor({ timeout: 10_000 })
     expect(await page.getByRole('button', { name: '账号菜单', exact: true }).count()).toBe(0)
-    await settings.click()
+    await more.click()
+    await page.getByRole('menuitem', { name: 'Skill', exact: true }).waitFor()
+    await page.getByRole('menuitem', { name: '面板设置', exact: true }).click()
     await page.getByRole('dialog', { name: '设置', exact: true }).waitFor({ timeout: 10_000 })
     await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '关闭', exact: true }).click()
     await account.click()
@@ -255,6 +275,52 @@ describe('web e2e: Ontology login', () => {
     expect(historyStartVisible).toBe(true)
     expect(ontology.requests).toContain('GET /api/runtime/projects/project-unpublished/draft')
     expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('opens the source title of a saved answer with a raw document ID', async () => {
+    const title = '《房产测量规范 第一单元 GB/T 17986.1-2000》'
+    const answer = `${citationSource.text}[${citationSource.citationId}]\n\n来源：${title}7.3.1、7.3.2（项目知识库，documentId \`${citationSource.documentId}\`）。`
+    await page.goto(`${ontology.baseUrl}/embed?harness=${encodeURIComponent(scaffold.authenticatedUrl)}`)
+    const frame = page.frameLocator('iframe[title="建模助手"]')
+    await frame.getByRole('textbox').waitFor()
+    const [session] = scaffold.ctx.sessions.list()
+    if (session === undefined) throw new Error('Missing conversation for citation replay')
+    // Persist a completed retrieval turn before reopening it in the browser.
+    const model = { provider: 'fixture', model: 'fixture' }
+    const call = {
+      type: 'tool-call' as const, id: brandString<ToolCallId>('call-survey'),
+      name: 'ontology_search_knowledge', arguments: '{"question":"分户图的用途"}',
+    }
+    session.append('turn/start', { turn: 1 })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: '分户图的用途' }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    session.append('step/start', { turn: 1, step: 1 })
+    session.append('assistant/message', {
+      turn: 1, step: 1, stream: [], message: createAssistantMessage({ content: [call], source: model }),
+    }, { surfaceOp: 'append' })
+    const tool = session.append('tool/call', { turn: 1, step: 1, callId: call.id, name: call.name, arguments: call.arguments })
+    session.append('tool/result', {
+      turn: 1, step: 1, message: createToolResultMessage({
+        callId: call.id, content: [{ type: 'text', text: citationSource.text }], isError: false,
+      }),
+      meta: { knowledgeSources: [citationSource] },
+    }, { surfaceOp: 'append', sourceEventSeqs: [tool.seq] })
+    session.append('step/end', { turn: 1, step: 1 })
+    session.append('step/start', { turn: 1, step: 2 })
+    session.append('assistant/message', {
+      turn: 1, step: 2, stream: [], message: createAssistantMessage({ content: [{ type: 'text', text: answer }], source: model }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step: 2 })
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    await scaffold.ctx.sessions.flush(session)
+    await page.reload()
+
+    await frame.getByRole('button', { name: title, exact: true }).click()
+    const preview = frame.getByRole('dialog', { name: citationSource.fileName, exact: true })
+    await preview.getByText('第 22 页', { exact: true }).waitFor()
+    expect(await preview.locator('iframe').getAttribute('src')).toMatch(/^blob:.*#page=22$/u)
+    expect(await frame.getByRole('button', { name: '片段 1', exact: true }).count()).toBe(1)
   }, 60_000)
 
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {

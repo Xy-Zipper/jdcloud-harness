@@ -1,6 +1,7 @@
 /** Ontology Remote mount and root-slot login lifecycle. */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-api-ontology-auth-controller/remote'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -8,10 +9,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type { PdfExcerptLocator } from '@deepseek-ai/dsh-client-ui-sidebar-documentpreview/client'
 import type {
   OntologyAuthStatus,
   OntologyModelingContext,
   OntologyProjectContext,
+  OntologyRuntimeContext,
   OntologyRuntimeIdentity,
   OntologyRuntimeSessionTransfer,
 } from '@deepseek-ai/dsh-api-ontology-auth-controller/types'
@@ -21,6 +24,9 @@ import { EmbeddedSessionPage } from './EmbeddedSessionPage.tsx'
 import { LoginPage, type OntologyLoginInjected } from './LoginPage.tsx'
 import { en, NS, zh } from './locales.ts'
 import { installModelingConversation } from './modeling.ts'
+import { installKnowledgeCitations } from './knowledge-turn.tsx'
+import { PublishedKnowledgeSkill } from './KnowledgeSkills.tsx'
+import { installSkillNavigation, ontologySkillPanel } from './SkillNavigation.tsx'
 
 const AUTH_LOGIN_RECORD_PREFIX = 'ontology-auth-controller/login-'
 const BRAND_PRIORITY = -10
@@ -42,7 +48,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required after the generated Ontology Remote namespace is mounted. */
-export const uiInject = ['remote', 'remote.ontologyAuth', 'slots', 'locale', 'uiWorkspace']
+export const uiInject = ['remote', 'remote.ontologyAuth', 'slots', 'locale', 'uiWorkspace', 'uiConversation']
 
 /** Install Ontology occupants ahead of generic and official brand fallbacks. */
 function installOntologyBrand(ctx: ClientContext): () => void {
@@ -68,8 +74,7 @@ function installOntologyBrand(ctx: ClientContext): () => void {
 /** Import one Runtime Session only from the exact page that embedded this Harness document. */
 function installRuntimeSessionBridge(
   ctx: ClientContext,
-  applyStatus: (status: OntologyAuthStatus) => void,
-  resetIdentityView: () => void,
+  applyStatus: (status: OntologyAuthStatus, resetSelection?: boolean) => void,
   parentOrigin: string | undefined,
 ): () => void {
   if (parentOrigin === undefined) return () => undefined
@@ -89,8 +94,7 @@ function installRuntimeSessionBridge(
       const accepted = result.ok && (message.context === undefined
         || (context?.projectId === message.context.projectId && context.mode === message.context.mode))
       if (accepted) {
-        resetIdentityView()
-        applyStatus(result.value)
+        applyStatus(result.value, result.value.preserveSelection !== true)
       }
       window.parent.postMessage({
         type: 'ontology/runtime-session-result',
@@ -197,14 +201,26 @@ function timestamp(value: unknown): string | undefined {
  * @param ctx - Client context carrying Remote, slot, locale, and Workspace services.
  */
 export function installOntologyLoginUi(ctx: ClientContext): void {
+  const parameters = new URLSearchParams(window.location.search)
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-ontology-login: dictionaries')
   let active = true
   let disposeGate: (() => void) | undefined
   let disposeAccount: (() => void) | undefined
+  let disposeSkillNavigation: (() => void) | undefined
+  let accountSignature: string | undefined
+  let viewScope: string | undefined
   let disposeModeling: (() => void) | undefined
+  let disposeSkill: (() => void) | undefined
+  let skillOwner: string | undefined
   let modelingKey: string | undefined
+  const skillProject = createSnapshotStore<OntologyRuntimeContext | undefined>(undefined)
   const embedded = window.parent !== window
   const parentOrigin = resolveParentOrigin()
-  const modeling = embedded && new URLSearchParams(window.location.search).get('ontologyEmbed') === '1'
+  const skillParameter = parameters.get('knowledgeSkill')
+  const knowledgeSkill = skillParameter === null ? undefined : /^ks_[a-zA-Z0-9-]+$/u.test(skillParameter) ? skillParameter : 'ks_invalid'
+  const modeling = embedded && knowledgeSkill === undefined && parameters.get('ontologyEmbed') === '1'
+  // The document preview plugin loads its PDF worker only when a citation needs text lookup.
+  const locatePage: PdfExcerptLocator = async (data, prose, signal, position) => ctx.get('pdfExcerptLocator')?.(data, prose, signal, position)
 
   const resetIdentityView = (): void => {
     // Token rotation preserves an open modeling Session; a new identity or Project prepares its own selection.
@@ -217,8 +233,11 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   }
 
   const hideAccount = (): void => {
+    disposeSkillNavigation?.()
+    disposeSkillNavigation = undefined
     disposeAccount?.()
     disposeAccount = undefined
+    accountSignature = undefined
   }
 
   const hideModeling = (): void => {
@@ -244,14 +263,17 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
 
   const showAccount = (status: Extract<OntologyAuthStatus, { readonly authenticated: true }>): void => {
     if (!active) return
+    const signature = JSON.stringify([status.baseUrl, status.user])
+    // Keep the current Skill page across matching authentication notifications.
+    if (accountSignature === signature) return
     hideAccount()
+    accountSignature = signature
     const injected: OntologyAccountInjected = {
       status,
       logout: async () => {
         const result = await ctx.remote.ontologyAuth.logout()
         if (!result.ok) return { ok: false, error: result.error.message }
-        resetIdentityView()
-        applyStatus(result.value)
+        applyStatus(result.value, true)
         return { ok: true }
       },
     }
@@ -260,11 +282,57 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
       locale: NS,
       inject: () => injected,
     }, AccountSeat))
+    disposeSkillNavigation = installSkillNavigation(ctx, status.user.accountType === 'admin', skillProject)
   }
 
-  const applyStatus = (status: OntologyAuthStatus): void => {
+  const hideSkill = (): void => {
+    disposeSkill?.()
+    disposeSkill = undefined
+    skillOwner = undefined
+  }
+
+  const showSkill = (id: string, owner: string): void => {
+    if (skillOwner === owner) return
+    hideSkill()
+    skillOwner = owner
+    disposeSkill = ctx.slots.register({
+      name: 'root', priority: -100, locale: NS,
+      inject: () => ({
+        id,
+        locatePage,
+        logout: async () => {
+          const result = await ctx.remote.ontologyAuth.logout()
+          if (!result.ok) throw new Error(result.error.message)
+          applyStatus(result.value, true)
+        },
+      }),
+    }, PublishedKnowledgeSkill)
+  }
+
+  const applyStatus = (status: OntologyAuthStatus, resetSelection = false): void => {
     if (!active) return
+    skillProject.set(status.authenticated && status.context?.mode === 'runtime' ? status.context : undefined)
+    // Replacing a token in the same scope preserves the workspace's saved conversation.
+    const nextScope = status.authenticated
+      ? JSON.stringify([status.baseUrl, status.user.userId, status.context?.projectId, status.context?.mode])
+      : undefined
+    if (resetSelection || (viewScope !== undefined && viewScope !== nextScope)) {
+      const layout = ctx.get('layout')
+      // The validated project scope changes while the same administrator continues editing Skills.
+      const keepSkills = status.authenticated && accountSignature === JSON.stringify([status.baseUrl, status.user])
+        && layout?.panelInfo.getSnapshot().activePanelId === ontologySkillPanel
+      resetIdentityView()
+      if (keepSkills) layout.selectPanel(ontologySkillPanel)
+    }
+    viewScope = nextScope
     if (status.authenticated) {
+      if (knowledgeSkill !== undefined) {
+        hideGate()
+        hideAccount()
+        hideModeling()
+        showSkill(knowledgeSkill, status.user.userId)
+        return
+      }
       if (modeling && (parentOrigin === undefined || status.context?.mode !== 'modeling')) {
         hideAccount()
         hideModeling()
@@ -281,6 +349,7 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
       }
       return
     }
+    hideSkill()
     hideModeling()
     if (modeling) ctx.uiWorkspace.clearSelection()
     hideAccount()
@@ -294,7 +363,7 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
       priority: -100,
       locale: NS,
     } as const
-    if (embedded) {
+    if (embedded && knowledgeSkill === undefined) {
       disposeGate = ctx.slots.register(registration, EmbeddedSessionPage)
       return
     }
@@ -309,8 +378,7 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
         const result = await ctx.remote.ontologyAuth.login(request)
         if (!result.ok) return { ok: false, error: result.error.message }
         if (!active) return { ok: true }
-        resetIdentityView()
-        applyStatus(result.value)
+        applyStatus(result.value, true)
         return { ok: true }
       },
     }
@@ -321,19 +389,20 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
   }
 
   const refresh = async (): Promise<void> => {
-    if (!active) return
+    // Wait for the verified parent handshake on a newly loaded embedded page.
+    const scope = viewScope
+    if (!active || (embedded && knowledgeSkill === undefined && scope === undefined)) return
     const result = await ctx.remote.ontologyAuth.status()
-    if (result.ok) applyStatus(result.value)
+    if (result.ok && viewScope === scope) applyStatus(result.value, scope === undefined)
   }
 
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-ontology-login: dictionaries')
   ctx.effect(() => installOntologyBrand(ctx), 'ui-ontology-login: Ontology brand')
+  installKnowledgeCitations(ctx, modeling, locatePage)
   ctx.effect(() => {
     const offRecord = ctx.remote.$on('credentials/record-updated', (key) => {
       // Resource ownership grants share the controller namespace but do not
       // change the current browser login or invalidate its selected Session.
       if (!active || !String(key).startsWith(AUTH_LOGIN_RECORD_PREFIX)) return
-      resetIdentityView()
       void refresh()
     })
     showGate()
@@ -343,10 +412,11 @@ export function installOntologyLoginUi(ctx: ClientContext): void {
       hideGate()
       hideAccount()
       hideModeling()
+      hideSkill()
     }
   }, 'ui-ontology-login: authentication gate')
   ctx.effect(
-    () => installRuntimeSessionBridge(ctx, applyStatus, resetIdentityView, parentOrigin),
+    () => installRuntimeSessionBridge(ctx, applyStatus, parentOrigin),
     'ui-ontology-login: embedded Runtime Session bridge',
   )
 }

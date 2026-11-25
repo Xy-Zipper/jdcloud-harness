@@ -15,7 +15,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
-| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations`, `administrator draft additions` | - | Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
+| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_search_knowledge`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations`, `administrator draft additions` | - | Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
@@ -395,6 +395,27 @@ Query one published Object Type with bounded pagination and Property-id equality
   "required": [
     "project_id",
     "object_type_id"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_search_knowledge`
+
+Search RAGFlow for relevant chunks of accessible Ontology project files. Returns excerpts, citation ids, and the knowledgeBaseId/documentId keys for related Ontology records.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "description": "The user’s document search question, with any follow-up reference resolved."
+    }
+  },
+  "required": [
+    "question"
   ]
 }
 ```

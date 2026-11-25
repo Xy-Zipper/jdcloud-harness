@@ -65,6 +65,8 @@ export function registerChatNodeRenderers(
       hooks: { presentation },
       resolveFilePath: sessionFilePath(ctx, sessionId),
       fileMentions: (owner, getFileTriggerProps) => ctx.get('chatFileMentions')?.forClosing(owner, sessionId, getFileTriggerProps),
+      assistantProse: owner => ctx.get('chatAssistantProse')?.forClosing(owner, sessionId),
+      assistantProseDataKey: ctx.get('chatAssistantProse')?.turnDataKey,
     }),
   }, AssistantNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({

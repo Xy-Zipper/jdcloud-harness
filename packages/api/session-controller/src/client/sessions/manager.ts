@@ -391,9 +391,13 @@ export class SessionManager {
 
   // ---- List API ----
 
-  /** Full refresh via session.list (single-flight within one Host generation). */
-  refreshList(): Promise<void> {
-    if (this.listInflight !== null) return this.listInflight
+  /**
+   * Refresh the Session list, sharing the in-flight read under the same credentials.
+   * @param options - Replace a pending read when the caller's credentials have changed.
+   * @returns completion of the active list request.
+   */
+  refreshList(options: { readonly replace?: boolean } = {}): Promise<void> {
+    if (this.listInflight !== null && options.replace !== true) return this.listInflight
     this.listState = 'loading'
     this.listError = null
     const established = this.summaries
@@ -736,9 +740,7 @@ export class SessionManager {
    */
   handleConnected(): void {
     for (const store of this.projectionStores.values()) store.clear()
-    this.listMutations = null
-    this.listInflight = null
-    void this.refreshList()
+    void this.refreshList({ replace: true })
     const parents = new Set(this.projectionLoads.keys())
     for (const id of this.sessions.keys()) {
       const address = this.addresses.get(id)

@@ -11,7 +11,7 @@ services:
         # `.git` is excluded from the build context, so pass the source revision explicitly.
         DSH_CLIENT_COMMIT_HASH: ${DSH_CLIENT_COMMIT_HASH:?Set DSH_CLIENT_COMMIT_HASH to `git rev-parse HEAD` before building}
         # Web branding is embedded into the frontend during image build.
-        DSH_CLIENT_TITLE: ${ONTOLOGY_PRODUCT_NAME:-jdcloud-harness}
+        DSH_CLIENT_TITLE: ${ONTOLOGY_PRODUCT_NAME:-LSY-Agent}
     init: true
     restart: unless-stopped
     working_dir: /workspace

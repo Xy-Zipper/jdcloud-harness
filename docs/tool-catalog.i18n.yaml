@@ -9,8 +9,8 @@
   en: 6cc2cd9ced70bb09
   zh: 1c0e6cb4ba2ed637
 /tool-schema-catalog/tool-package-map:
-  en: f87d43ba1c9e9f5f
-  zh: ade64940f28badb8
+  en: ac6861649d41b062
+  zh: 7f7f0d90befbba5d
 /tool-schema-catalog/deepseek-ai-dsh-tool-ontology:
   en: eb2348686c8fa737
   zh: eb2348686c8fa737
@@ -47,6 +47,9 @@
 /tool-schema-catalog/deepseek-ai-dsh-tool-ontology/ontology-query-objects:
   en: a4f3ff1777e05492
   zh: a4f3ff1777e05492
+/tool-schema-catalog/deepseek-ai-dsh-tool-ontology/ontology-search-knowledge:
+  en: 4561fea48c79e0a3
+  zh: 450f16d4d61a28c0
 /tool-schema-catalog/deepseek-ai-dsh-tool-ontology/ontology-traverse-link:
   en: 6a5c2b3e14b2a00c
   zh: 6a5c2b3e14b2a00c

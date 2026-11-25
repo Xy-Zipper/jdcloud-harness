@@ -58,6 +58,8 @@ Runtime 用户必须有权访问指定项目。Ontology 会拒绝 `X-Tenant-Id` 
 <a id="request-and-response-rules"></a>
 ## 请求与响应规则
 
+本节适用于 `/api/external/v1`。发布 Skill 的响应字段与事件见[知识 Skill 集成](#knowledge-skill-integration)。
+
 - 有请求体的 JSON 接口必须使用 `Content-Type: application/json`。
 - Skill 上传必须使用 `multipart/form-data`，应由 HTTP 客户端自动生成 boundary。
 - 所有 JSON 成功响应均使用 `{ "code": 200, "data": ... }` 和 `Content-Type: application/json; charset=utf-8`。
@@ -318,6 +320,234 @@ data: {"code":200,"data":{"sessionId":"session-id"}}
 API 会转发模型提供方返回的流式字段，但不会生成或暴露隐藏推理。客户端应保存返回的 `sessionId`，后续请求通过该 ID 继续对话。
 
 <a id="errors"></a>
+<a id="knowledge-skill-integration"></a>
+## 知识 Skill 集成
+
+在 Harness 左下角打开「更多 → Skill」。Ontology 工作台内只列出当前项目的 Skill。独立打开 Harness 时先选项目。填写角色指令，选择知识库，然后点击「发布 Skill」。知识库留空时查询该项目在所有可用知识库中的文件。保存草稿后再次发布即可应用修改。删除 Skill 会关闭它的发布入口，并删除 API Key 和 API 会话历史。
+
+在「发布接入」中启用外部嵌入，然后从「全屏 iframe」或「悬浮组件」复制代码到目标网站。iframe 填满指定容器，悬浮组件从页面右下角打开聊天。持分享链接者可以提问并查看引用片段。停用外部嵌入会使两种代码中的分享凭证同时失效。保护原件预览的项目权限继续由登录后的工作台校验。
+
+### 认证与服务地址
+
+在「发布接入 → API 接口 → 管理 API Key」创建密钥。完整值在创建时可复制，之后列表显示掩码和创建时间。一个 Skill 可有多把独立的 Key。删除一把 Key 会立即停用它并删除该 Key 创建的 API 会话及历史。请求发送 `Authorization: Bearer $SKILL_API_KEY`。将密钥保存在调用方服务端。
+
+以下示例使用 `SKILL_API` 作为接口地址前缀。将其中的地址、部署路径和 Skill ID 替换为发布页面给出的值。页面里的 curl 示例已填写当前 Skill 的请求地址。
+
+```bash
+SKILL_API='https://example.com/harness/api/ontology-skill/v1/skills/ks_example'
+```
+
+| 公共请求参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `skillId` | 路径字符串 | 必填。对应 `SKILL_API` 最后一段，取自已发布的 Skill。 |
+| `Authorization` | 请求头 | 必填。值为 `Bearer` 加空格和该 Skill 的 API Key。 |
+| `Content-Type` | 请求头 | POST 必填，使用 `application/json`。 |
+| `X-Request-ID` | 请求头 | 可选。最多 128 字，用于关联请求和错误。 |
+
+### 新建会话
+
+`POST /sessions`
+
+请求使用 `Content-Type: application/json`。`name` 是可选字符串，最多 120 字，默认「新会话」。调用方可发送 `{}` 使用默认名称。
+
+```bash
+curl --request POST "$SKILL_API/sessions" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"培训资料"}'
+```
+
+HTTP 201 返回会话 `id`、`name`、`turnCount`、`createdAt` 和 `updatedAt`，可将 `id` 保存为 `SESSION_ID`。
+
+| 会话字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | 字符串 | 会话 ID，用于提问、读取历史和删除。 |
+| `name` | 字符串 | 会话显示名称。 |
+| `turnCount` | 整数 | 已保存的问答轮数。 |
+| `createdAt` | 字符串 | 会话创建时间，RFC 3339。 |
+| `updatedAt` | 字符串 | 会话最近更新时间，RFC 3339。 |
+
+```json
+{
+  "id": "ss_example",
+  "name": "培训资料",
+  "turnCount": 0,
+  "createdAt": "2026-11-20T01:00:00Z",
+  "updatedAt": "2026-11-20T01:00:00Z"
+}
+```
+
+### 发起对话
+
+`POST /chat`
+
+| 请求体字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `question` | 字符串 | 必填。1–2000 字。 |
+| `sessionId` | 字符串 | 可选。传入当前 Key 创建的 ID 后保存问答，并使用同一发布版本最近 4 轮的上下文。省略时独立回答。 |
+| `stream` | 布尔值 | 可选，默认 `false`。`true` 时分段返回 SSE，`false` 时等待完整 JSON。 |
+
+```bash
+curl --request POST "$SKILL_API/chat" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data "{\"question\":\"培训主题是什么？\",\"sessionId\":\"$SESSION_ID\",\"stream\":false}"
+```
+
+HTTP 200 JSON 响应和流式 `done` 事件使用以下字段。
+
+| 响应字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `answer` | 字符串 | 本轮完整的回答正文。 |
+| `sources` | 对象数组 | 支持答复的引用片段。资料不足时返回空数组。 |
+| `version` | 整数 | 生成该回答时使用的 Skill 发布版本。 |
+| `sessionId` | 字符串 | 本轮保存到的会话 ID。有会话时返回。 |
+| `number` | 整数 | 本轮序号，从 1 开始。有会话时返回。 |
+
+```json
+{
+  "answer": "当前所选资料中未找到足够依据。",
+  "sources": [],
+  "version": 1,
+  "sessionId": "ss_example",
+  "number": 1
+}
+```
+
+#### `sources[]` 引用字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `citationId` | 字符串 | 该引用的标识，用于关联回答与来源。 |
+| `text` | 字符串 | 返回的原文片段正文。 |
+| `projectId` | 字符串 | 原件所属的 Ontology 项目 ID。 |
+| `fileId` | 字符串 | Ontology 原文件 ID。 |
+| `fileName` | 字符串 | 原件文件名。 |
+| `mediaType` | 字符串 | 原件媒体类型，例如 `application/pdf`。 |
+| `knowledgeBaseId` | 字符串 | RAGFlow 知识库 ID。 |
+| `documentId` | 字符串 | RAGFlow 文档 ID。 |
+| `chunkId` | 字符串 | RAGFlow 命中的分块 ID。 |
+| `nodeIds` | 字符串数组 | 对应的原始切片节点 ID 列表。 |
+| `nodeId` | 字符串 | 可选。已知的单个原始切片节点 ID。 |
+| `page` | 整数 | 可选。已确认的原 PDF 页码，从 1 开始。 |
+| `endPage` | 整数 | 可选。跨页片段已确认的结束页。 |
+
+#### 流式返回
+
+```bash
+curl --no-buffer --request POST "$SKILL_API/chat" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data "{\"question\":\"培训主题是什么？\",\"sessionId\":\"$SESSION_ID\",\"stream\":true}"
+```
+
+成功时响应为 HTTP 200 和 `Content-Type: text/event-stream`。每条事件的 `data` 是 JSON 对象，事件之间以空行分隔。
+
+| `event` | `data` 字段 | 说明 |
+| --- | --- | --- |
+| `delta` | `text`，字符串 | 本次新增的正文。按顺序拼接，保留空格和换行。可能出现多次。 |
+| `done` | 与 JSON 响应相同 | 成功结束。以完整的 `answer` 和 `sources` 为准。有会话时，该轮已保存。资料不足时可直接返回 `done`。 |
+| `error` | `status`、`code`、`message`、`requestId` | 流开启后的失败。`status` 是对应的 HTTP 状态整数。该事件结束本次响应。 |
+
+```text
+event: delta
+data: {"text":"培训介绍了"}
+
+event: delta
+data: {"text":"系统操作流程。"}
+
+event: done
+data: {"answer":"培训介绍了系统操作流程。","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"系统操作培训","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
+```
+
+首个 SSE 事件发出前，失败以 HTTP 错误状态和 JSON 返回。收到 `error` 后可以丢弃临时正文。如果连接提前关闭且未收到 `done`，重试前先读取会话历史。
+
+### 获取会话列表
+
+`GET /sessions?page=1&pageSize=20`
+
+返回当前 API Key 创建的会话，最近活动在前。`page` 默认 1，范围为 1–1000000。`pageSize` 默认 20，范围为 1–50。两个参数都可省略。HTTP 200 返回 `sessions`、`page`、`pageSize` 和 `hasMore`。
+
+| 响应字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `sessions` | 对象数组 | 当前页的会话，每项与新建会话的响应字段相同。 |
+| `page` | 整数 | 本次返回的页码，从 1 开始。 |
+| `pageSize` | 整数 | 本次请求的每页条数上限。 |
+| `hasMore` | 布尔值 | 为 `true` 时可继续读取下一页。 |
+
+```bash
+curl "$SKILL_API/sessions?page=1&pageSize=20" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+```json
+{"sessions":[],"page":1,"pageSize":20,"hasMore":false}
+```
+
+### 获取会话历史
+
+`GET /sessions/{sessionId}?page=1&pageSize=20`
+
+`sessionId` 为必填路径参数。使用与列表相同的分页参数。HTTP 200 返回 `session` 和按 `number` 正序的 `turns`，每轮包含 `question`、`answer`、`sources`、`version` 和 `createdAt`。
+
+| 响应字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `session` | 对象 | 会话基本信息，字段与新建会话相同。 |
+| `turns` | 对象数组 | 当前页按轮次升序排列的问答记录。 |
+| `turns[].number` | 整数 | 会话中的轮次序号，从 1 开始。 |
+| `turns[].question` | 字符串 | 本轮保存的问题正文。 |
+| `turns[].answer` | 字符串 | 本轮保存的完整回答。 |
+| `turns[].sources` | 对象数组 | 本轮的引用，使用与发起对话相同的 `sources[]` 字段。 |
+| `turns[].version` | 整数 | 生成该轮回答时使用的 Skill 发布版本。 |
+| `turns[].createdAt` | 字符串 | 保存该轮问答的时间，RFC 3339。 |
+| `page`、`pageSize`、`hasMore` | 整数、整数、布尔值 | 与会话列表的分页字段相同。 |
+
+```bash
+curl "$SKILL_API/sessions/$SESSION_ID?page=1&pageSize=20" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+```json
+{
+  "session": {"id":"ss_example","name":"培训资料","turnCount":1,"createdAt":"2026-11-20T01:00:00Z","updatedAt":"2026-11-20T01:02:00Z"},
+  "turns": [{"number":1,"question":"培训主题是什么？","answer":"当前所选资料中未找到足够依据。","sources":[],"version":1,"createdAt":"2026-11-20T01:02:00Z"}],
+  "page": 1,
+  "pageSize": 20,
+  "hasMore": false
+}
+```
+
+### 删除会话
+
+`DELETE /sessions/{sessionId}`
+
+删除当前 Key 创建的指定会话及其历史。成功返回 HTTP 204，响应体为空。
+
+```bash
+curl --request DELETE "$SKILL_API/sessions/$SESSION_ID" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+### 错误响应
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `code` | 字符串 | 稳定的错误标识，用于程序判断。 |
+| `message` | 字符串 | 可读的失败原因，部分网关错误可能省略。 |
+| `requestId` | 字符串 | 请求追踪 ID，部分网关错误可能省略。 |
+
+| 状态 | 处理方式 |
+| --- | --- |
+| 400 | 检查请求体、会话 ID 或分页参数 |
+| 401 | 使用这个 Skill 当前有效的 API Key |
+| 404 | 检查会话是否存在，是否由当前 Key 创建 |
+| 409 | 会话或发布版本已更新，重新读取后再提问 |
+| 415 | 发送 `Content-Type: application/json` |
+| 429 | 等待 `Retry-After` 后重试。每个实例、每个 Skill 每分钟最多处理 30 个外部问答，同时最多 4 个进行中 |
+| 500 / 502 / 503 / 504 | 服务、知识库或模型暂时不可用，可以稍后重试 |
+
+「登录后试用」链接仍按查看者的 Ontology 登录授权。使用 Runtime Access Token 的既有调用方可以继续调用 `GET /api/runtime/knowledge/skills/{id}`、`POST /api/runtime/knowledge/skills/{id}/ask` 和有权限的 `/api/runtime/knowledge/files/{projectId}/{fileId}/preview` 或 `/content`。
+
 ## 错误处理
 
 JSON 错误通常采用以下结构：

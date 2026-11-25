@@ -86,8 +86,9 @@ export class HostConnectionService extends Service implements HostConnectionHand
     this.allowsRemoteAuthorities = trustedHosts.some(isRemoteAuthority)
     ctx.on('webserver/authorize', (request, policy) => {
       const facts = { ...request, url: request.url.href }
-      if (!this.isTrustedRequest(facts)) return { kind: 'deny', status: 403 }
-      if (policy === 'anonymous') return { kind: 'allow' }
+      const embedded = policy === 'embed' && request.transport === 'http'
+      if (!this.isTrustedRequest(facts, embedded)) return { kind: 'deny', status: 403 }
+      if (policy === 'anonymous' || embedded) return { kind: 'allow' }
       const admission = this.authentication.authenticate(facts)
       return 'rejection' in admission
         ? { kind: 'deny', status: admission.rejection }
@@ -130,9 +131,9 @@ export class HostConnectionService extends Service implements HostConnectionHand
   }
 
   /** Check the deployment's request-source policy without credential verification. */
-  private isTrustedRequest(request: ConnectionTrustRequest): boolean {
+  private isTrustedRequest(request: ConnectionTrustRequest, embedded = false): boolean {
     const carrier = this.owner.get('webServer')
-    return isTrustedApiRequest(request, this.trustedHosts, carrier?.host, carrier?.protocol ?? 'http:')
+    return isTrustedApiRequest(request, this.trustedHosts, carrier?.host, carrier?.protocol ?? 'http:', embedded)
   }
 
   /**

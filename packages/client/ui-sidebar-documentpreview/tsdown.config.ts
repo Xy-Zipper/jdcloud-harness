@@ -6,11 +6,47 @@ import { clientBundle } from '../tsdown.client.ts'
 
 const bundle = clientBundle(import.meta.dirname, ['lib/types/index.js'], {
   clientBanner: fileName => fileName.endsWith('client.pdf.js') ? pdfLicenseBanner()
-    : fileName.endsWith('client.excel.js') ? excelLicenseBanner() : undefined,
+    : fileName.endsWith('client.excel.js') ? excelLicenseBanner()
+      : fileName.endsWith('client.ocr.js') ? ocrLicenseBanner() : undefined,
 })
 const require = createRequire(import.meta.url)
 const workerSpecifier = 'pdfjs-dist/build/pdf.worker.min.mjs?raw'
 const workerModule = '\0dsh-pdf-worker.mjs'
+const ocrModule = '\0dsh-pdf-ocr-assets.mjs'
+
+/** Retain the license notices with the lazy OCR implementation and its language data. */
+function ocrLicenseBanner(): string {
+  const licenses = ['tesseract.js/LICENSE.md', 'tesseract.js-core/LICENSE'].map(path => readFileSync(require.resolve(path), 'utf8'))
+  const notice = ['Tesseract.js, Tesseract.js-core, and Tesseract chi_sim language data',
+    'Language data: https://github.com/naptha/tessdata (Tesseract integerized best model)', ...licenses].join('\n')
+  return ['//! Bundled OCR license notices', ...notice.trimEnd().split('\n').map(line => `// ${line}`)].join('\n')
+}
+
+/** The browser can locate old PDF citations without downloading the engine or sending page images anywhere. */
+const ocrAssets: NonNullable<UserConfig['plugins']> = [{
+  name: 'dsh-pdf-ocr-assets',
+  resolveId(source) { return source === './ocr-assets?raw' ? ocrModule : null },
+  load(id) {
+    if (id !== ocrModule) return null
+    // Its browser distribution keeps the OCR chunk independent of other lazy parser runtimes.
+    const launcher = require.resolve('tesseract.js/dist/tesseract.min.js')
+    this.addWatchFile(launcher)
+    const browser = readFileSync(launcher, 'utf8').replace(/^\/\/# sourceMappingURL=.*$/mu, '')
+    const assets = {
+      worker: require.resolve('tesseract.js/dist/worker.min.js'),
+      core: require.resolve('tesseract.js-core/tesseract-core-simd-lstm.wasm.js'),
+      language: join(dirname(require.resolve('@tesseract.js-data/chi_sim/package.json')), '4.0.0_best_int/chi_sim.traineddata.gz'),
+    }
+    const sources = Object.entries(assets).map(([name, path]) => {
+      this.addWatchFile(path)
+      return `export const ${name} = ${JSON.stringify(readFileSync(path, name === 'language' ? 'base64' : 'utf8'))};`
+    })
+    return [
+      'const api = (() => { const module = { exports: {} }; const exports = module.exports;', browser,
+      'return module.exports })();', 'export const { createWorker, OEM } = api;', ...sources,
+    ].join('\n')
+  },
+}]
 
 /** FortuneSheet omits its repository license from the npm payload. */
 function excelLicenseBanner(): string {
@@ -104,7 +140,7 @@ export default (options: Parameters<typeof bundle>[0]): UserConfig[] => bundle(o
       ...config.inputOptions,
       resolve: { ...config.inputOptions?.resolve, mainFields: ['browser', 'module', 'main'], aliasFields: [['browser']] },
     },
-    plugins: [config.plugins, pdfWorker, excelWorker],
+    plugins: [config.plugins, pdfWorker, excelWorker, ocrAssets],
     define: { ...config.define, __DSH_PDFJS_ASSETS__: pdfAssets() },
   } : config,
 )

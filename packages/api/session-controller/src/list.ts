@@ -24,6 +24,11 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+interface ScopeOwner {
+  currentScopeKey(): Promise<string | undefined>
+  owns(kind: 'session', id: string, expectedScopeKey?: string, listedHeaders?: ReadonlyMap<SessionId, SessionHeader>): Promise<boolean>
+}
+
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
@@ -144,14 +149,20 @@ export class ApiSessionList {
    */
   async list(signal?: AbortSignal): Promise<SessionSummary[]> {
     signal?.throwIfAborted()
+    // Reuse the request's verified Ontology account for each ownership lookup.
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
+    const scopeKey = owner === undefined ? undefined : await owner.currentScopeKey()
+    signal?.throwIfAborted()
+    if (owner !== undefined && scopeKey === undefined) return []
     const records = await this.ctx.sessionQuery.listSessions(signal)
     signal?.throwIfAborted()
+    // Ownership inheritance can use these headers instead of re-scanning storage for each Session.
+    const listedHeaders = owner === undefined ? undefined : new Map(records.map(({ header }) => [header.id, header]))
     const items: SessionSummary[] = []
     const cold: SessionRecord[] = []
     let yieldDeadline = performance.now() + this.workSliceMs
-    const owner = this.ctx.get('ontologyAuthController') as { owns(kind: 'session', id: string): Promise<boolean> } | undefined
     for (const record of records) {
-      if (owner !== undefined && !await owner.owns('session', String(record.header.id))) continue
+      if (owner !== undefined && !await owner.owns('session', String(record.header.id), scopeKey, listedHeaders)) continue
       signal?.throwIfAborted()
       const live = this.ctx.sessions.get(record.header.id)
       if (live !== undefined) {

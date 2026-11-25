@@ -7,6 +7,8 @@ import type { DocumentPreviewProps } from '../document/contract.ts'
 import type { PdfStore, PdfView } from './store.ts'
 import { renderPdfPage, type PdfDocument } from './document.ts'
 import { openPdf } from './runtime.ts'
+import { findPdfExcerptPage } from './excerpt.ts'
+import type { PdfExcerptLocator } from './index.ts'
 import { PdfWorkerFailure } from './errors.ts'
 import { pdfTextRenderer } from './text.ts'
 import type { ZoomViewportProps } from '../zoom/ZoomViewport.tsx'
@@ -37,6 +39,25 @@ type LoadState =
 
 const DEFAULT_PDF_VIEW: PdfView = { page: 1 }
 const FIT_WIDTH: ZoomPreference = { kind: 'fit-width' }
+
+/** Use the same lazy PDF worker and font mappings as the document preview. */
+export const locatePdfExcerpt: PdfExcerptLocator = async (data, prose, signal, position) => {
+  const session = openPdf(data, signal, () => {})
+  try {
+    const document = await session.document
+    return await findPdfExcerptPage(document, prose, signal, {
+      position,
+      search: async (pages, matches) => {
+        signal.throwIfAborted()
+        const { searchPdfImages } = await import('./ocr.ts')
+        return searchPdfImages(pages, (page, canvas) => renderPdfPage(document, page, canvas, signal, 1.25), matches, signal)
+      },
+    })
+  } finally {
+    await session.dispose()
+  }
+}
+
 /**
  * Present a PDF with tab-local viewing preferences and component-owned rendering resources.
  * @param props - complete bytes, framework-owned tab/store/locale seats, and main-bundle loading content.

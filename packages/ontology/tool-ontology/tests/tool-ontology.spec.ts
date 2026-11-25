@@ -27,6 +27,7 @@ interface FixtureOptions {
   readonly executeError?: Error
   readonly actionResponse?: unknown
   readonly modelingProjectId?: string
+  readonly knowledgeResponse?: unknown
 }
 
 /** Mount the real tool and approval services with a Host-only Runtime request recorder. */
@@ -121,8 +122,10 @@ async function fixture(options: FixtureOptions = {}) {
     }
     throw new Error(`unexpected Runtime path: ${request.path}`)
   })
+  const searchKnowledge = vi.fn(async (_question: string) => options.knowledgeResponse ?? { sources: [] })
   ctx.provide('ontologyAuthController', {
     requestAuthenticated,
+    searchKnowledge,
     currentModelingContext: async () => options.modelingProjectId === undefined
       ? undefined : { projectId: options.modelingProjectId, projectName: '销售', mode: 'modeling' },
   } as never)
@@ -146,7 +149,7 @@ async function fixture(options: FixtureOptions = {}) {
     agent,
     signal: new AbortController().signal,
   })
-  return { approvalRequests, ctx, execute, fiber, requestAuthenticated, session }
+  return { approvalRequests, ctx, execute, fiber, requestAuthenticated, searchKnowledge, session }
 }
 
 function value(result: ToolExecutionResult) {
@@ -163,6 +166,7 @@ describe('Ontology tools', () => {
   it('registers the published and draft tools and removes them with the plugin fiber', async () => {
     const { ctx, fiber } = await fixture()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
+      'ontology_search_knowledge',
       'ontology_list_projects',
       'ontology_list_objects',
       'ontology_describe_object',
@@ -179,6 +183,27 @@ describe('Ontology tools', () => {
     ])
     await fiber.dispose()
     expect(ctx.tools.schemas()).toEqual([])
+  })
+
+  it('presents exact RAGFlow citations and valid Ontology join keys from the signed-in search', async () => {
+    const source = {
+      citationId: 'R-0102030405', projectId: 'project-sales', fileId: 'file-manual', fileName: '培训.pdf',
+      knowledgeBaseId: 'kb-manuals', documentId: 'doc-chunk-one', chunkId: 'ragflow-chunk-one',
+      mediaType: 'application/pdf', page: 2, nodeIds: ['0000'], text: '请使用确认后的订单编号。',
+    }
+    const { execute, searchKnowledge } = await fixture({
+      knowledgeResponse: { sources: [{ ...source, sourceUrl: 'https://untrusted.example' }] },
+    })
+    const result = await execute('ontology_search_knowledge', { question: '  查找订单操作说明  ' })
+    expect(searchKnowledge).toHaveBeenCalledWith('查找订单操作说明', expect.any(AbortSignal))
+    expect(value(result)).toEqual([source])
+    expect(result.meta).toEqual({ knowledgeSources: [source] })
+    expect(result.content).toEqual([{ type: 'text', text: JSON.stringify([{
+      citationId: source.citationId, projectId: source.projectId, fileId: source.fileId, fileName: source.fileName,
+      text: source.text, knowledgeBaseId: source.knowledgeBaseId, documentId: source.documentId,
+    }]) }])
+    expect(failure(await execute('ontology_search_knowledge', { question: '  ' })).error.info?.code).toBe('INVALID_ARGS')
+    expect(searchKnowledge).toHaveBeenCalledOnce()
   })
 
   it('describes required and optional Action parameters before preparation', async () => {

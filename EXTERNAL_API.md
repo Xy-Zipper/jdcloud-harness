@@ -58,6 +58,8 @@ The Runtime user must be authorized to access the requested Project. Ontology re
 <a id="request-and-response-rules"></a>
 ## Request and response rules
 
+These rules apply to `/api/external/v1`. [Knowledge Skill integration](#knowledge-skill-integration) documents the published Skill response fields and events.
+
 - JSON endpoints require `Content-Type: application/json` when they have a body.
 - Skill upload requires `multipart/form-data`; let the HTTP client generate its boundary.
 - Every JSON success uses `{ "code": 200, "data": ... }` and `Content-Type: application/json; charset=utf-8`.
@@ -318,6 +320,186 @@ data: {"code":200,"data":{"sessionId":"session-id"}}
 The API forwards model-provided stream fields but does not generate or expose hidden reasoning. A client should retain the returned `sessionId` and reconnect by sending it in the next request.
 
 <a id="errors"></a>
+<a id="knowledge-skill-integration"></a>
+## Knowledge Skill integration
+
+[中文接口文档](EXTERNAL_API.zh.md#knowledge-skill-integration)
+
+In Harness, open More → Skills. The workbench shows the current Ontology project's Skills. In standalone Harness, select a project first. Set the role instructions and knowledge bases, then publish. An empty knowledge-base selection searches the project's files in all available bases. Publish again to apply draft edits. Deleting a Skill revokes its public links and keys and removes its API sessions and history.
+
+Enable external embedding under Publish and integrate. Copy the Full-page iframe or Chat widget snippet into the destination site. The iframe fills its container, and the widget opens chat from the lower-right corner. Anyone holding the share link can ask questions and see cited excerpts. Disabling embedding revokes the credential in both snippets. Original file previews use the signed-in workbench's project permissions.
+
+### Authentication and service address
+
+Open Publish and integrate → API → Manage API keys to create a key. Copy the full key when issued. The list shows masked values and creation times. Each key owns its own API sessions. Deleting a key revokes it and removes the sessions and history it created. Store your key on the calling server.
+
+Set `SKILL_API` to the Skill base URL shown in the publication panel. Keep the Harness deployment prefix, such as `/harness/`. Send `Authorization: Bearer $SKILL_API_KEY` with each request.
+
+```bash
+SKILL_API='https://example.com/harness/api/ontology-skill/v1/skills/ks_example'
+```
+
+| Common request parameter | Type | Meaning |
+| --- | --- | --- |
+| `skillId` | Path string | Required. The last segment of `SKILL_API` identifies the published Skill. |
+| `Authorization` | Header | Required. Send `Bearer` and the API key issued for this Skill. |
+| `Content-Type` | Header | Required for POST. Use `application/json`. |
+| `X-Request-ID` | Header | Optional correlation ID up to 128 characters. |
+
+### Create a session
+
+`POST /sessions` accepts an optional `name` of up to 120 characters. Send `{}` for the default name. HTTP 201 returns a session with `id`, `name`, `turnCount`, `createdAt`, and `updatedAt`. Store its `id` in `SESSION_ID`.
+
+```bash
+curl --request POST "$SKILL_API/sessions" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Training materials"}'
+```
+
+| Session field | Type | Meaning |
+| --- | --- | --- |
+| `id` | String | Session ID for chat, history, and deletion. |
+| `name` | String | Display name. |
+| `turnCount` | Integer | Number of completed, saved turns. |
+| `createdAt` | String | Session creation time in RFC 3339 format. |
+| `updatedAt` | String | Most recent update time in RFC 3339 format. |
+
+### Send a question
+
+`POST /chat` accepts the following JSON fields.
+
+| Request field | Type | Meaning |
+| --- | --- | --- |
+| `question` | String | Required. Question of 1–2,000 characters. |
+| `sessionId` | String | Optional. Saves a turn in a session owned by this key and uses up to four recent turns from the current published version. Omit for a standalone answer. |
+| `stream` | Boolean | Optional, defaults to `false` for complete JSON. Set `true` to receive SSE deltas. |
+
+```bash
+curl --request POST "$SKILL_API/chat" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data "{\"question\":\"What is the training about?\",\"sessionId\":\"$SESSION_ID\",\"stream\":false}"
+```
+
+The HTTP 200 JSON response and the SSE `done` event share these fields.
+
+| Response field | Type | Meaning |
+| --- | --- | --- |
+| `answer` | String | Complete answer text for the turn. |
+| `sources` | Object array | Excerpts supporting the answer. An empty array indicates insufficient evidence. |
+| `version` | Integer | Published Skill version used for the answer. |
+| `sessionId` | String | Session ID present when the turn was saved. |
+| `number` | Integer | Turn number starting at 1, present when the turn was saved. |
+
+| `sources[]` field | Type | Meaning |
+| --- | --- | --- |
+| `citationId` | String | Citation identifier that connects the answer with its evidence. |
+| `text` | String | Text from the cited excerpt. |
+| `projectId` | String | Ontology project that owns the original file. |
+| `fileId` | String | Original file ID in Ontology. |
+| `fileName` | String | Original filename. |
+| `mediaType` | String | Media type of the original file. |
+| `knowledgeBaseId` | String | RAGFlow knowledge base ID. |
+| `documentId` | String | RAGFlow document ID. |
+| `chunkId` | String | RAGFlow ID of the matched chunk. |
+| `nodeIds` | String array | IDs of the original slice nodes. |
+| `nodeId` | String | Optional ID of a single original slice node. |
+| `page` | Integer | Optional verified PDF page, starting at 1. |
+| `endPage` | Integer | Optional verified last page of a multi-page excerpt. |
+
+#### Streaming response
+
+```bash
+curl --no-buffer --request POST "$SKILL_API/chat" \
+  --header "Authorization: Bearer $SKILL_API_KEY" \
+  --header 'Content-Type: application/json' \
+  --data "{\"question\":\"What is the training about?\",\"sessionId\":\"$SESSION_ID\",\"stream\":true}"
+```
+
+Successful SSE responses use HTTP 200 and `Content-Type: text/event-stream`. Each `data` line contains a JSON object. A blank line separates events.
+
+| Event | Data | Meaning |
+| --- | --- | --- |
+| `delta` | `text` string | New answer text. Append in order and retain whitespace. |
+| `done` | JSON response fields | Successful completion. Use the full answer and verified sources. A session turn is saved before this event. An insufficient-evidence answer can go straight to `done`. |
+| `error` | `status`, `code`, `message`, `requestId` | Terminal failure after streaming began. `status` is the corresponding HTTP status integer. |
+
+```text
+event: delta
+data: {"text":"The training "}
+
+event: delta
+data: {"text":"covers cafeteria operations."}
+
+event: done
+data: {"answer":"The training covers cafeteria operations.","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"Cafeteria operations training","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
+```
+
+Failures before the first SSE event use an HTTP status and JSON. Discard provisional text on `error`. If the connection closes without `done`, read session history before retrying.
+
+### List sessions
+
+`GET /sessions` lists sessions owned by the calling key, most recently active first. Optional `page` defaults to 1 and accepts 1–1,000,000. Optional `pageSize` defaults to 20 and accepts 1–50. HTTP 200 returns `sessions`, `page`, `pageSize`, and `hasMore`.
+
+| Response field | Type | Meaning |
+| --- | --- | --- |
+| `sessions` | Object array | Sessions on this page. Each item has the fields from Create a session. |
+| `page` | Integer | Returned page, starting at 1. |
+| `pageSize` | Integer | Maximum items requested for the page. |
+| `hasMore` | Boolean | True when another page is available. |
+
+```bash
+curl "$SKILL_API/sessions?page=1&pageSize=20" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+### Read session history
+
+`GET /sessions/{sessionId}` takes the same paging options. HTTP 200 returns `session`, `turns` in order, `page`, `pageSize`, and `hasMore`. Each turn contains `number`, `question`, `answer`, `sources`, `version`, and `createdAt`.
+
+| Response field | Type | Meaning |
+| --- | --- | --- |
+| `session` | Object | Session fields from Create a session. |
+| `turns` | Object array | Saved turns on this page in ascending order. |
+| `turns[].number` | Integer | Turn number starting at 1. |
+| `turns[].question` | String | Saved question for the turn. |
+| `turns[].answer` | String | Complete saved answer. |
+| `turns[].sources` | Object array | Same citation fields as Send a question. |
+| `turns[].version` | Integer | Published Skill version used for the turn. |
+| `turns[].createdAt` | String | Time the turn was saved, in RFC 3339 format. |
+| `page`, `pageSize`, `hasMore` | Integer, integer, boolean | Same paging fields as List sessions. |
+
+```bash
+curl "$SKILL_API/sessions/$SESSION_ID?page=1&pageSize=20" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+### Delete a session
+
+`DELETE /sessions/{sessionId}` removes the specified session and its history. HTTP 204 has an empty response body.
+
+```bash
+curl --request DELETE "$SKILL_API/sessions/$SESSION_ID" \
+  --header "Authorization: Bearer $SKILL_API_KEY"
+```
+
+### Error responses
+
+`code` is a machine-readable string. `message` is a human-readable string, and `requestId` identifies the request. Some gateway errors omit the latter two fields.
+
+| Status | Handling |
+| --- | --- |
+| 400 | Check the body, session ID, or pagination |
+| 401 | Use the current key for this Skill |
+| 404 | Check that the session exists and belongs to the calling key |
+| 409 | The session or release changed while answering. Read it again before retrying |
+| 415 | Send `Content-Type: application/json` |
+| 429 | Retry after `Retry-After`. Each instance allows 30 external chat requests per minute and four in flight per Skill |
+| 500 / 502 / 503 / 504 | The service, knowledge base, or model is unavailable. Retry later |
+
+Try with sign-in continues to use the viewer's Ontology login. Callers with a Runtime Access Token can use `GET /api/runtime/knowledge/skills/{id}`, `POST /api/runtime/knowledge/skills/{id}/ask`, and authorized `/api/runtime/knowledge/files/{projectId}/{fileId}/preview` or `/content` requests.
+
 ## Errors
 
 JSON failures normally use this structure:

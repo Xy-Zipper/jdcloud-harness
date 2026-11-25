@@ -19,7 +19,7 @@
 
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
-| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations`, `administrator draft additions` | - | Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
+| `@deepseek-ai/dsh-tool-ontology` | `ontology_add_draft_resources`, `ontology_describe_action`, `ontology_describe_object`, `ontology_execute_action`, `ontology_get_draft`, `ontology_get_object`, `ontology_inspect_data_source`, `ontology_list_objects`, `ontology_list_projects`, `ontology_prepare_action`, `ontology_query_objects`, `ontology_search_knowledge`, `ontology_traverse_link`, `ontology_update_draft_bindings` | `ctx.tools`, `ctx.ontologyAuthController`, `ctx.systemPrompt`, `an admitted browser request` | `tool/call`, `tool/result`, `authorized Ontology Action mutations`, `administrator draft additions` | - | Published-data tools discover authorized ids before bounded reads, Link traversal, and prepared Action execution. Draft-modeling tools read the current revision and add definitions atomically with administrator authorization. Runtime authorization is rechecked for every request; schema harvest mounts an inert authentication provider because no tool executes. |
 | `@deepseek-ai/dsh-plugin-manager` | `plugin_manager` | `ctx.tools`, `ctx.pluginManager`, `ctx.sandboxPolicy` | `tool/call`, `tool/result`, `user/message` | - | - |
 | `@deepseek-ai/dsh-plugin-market` | `plugin_market` | `ctx.tools`, `ctx.pluginMarket` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-mcp-resources` | `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource` | `ctx.tools`, `ctx.mcpResources` | `tool/call`, `tool/result` | - | - |
@@ -406,6 +406,28 @@ Query one published Object Type with bounded pagination and Property-id equality
 ```
 
 Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
+### `ontology_search_knowledge`
+
+在 RAGFlow 检索当前用户可访问的 Ontology 项目文件。结果包括片段、引用 ID，以及查询关联记录时使用的 knowledgeBaseId 和 documentId。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "description": "The user’s document search question, with any follow-up reference resolved."
+    }
+  },
+  "required": [
+    "question"
+  ]
+}
+```
+
+Source: [`packages/ontology/tool-ontology/src/index.ts`](../packages/ontology/tool-ontology/src/index.ts)
+
 
 ### `ontology_traverse_link`
 

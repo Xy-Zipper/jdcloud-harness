@@ -44,6 +44,8 @@ kind: "package-reference"
 
 围栏层的根元素不设外边距，因为围栏所在的[块级外框](../ui-primitives/README.zh.md#component-catalog)负责它与相邻块之间的间距。与内容相关的错误由层自己接住。层崩溃时错误照常上报，只有该围栏改为渲染崩溃层的 `children`，并在该围栏本次挂载内保持如此，props 变化也不恢复；同语言的其他围栏仍保留该层，重新挂载的围栏会再次使用它。因此，处理不了不完整内容的层在 `streaming` 为 true 时渲染 `children`。
 
+可选的 `chatAssistantProse.forClosing` 服务根据已结束的轮次为回答添加行内控件，可以修饰正文和替换已识别的 Markdown 链接。轮次数据会随较早的历史加载而更新时，提供方可声明 `turnDataKey`。会话记录保留回答原文。
+
 原生消息图片使用独立的用户与输出位置。`conversation.chat.user.content` Factory 声明 `conversation.chat.user.images`，由 `UserContent` 渲染；Assistant 节点注册声明 `conversation.chat.message.images`，由 `AssistantMarkdown` 渲染。两者通过显式 props 接收图片来源、授权 `loadImage` 和布局参数。官方 `MessageImages` 条目调用共享的 root 作用域 `conversation.images.content` Factory。每个位置均可独立替换，无需复制画廊实现。
 
 Session 作用域的 `conversation.chat.user.content` Factory 只渲染用户内容区域：文本、额外内容块、按输入顺序排列的图片／文件附件及引用摘要。[`UserContentInput`](src/client/contract/slots.ts) 携带预处理的 `content`、变换 `facts`、显示 props 和显式 `loadImage`；引用动作由节点自己的 Injection 提供。正文调用共享 `conversation.user.text` Factory，图片调用自身拥有的图片 Slot。直接调用需要 Session 绑定，行包装层由调用方提供。

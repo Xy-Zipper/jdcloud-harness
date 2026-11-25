@@ -511,6 +511,30 @@ async owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string)
  * @returns Untrusted JSON for the owning consumer to validate at the wire boundary.
  */
 async requestAuthenticated(request: OntologyAuthenticatedRequest, signal: AbortSignal): Promise<unknown>
+
+/**
+ * Search the current Ontology scope for document excerpts.
+ * @param question - Search query derived from the current user turn.
+ * @param signal - Caller cancellation.
+ * @returns Runtime JSON containing only the permitted sources.
+ */
+async searchKnowledge(question: string, signal: AbortSignal): Promise<unknown>
+
+/**
+ * Relay a fixed knowledge route for the authenticated browser.
+ * @param request - Knowledge management, published question, or original-file request.
+ * @param signal - Caller cancellation.
+ * @returns The upstream body for the proxy to stream.
+ */
+async fetchKnowledge(request: Omit<OntologyAuthenticatedRequest, 'path'> & { path: `/api/runtime/knowledge/${string}` }, signal: AbortSignal): Promise<Response>
+
+/**
+ * Forward one public Skill request to the configured Runtime, which validates its own credential.
+ * @param endpoint - An allowlisted delivery route selected by the HTTP plugin.
+ * @param request - Incoming request carrying the external Bearer credential.
+ * @returns Runtime response with its original status and body.
+ */
+async fetchSkillDelivery(endpoint: 'embed' | 'embed/chat' | `skills/${string}/chat`, request: Request): Promise<Response>
 ```
 
 Source: [`packages/api/ontology-auth-controller/src/index.ts`](../../packages/api/ontology-auth-controller/src/index.ts)

@@ -45,11 +45,13 @@ async function bench(authenticated = false) {
     return Promise.resolve({ ok: true as const, value: authenticatedValue })
   })
   const importSession = vi.fn((request?: { readonly context?: OntologyProjectContext }) => {
+    const preserveSelection = loggedIn && importedContext?.projectId === request?.context?.projectId
+      && importedContext?.mode === request?.context?.mode
     loggedIn = true
     importedContext = request?.context
     return Promise.resolve({
       ok: true as const,
-      value: { ...authenticatedValue, ...(request?.context === undefined ? {} : { context: request.context }) },
+      value: { ...authenticatedValue, preserveSelection, ...(request?.context === undefined ? {} : { context: request.context }) },
     })
   })
   const logout = vi.fn(() => {
@@ -72,6 +74,7 @@ async function bench(authenticated = false) {
   ctx.provide('locale', new LocaleRuntime(ctx))
   const clearSelection = vi.fn()
   ctx.provide('uiWorkspace', { clearSelection } as never)
+  ctx.provide('uiConversation', { events: { register: () => () => {} } } as never)
   return {
     ctx, slots, status, login, importSession, logout, clearSelection,
     emitRecord(key: string) { recordListener?.(key) },
@@ -80,7 +83,7 @@ async function bench(authenticated = false) {
 
 describe('Ontology login browser plugin', () => {
   it('declares only its required browser services', () => {
-    expect(uiInject).toEqual(['remote', 'remote.ontologyAuth', 'slots', 'locale', 'uiWorkspace'])
+    expect(uiInject).toEqual(['remote', 'remote.ontologyAuth', 'slots', 'locale', 'uiWorkspace', 'uiConversation'])
   })
 
   it('moves from login gate to account seat and back without exposing tokens', async () => {
@@ -157,6 +160,26 @@ describe('Ontology login browser plugin', () => {
         ...(context === undefined ? {} : { projectId: context.projectId, mode: context.mode }),
       }, 'https://admin.example.com')
       await fiber.dispose()
+
+      // A remounted iframe has the same browser login and a persisted Workspace selection.
+      const reloaded = b.ctx.plugin({ inject: [...uiInject], apply: installOntologyLoginUi })
+      await reloaded.await()
+      b.emitRecord('ontology-auth-controller/login-browser')
+      expect(b.status).not.toHaveBeenCalled()
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { ...message, nonce: 'nonce-2' },
+        origin: 'https://admin.example.com', source: parent as never,
+      }))
+      await vi.waitFor(() => {
+        expect(parent.postMessage).toHaveBeenCalledWith({
+          type: 'ontology/runtime-session-result', version: 1, nonce: 'nonce-2', ok: true,
+          ...(context === undefined ? {} : { projectId: context.projectId, mode: context.mode }),
+        }, 'https://admin.example.com')
+      })
+      b.emitRecord('ontology-auth-controller/login-browser')
+      await vi.waitFor(() => { expect(b.status).toHaveBeenCalledOnce() })
+      expect(b.clearSelection).toHaveBeenCalledOnce()
+      await reloaded.dispose()
     } finally {
       if (originalParent !== undefined) Object.defineProperty(window, 'parent', originalParent)
       Reflect.deleteProperty(document, 'referrer')

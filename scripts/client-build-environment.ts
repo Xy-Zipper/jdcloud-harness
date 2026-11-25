@@ -17,7 +17,7 @@ const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
 export const CLIENT_BUILD_PROFILE_SELECTOR = 'DSH_BUILD_CLIENT_PROFILE'
 
 /** Default product title for repository Web builds. */
-export const DEFAULT_CLIENT_TITLE = 'jdcloud-harness'
+export const DEFAULT_CLIENT_TITLE = 'LSY-Agent'
 
 /** Public client environment required by official DSH artifacts. */
 const OFFICIAL_CLIENT_BUILD_ENVIRONMENT = {

@@ -28,6 +28,10 @@
   "files": [
     "lib/index.js",
     "lib/types/file-assistant.js",
+    "lib/types/knowledge-http.js",
+    "lib/types/skill-chat.js",
+    "lib/types/skill-delivery-http.js",
+    "lib/types/skill-widget.js",
     "cordis.patch.yml",
     "lib/types/**/*.d.ts",
     "lib/types/**/*.d.ts.map",
@@ -50,6 +54,7 @@
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-tool-ontology": "workspace:*",
+    "@deepseek-ai/dsh-util-values": "workspace:*",
     "@deepseek-ai/dsh-client-connection": "workspace:*"
   },
   "peerDependencies": {

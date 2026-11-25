@@ -1,0 +1,230 @@
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.citation.citation {
+  display: inline-block;
+  height: 20px;
+  margin-inline: 2px;
+  padding: 0 6px;
+  white-space: nowrap;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+.citation.citation:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.citation:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+
+.drawer {
+  margin-inline-start: auto;
+  width: min(560px, 100%);
+  max-height: 100%;
+}
+
+.editor {
+  width: min(640px, 100%);
+  max-height: 100%;
+}
+
+.scroll { min-height: 0; overflow: auto; }
+
+/* The results scroll independently of the transcript and keep the active card visible. */
+.results {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+.result {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.result[data-active] {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+.sourceLocation, .resultActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.sourceLocation .citation { margin-inline: 0; }
+.sourceLocation, .referenceDetails, .sourceKeys dt, .datasets p { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.fileName { margin: 8px 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.quote {
+  display: flow-root;
+  margin: 0 0 8px;
+  min-width: 0;
+}
+.quote > [data-markdown-variant='compact'] { color: var(--dsw-alias-label-primary); }
+.emptyQuote { margin: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); }
+/* Clip the rendered blocks so Markdown syntax and table structure survive expansion. */
+.quote[data-collapsed] { max-block-size: 140px; overflow: hidden; }
+.quote[data-clipped]:not(:focus-within) { mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent); }
+.expand.expand { margin: 0 0 8px; padding-inline: 0; color: var(--dsw-alias-link); }
+.referenceDetails { margin-top: 8px; }
+.referenceDetails summary { cursor: pointer; }
+.sourceKeys {
+  margin: 8px 0 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.sourceKeys dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+
+.preview { width: min(1200px, 100%); max-height: 100%; overflow-wrap: anywhere; }
+.previewContent { display: grid; gap: 8px; }
+.previewPage { color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.previewNotice { display: grid; justify-items: center; align-content: center; min-height: min(40dvh, 320px); gap: 8px; }
+.previewNotice p { margin: 0; }
+.document { display: block; width: 100%; height: min(68dvh, 760px); border: 0; border-radius: var(--dsw-radius-sm); }
+.link { color: var(--dsw-alias-brand-primary); overflow-wrap: anywhere; }
+.originalLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-link);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.originalLink:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+.error { color: var(--dsw-alias-state-error-primary); }
+
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+.field input, .field select, .field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+.field :focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.field textarea { resize: vertical; }
+.datasets {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+}
+.datasets p { margin: 0 0 8px; }
+.option { display: flex; gap: 6px; align-items: flex-start; padding: 3px 0; }
+.option span { overflow-wrap: anywhere; }
+
+.published {
+  width: min(100%, 820px);
+  height: 100%;
+  padding: 18px clamp(12px, 4vw, 28px);
+  box-sizing: border-box;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+.publishedHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.publishedHeader h1 { margin: 0; font-size: 20px; overflow-wrap: anywhere; }
+.replies { flex: 1; min-height: 0; overflow: auto; }
+.reply { margin: 0 0 18px; }
+.question, .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+.question { width: fit-content; max-width: 90%; margin-inline-start: auto; padding: 8px 12px; background: var(--dsw-alias-bg-layer-2); border-radius: 8px; }
+.answer { margin: 10px 0; }
+.ask { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+
+/* Use the existing sidebar's wide and rail positions for the settings menu. */
+.moreWide.moreWide { justify-content: flex-start; width: 100%; padding: 0 8px; }
+.moreRail.moreRail { width: 32px; padding: 0; }
+
+/* Skill navigation stays beside its editor, and folds above it on constrained workbenches. */
+.skillPage {
+  width: 100%;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: max(20px, var(--dsh-frame-top-clearance, 0px)) clamp(12px, 3vw, 28px) 24px;
+  color: var(--dsw-alias-label-primary);
+  container-type: inline-size;
+}
+.skillHeader, .skillLayout, .skillProject { width: min(100%, 1100px); margin-inline: auto; }
+.skillHeader, .releaseHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.skillHeader { margin-bottom: 16px; }
+.skillHeader h1 { margin: 0; font-size: 22px; font-weight: 500; }
+.skillLayout { display: grid; grid-template-columns: minmax(164px, 220px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.skillList, .skillDetail, .skillCard { display: grid; gap: 12px; min-width: 0; }
+.skillList, .skillCard {
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.skillList { gap: 4px; }
+.skillRow.skillRow { justify-content: space-between; min-width: 0; width: 100%; padding: 0 8px; }
+.skillRow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skillRow small, .releaseHeader span, .skillActions small { flex: none; color: var(--dsw-alias-label-secondary); }
+.skillRow[aria-pressed='true'] { background: var(--dsw-alias-state-business-tertiary); }
+.skillCard h2, .skillCard h3 { margin: 0; font-size: 16px; font-weight: 500; }
+.skillCard h3 { font-size: 14px; }
+.roleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.skillCard .datasets { max-height: 190px; overflow: auto; }
+.skillActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.releaseHeader span, .releaseHint, .skillActions small { font-size: 13px; }
+.releaseHint { margin: 0; color: var(--dsw-alias-label-secondary); }
+.copyField { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; }
+.copyField input, .copyField textarea { font-family: var(--dsw-font-markdown-code-font-family); }
+.skillProject { display: grid; gap: 8px; margin-bottom: 16px; }
+.skillProject .field { max-width: 360px; }
+.danger.danger { color: var(--dsw-alias-state-error-primary); }
+
+/* Keep the credential table readable in a narrow embedded window. */
+.keyModal.keyModal { width: min(720px, 100%); max-height: 100%; }
+.keyTableWrap {
+  max-height: min(320px, 45vh);
+  overflow: auto;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+.keyTable { width: 100%; border-collapse: collapse; text-align: start; font-size: 13px; }
+.keyTable th, .keyTable td { padding: 8px 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.keyTable th { text-align: start; color: var(--dsw-alias-label-secondary); font-weight: 500; background: var(--dsw-alias-bg-layer-2); }
+.keyTable td:first-child { min-width: 125px; }
+.keyTable code, .keyValue { font-family: var(--dsw-font-markdown-code-font-family); }
+.keyValue { box-sizing: border-box; width: 100%; background: transparent; color: inherit; border: 0; }
+.keyTableWrap + p { margin-top: 8px; }
+
+.apiDocs, .apiDetails { display: grid; gap: 8px; min-width: 0; }
+.apiEndpoint { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.apiOperation { border-top: 0.5px solid var(--dsw-alias-border-l2); }
+.apiOperation summary { padding: 8px 0; cursor: pointer; font-size: 13px; }
+.apiOperation summary code { margin-inline-start: 8px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.apiDetails { padding: 4px 0 12px; }
+.apiDetails h4 { margin: 0; font-weight: 500; }
+.apiParams, .apiParams dd { margin: 0; }
+.apiParams dt, .apiParams dd { min-width: 0; overflow-wrap: anywhere; }
+.apiParams { display: grid; gap: 4px; font-size: 13px; }
+.apiParams > div { display: grid; grid-template-columns: minmax(108px, 24%) minmax(0, 1fr); gap: 8px; }
+.apiParams dt small, .apiParams dd { color: var(--dsw-alias-label-secondary); }
+@container (max-width: 620px) {
+  .skillLayout, .roleFields { grid-template-columns: minmax(0, 1fr); }
+  .skillList { max-height: 160px; overflow: auto; }
+}

@@ -1,6 +1,6 @@
 import { memo, useCallback, useMemo } from 'react'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ChatFileMentions, ChatNodeViewProps, PresentationInjected, TurnTailOwnerProps } from '../contract/slots.ts'
+import type { ChatAssistantProse, ChatFileMentions, ChatNodeViewProps, PresentationInjected, TurnTailOwnerProps } from '../contract/slots.ts'
 import { AssistantMarkdown } from './AssistantMarkdown.tsx'
 
 /** Business readers owned by the assistant renderer's existing Slot registration. */
@@ -9,6 +9,10 @@ export interface AssistantNodeInjected extends PresentationInjected {
   resolveFilePath: (path: string) => string
   /** Resolve closing-Turn mentions with the supplied ordinary file gesture callback. */
   fileMentions: (owner: TurnTailOwnerProps, getFileTriggerProps: NonNullable<Parameters<ChatFileMentions['forClosing']>[2]>) => ReturnType<ChatFileMentions['forClosing']>
+  /** Resolve any feature-owned references for the closing assistant response. */
+  assistantProse?: ((owner: TurnTailOwnerProps) => ReturnType<ChatAssistantProse['forClosing']>) | undefined
+  /** Observe the reference owner's data when earlier turns arrive. */
+  assistantProseDataKey?: ChatAssistantProse['turnDataKey']
 }
 
 type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<AssistantNodeInjected>
@@ -17,7 +21,7 @@ type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<A
 /** Streaming, settled, and interrupted Assistant states share one keyed renderer instance. */
 export const AssistantNodeView = memo(function AssistantNodeView({
   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, loadImage, fileMentions,
-  usePresentation, renderSlot, t, sessionId, useContextMenu, resolveFilePath,
+  usePresentation, renderSlot, t, sessionId, useContextMenu, resolveFilePath, assistantProse, assistantProseDataKey,
 }: AssistantNodeViewProps) {
   const { getTriggerProps } = useContextMenu()
   const getFileTriggerProps = useCallback((path: string) => getTriggerProps(() => ({
@@ -36,6 +40,11 @@ export const AssistantNodeView = memo(function AssistantNodeView({
   const mentions = useMemo(
     () => owner === undefined ? undefined : fileMentions(owner, getFileTriggerProps),
     [fileMentions, owner, getFileTriggerProps],
+  )
+  const proseData = useTurnData(assistantProseDataKey ?? 'turn-tail')
+  const renderProse = useMemo(
+    () => owner === undefined || (assistantProseDataKey !== undefined && proseData === undefined) ? undefined : assistantProse?.(owner),
+    [assistantProse, assistantProseDataKey, owner, proseData],
   )
   const keepReplies = usePresentation(policy => policy.foldedReplies === 'all')
   // A kept reply row stays visible while the folded Turn hides its inline reasoning.
@@ -61,6 +70,7 @@ export const AssistantNodeView = memo(function AssistantNodeView({
       renderSlot={renderSlot}
       revealProcess={revealProcess}
       mentions={mentions}
+      renderProse={renderProse}
       t={t}
     />
   )

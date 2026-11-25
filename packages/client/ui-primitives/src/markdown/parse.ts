@@ -8,7 +8,7 @@
  * math block once settled, by design).
  */
 
-import type { Root } from 'mdast'
+import type { Root, RootContent } from 'mdast'
 import { recoverLocalImages } from './local-image-syntax.ts'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { gfmFromMarkdown } from 'mdast-util-gfm'
@@ -46,4 +46,20 @@ export function parseGfmWithMath(text: string): Root {
     extensions: [gfm(gfmOptions), cjkFriendlyStrong(), mathCompatibility(), math()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown(), windowsPathDestinations()],
   }), text)
+}
+
+/**
+ * Read settled body text runs in display order for an inline decoration's numbering.
+ * @param text - One Markdown message block.
+ * @returns Runs eligible for decoration, excluding links, code, and the footnote section.
+ */
+export function markdownProseRuns(text: string): Iterable<string> {
+  return proseRuns(parseGfmWithMath(text))
+}
+
+function* proseRuns(node: Root | RootContent): Iterable<string> {
+  if (node.type === 'text') yield node.value
+  else if ('children' in node && node.type !== 'link' && node.type !== 'linkReference' && node.type !== 'footnoteDefinition') {
+    for (const child of node.children) yield* proseRuns(child)
+  }
 }

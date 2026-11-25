@@ -135,7 +135,7 @@ export function apply(ctx: Context): void {
   const offAuth = remoteEvents.$on('credentials/record-updated', (key) => {
     if (!key.startsWith('ontology-auth-controller/login-')) return
     control.restart()
-    void sessions.refresh()
+    void sessions.refreshAfterCredentialChange()
   })
   const connected = (): void => {
     if (connection.generation.getSnapshot() === undefined) return

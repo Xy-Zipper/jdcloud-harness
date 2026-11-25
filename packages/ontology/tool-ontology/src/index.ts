@@ -26,6 +26,7 @@ import {
 import type { OntologyActionDetail, OntologyActionParameterSummary } from './types.ts'
 import { readDataSourceInspection, readDraftBindingResult, readDraftResult } from './draft.ts'
 import { installModelingSkill } from './modeling-skill.ts'
+import { installKnowledgeTool } from './knowledge.ts'
 
 export type * from './types.ts'
 
@@ -60,6 +61,7 @@ const APPROVAL_PRIMARY_KEY_LIMIT = 80
 /** Register the stable Ontology tool suite and its compact usage policy. */
 export function apply(ctx: Context): void {
   installModelingSkill(ctx)
+  installKnowledgeTool(ctx)
   ctx.systemPrompt.section({
     name: 'tool:ontology',
     order: ctx.systemPrompt.getSectionOrder('TOOL_SESSION_QUERY') + 20,

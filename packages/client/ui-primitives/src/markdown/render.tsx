@@ -218,6 +218,22 @@ export interface MarkdownFileMentions {
   } | undefined
 }
 
+/** Optional decorations for settled Markdown owned by the containing view. */
+export interface MarkdownProseRenderer {
+  /**
+   * @param value - Parsed prose outside links and code.
+   * @param followingCode - Value of the prose's next sibling when it is inline code.
+   * @returns Inline content, or undefined to retain the original text.
+   */
+  (value: string, followingCode?: string): ReactNode | undefined
+  /**
+   * @param url - Parsed link destination before generic navigation.
+   * @param children - Rendered, non-interactive link contents.
+   * @returns Replacement content, or undefined to use ordinary link handling.
+   */
+  link?(url: string, children: readonly ReactNode[]): ReactNode | undefined
+}
+
 /**
  * One render pass's state: immutable options and targets plus the footnote
  * numbering accumulated in document order while references render.
@@ -233,6 +249,8 @@ export interface MarkdownRenderContext {
   readonly fileMentions: MarkdownFileMentions | undefined
   /** Local-path image vocabulary; absent wherever no rewriting owner exists. */
   readonly pathImages: MarkdownPathImages | undefined
+  /** Optional inline decorations from the document owner. */
+  readonly renderProse?: MarkdownProseRenderer | undefined
   /** Raw HTML renders nothing instead of literal text. */
   readonly omitHtml: boolean
   /** Inside an anchor's children: interactive mentions must not nest there. */
@@ -309,13 +327,18 @@ function renderChildren(
   nodes: readonly Md.RootContent[],
   context: MarkdownRenderContext,
 ): ReactNode[] {
-  return nodes.map((node, index) => renderNode(node, index, context))
+  return nodes.map((node, index) => {
+    const next = nodes[index + 1]
+    return renderNode(node, index, context, next?.type === 'inlineCode' ? next.value : undefined)
+  })
 }
 
-function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderContext): ReactNode {
+function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderContext, followingCode?: string): ReactNode {
   switch (node.type) {
-    case 'text':
-      return node.value
+    case 'text': {
+      const decorated = context.inLink === true ? undefined : context.renderProse?.(node.value, followingCode)
+      return decorated === undefined ? node.value : <Fragment key={key}>{decorated}</Fragment>
+    }
     case 'paragraph':
       return <p key={key}>{renderChildren(node.children, context)}</p>
     case 'heading':
@@ -392,7 +415,7 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
     case 'link':
       return renderAnchor(
         node.url, renderChildren(node.children, { ...context, inLink: true }), key,
-        !anchorWrapsOnlyImages(node.children), context.streaming,
+        !anchorWrapsOnlyImages(node.children), context,
       )
     case 'linkReference':
       return renderLinkReference(node, key, context)
@@ -625,10 +648,12 @@ function MarkdownAnchor({ href, glyph, children }: {
 }
 
 /** Local destinations use the scoped file delegate after settlement. */
-function renderAnchor(url: string, children: ReactNode[], key: Key, glyph = true, streaming = false): ReactNode {
+function renderAnchor(url: string, children: ReactNode[], key: Key, glyph: boolean, context: MarkdownRenderContext): ReactNode {
+  const decorated = context.streaming ? undefined : context.renderProse?.link?.(url, children)
+  if (decorated !== undefined) return <Fragment key={key}>{decorated}</Fragment>
   const file = parseFileLink(url)
   if (file !== undefined) {
-    if (streaming) return <Fragment key={key}>{children}</Fragment>
+    if (context.streaming) return <Fragment key={key}>{children}</Fragment>
     return <MarkdownFileLink key={key} file={file} glyph={glyph}>{children}</MarkdownFileLink>
   }
   return renderSafeLink(normalizeUri(url), children, key, glyph)
@@ -757,7 +782,7 @@ function renderLinkReference(
     return <Fragment key={key}>{'['}{renderChildren(node.children, context)}{referenceSuffix(node)}</Fragment>
   }
   const rendered = renderChildren(node.children, { ...context, inLink: true })
-  return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children), context.streaming)
+  return renderAnchor(definition.url, rendered, key, !anchorWrapsOnlyImages(node.children), context)
 }
 
 function renderImageReference(
@@ -803,7 +828,7 @@ export function renderFootnoteSection(context: MarkdownRenderContext): ReactNode
       backrefs.push('↩')
       if (reference > 1) backrefs.push(<sup key={`re-${reference}`}>{String(reference)}</sup>)
     }
-    const entries = renderBlockEntries(definition.children, context)
+    const entries = renderBlockEntries(definition.children, { ...context, renderProse: undefined })
     const tail = entries[entries.length - 1]
     const body: ReactNode[] = entries.map((entry, index) => (
       'paragraph' in entry

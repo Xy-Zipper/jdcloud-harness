@@ -442,6 +442,7 @@
       "@deepseek-ai/dsh-ptc-runtime-node/configuration": ["./packages/ptc-runtime/ptc-runtime-node/src/configuration.ts"],
       "@deepseek-ai/dsh-message-feedback/types": ["./packages/feedback/message-feedback/src/types.ts"],
       "@deepseek-ai/dsh-webhook/types": ["./packages/experimental/webhook/src/types.ts"],
+      "@deepseek-ai/dsh-ontology-login/file-assistant": ["./packages/bundle/ontology-login/src/file-assistant.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
@@ -524,7 +525,6 @@
       "@deepseek-ai/dsh-office-kit": ["./packages/document/office-kit/src"],
       "@deepseek-ai/dsh-official-bundles": ["./packages/util/official-bundles/src"],
       "@deepseek-ai/dsh-ontology-login": ["./packages/bundle/ontology-login/src"],
-      "@deepseek-ai/dsh-ontology-login/file-assistant": ["./packages/bundle/ontology-login/src/file-assistant.ts"],
       "@deepseek-ai/dsh-output-retention": ["./packages/util/output-retention/src"],
       "@deepseek-ai/dsh-package-manifest": ["./packages/util/package-manifest/src"],
       "@deepseek-ai/dsh-permission-presets": ["./packages/interaction/permission-presets/src"],

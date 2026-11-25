@@ -11,7 +11,7 @@ import Include, { applyEntryPatches, parseEntryYaml, type PatchOptions } from '@
 import Loader, { type ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import * as ExternalApi from '@deepseek-ai/dsh-api-external'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
-import LlmRuntime, { LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { LlmAdapter, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo, type ReasoningEffortId, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import * as fileAssistant from '@deepseek-ai/dsh-ontology-login/file-assistant'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -84,9 +84,11 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   const browserSessionModule = {
-    inject: ['credentials'],
+    inject: ['credentials', 'connection', 'connection.authentication'],
     async apply(context: Context) {
-      await BrowserSessionService.create(context, context.credentials)
+      const session = await BrowserSessionService.create(context, context.credentials)
+      context.effect(() => context.connection.authentication.register({ authenticate: request => session.authenticate(request) }))
+      context.on('connection/request', (request, _response, next) => session.run(request, next))
     },
   }
   // The external API is loaded through its production dependency names while this test owns only their data.
@@ -143,7 +145,7 @@ async function bootComposition(fetcher: typeof fetch): Promise<Context> {
   return ctx
 }
 
-function browserCookie(browserSession: BrowserSessionService): string {
+function browserCookie(browserSession: BrowserSessionService, host = 'harness.example'): string {
   const response: {
     headers: Record<string, string>
     writeHead: (_status: number, headers?: Readonly<Record<string, string>>) => void
@@ -153,7 +155,7 @@ function browserCookie(browserSession: BrowserSessionService): string {
     writeHead: (_status, headers) => { if (headers !== undefined) Object.assign(response.headers, headers) },
     end: () => undefined,
   }
-  browserSession.authorizeIndex({ headers: { host: 'harness.example' }, method: 'GET', url: '/' }, response)
+  browserSession.authorizeIndex({ headers: { host }, method: 'GET', url: '/' }, response)
   const cookie = response.headers['set-cookie']?.split(';', 1)[0]
   if (cookie === undefined) throw new Error('browser session cookie was not created')
   return cookie
@@ -203,6 +205,12 @@ describe('Ontology login through a real Loader composition', () => {
     const absent = { answer: '当前所选资料中未找到足够依据。', sourceIds: [] }
     let output = JSON.stringify(supported)
     const adapter = new class extends LlmAdapter {
+      override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+        return { provider, id: model, name: model, defaultMaxTokens: 12_000, reasoning: {
+          defaultEffort: 'high' as ReasoningEffortId,
+          efforts: [{ id: 'off' as ReasoningEffortId, name: 'Off' }, { id: 'high' as ReasoningEffortId, name: 'High' }],
+        } }
+      }
       async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
         seen.push(options)
         yield { type: 'reasoning-delta', index: 0, text: 'internal reasoning' }
@@ -235,6 +243,11 @@ describe('Ontology login through a real Loader composition', () => {
     expect(seen[0]?.tools).toBeUndefined()
     expect(seen[0]?.sessionId).toBeUndefined()
     expect(seen[0]?.system).toMatchSnapshot()
+    const followUp = { ...input, history: [{ question: '哪份合同？', answer: '项目合同。' }] }
+    await expect((await post(followUp)).json()).resolves.toEqual(supported)
+    expect(seen.at(-1)?.system).toContain('事实依据与引证必须来自当前 sources')
+    expect(seen.at(-1)?.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: JSON.stringify(followUp) }] }])
+    expect((await post({ ...input, history: [{ question: 1, answer: 'invalid' }] })).status).toBe(400)
     output = JSON.stringify({ answer: '无依据的猜测', sourceIds: [] })
     await expect((await post(input)).json()).resolves.toEqual(absent)
     for (const invalid of [
@@ -265,7 +278,13 @@ describe('Ontology login through a real Loader composition', () => {
     output = JSON.stringify({ value: ['示例水库'] })
     await expect((await post(transform)).json()).resolves.toEqual({ value: ['示例水库'] })
     expect(seen.at(-1)?.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: JSON.stringify(transform) }] }])
+    expect(seen.at(-1)).toMatchObject({ reasoningEffort: 'high', maxTokens: 4096 })
     expect(seen.at(-1)?.system).toMatchSnapshot('transform selected pipeline fields')
+    const wholeFile = { ...transform, fields: { rows: [transform.fields, { content: '补充资料' }] }, wholeFile: true }
+    await expect((await post(wholeFile)).json()).resolves.toEqual({ value: ['示例水库'] })
+    expect(seen.at(-1)).toMatchObject({ reasoningEffort: 'off', maxTokens: 8192 })
+    expect(seen.at(-1)?.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: JSON.stringify(wholeFile) }] }])
+    expect((await post({ ...wholeFile, outputType: 'text' })).status).toBe(400)
     output = ['```json', '{"value":["示例水库"]}', '```'].join('\n')
     await expect((await post(transform)).json()).resolves.toEqual({ value: ['示例水库'] })
     output = '提取结果如下：\n' + output
@@ -282,6 +301,98 @@ describe('Ontology login through a real Loader composition', () => {
     await entry?.fiber?.dispose()
     // The remaining /api prefix now checks browser credentials.
     expect((await post(input)).status).toBe(401)
+  })
+
+  it('emits answer deltas while the model is still generating and rejects unknown source IDs', async () => {
+    const context = await bootComposition(vi.fn())
+    vi.stubEnv('FILE_ASSISTANT_SERVICE_TOKEN', 'test-only')
+    const finish = Promise.withResolvers<undefined>()
+    let supported = true
+    context.llm.registerAdapter(['fixture'], new class extends LlmAdapter {
+      async * stream(): AsyncIterable<StreamChunk> {
+        yield { type: 'reasoning-delta', index: 0, text: 'private' }
+        yield { type: 'text-delta', index: 1, text: `{"sourceIds":["${supported ? 'S1' : 'S2'}"],"answer":"依据\\n` }
+        await finish.promise
+        yield { type: 'text-delta', index: 1, text: '文件。"}' }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }())
+    const endpoint = `http://127.0.0.1:${String(context.webServer.port)}/api/internal/file-assistant/answer`
+    const post = () => socketFetch(endpoint, {
+      method: 'POST', signal: AbortSignal.timeout(5000),
+      headers: { authorization: 'Bearer test-only', 'content-type': 'application/json', accept: 'application/x-ndjson' },
+      body: JSON.stringify({ question: '原文在哪里？', sources: [{ id: 'S1', text: '依据文件。', fileName: '培训.pdf' }] }),
+    })
+    try {
+      const response = await post()
+      expect(response.headers.get('content-type')).toContain('application/x-ndjson')
+      const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader()
+      expect((await reader.read()).value).toBe('{"type":"delta","text":"依据\\n"}\n')
+      finish.resolve(undefined)
+      let rest = ''
+      for (;;) {
+        const next = await reader.read()
+        if (next.done) break
+        rest += next.value
+      }
+      expect(rest.trim().split('\n').map(line => JSON.parse(line))).toEqual([
+        { type: 'delta', text: '文件。' }, { type: 'done', answer: '依据\n文件。', sourceIds: ['S1'] },
+      ])
+      supported = false
+      expect(JSON.parse(await (await post()).text())).toEqual({ type: 'error', error: 'invalid_model_answer' })
+    } finally {
+      finish.resolve(undefined)
+    }
+  })
+
+  it('forwards only defined public routes and retains the SSE response headers', async () => {
+    const finish = Promise.withResolvers<undefined>()
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      const path = url.pathname.replace('/api/runtime/skill-delivery/v1/', '')
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer osk_test')
+      if (path.endsWith('/chat')) {
+        expect(new Headers(init?.headers).get('x-request-id')).toBe('test-stream')
+        const encoder = new TextEncoder()
+        return new Response(new ReadableStream({
+          async start(controller) {
+            controller.enqueue(encoder.encode('event: delta\ndata: {"text":"first"}\n\n'))
+            await finish.promise
+            controller.enqueue(encoder.encode('event: done\ndata: {"answer":"first"}\n\n'))
+            controller.close()
+          },
+        }), { headers: { 'content-type': 'text/event-stream; charset=utf-8', 'x-accel-buffering': 'no' } })
+      }
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 })
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null
+      return Response.json({ path, search: url.search, method: init?.method, body }, { status: init?.method === 'POST' ? 201 : 200 })
+    })
+    const context = await bootComposition(fetcher)
+    const base = `http://127.0.0.1:${String(context.webServer.port)}/api/ontology-skill/v1/skills/ks_example`
+    const headers = { authorization: 'Bearer osk_test', 'content-type': 'application/json' }
+    const created = await socketFetch(base + '/sessions', { headers, method: 'POST', body: '{"name":"Example"}' })
+    expect(created.status).toBe(201)
+    await expect(created.json()).resolves.toMatchObject({ path: 'skills/ks_example/sessions', body: { name: 'Example' } })
+    const history = await socketFetch(base + '/sessions/ss_test?page=2&pageSize=1', { headers })
+    await expect(history.json()).resolves.toMatchObject({ path: 'skills/ks_example/sessions/ss_test', search: '?page=2&pageSize=1' })
+    expect((await socketFetch(base + '/sessions/ss_test', { headers, method: 'DELETE' })).status).toBe(204)
+    expect((await socketFetch(base + '/sessions', { headers, method: 'DELETE' })).status).toBe(404)
+    expect(fetcher).toHaveBeenCalledTimes(3)
+    try {
+      const stream = await socketFetch(base + '/chat', {
+        method: 'POST', headers: { ...headers, 'x-request-id': 'test-stream' }, body: '{"question":"Example","stream":true}',
+        signal: AbortSignal.timeout(5000),
+      })
+      expect(stream.headers.get('content-type')).toContain('text/event-stream')
+      expect(stream.headers.get('x-accel-buffering')).toBe('no')
+      const reader = stream.body!.pipeThrough(new TextDecoderStream()).getReader()
+      expect((await reader.read()).value).toContain('event: delta')
+      finish.resolve(undefined)
+      expect((await reader.read()).value).toContain('event: done')
+      expect((await reader.read()).done).toBe(true)
+    } finally {
+      finish.resolve(undefined)
+    }
   })
 
   it('activates the controller and UI node half for password and imported browser-scoped logins', async () => {
@@ -312,6 +423,9 @@ describe('Ontology login through a real Loader composition', () => {
           }],
         })
       }
+      if (url.pathname.endsWith('/api/runtime/knowledge/catalog')) {
+        return Response.json({ projects: [], datasets: [{ id: 'kb-reference', name: 'Training' }] })
+      }
       throw new Error(`unexpected Ontology request: ${url.pathname}`)
     })
     const context = await bootComposition(fetcher)
@@ -320,6 +434,7 @@ describe('Ontology login through a real Loader composition', () => {
     expect(browserSession).toBeInstanceOf(BrowserSessionService)
     expect(context.get('ontologyAuthController')).toBeInstanceOf(OntologyAuthController)
     expect(context.tools.schemas().map(schema => schema.name)).toEqual([
+      'ontology_search_knowledge',
       'ontology_list_projects',
       'ontology_list_objects',
       'ontology_describe_object',
@@ -360,6 +475,18 @@ describe('Ontology login through a real Loader composition', () => {
       authenticated: true,
       user: { userId: 'user-alice', authorizationVersion: '1' },
     })
+
+    const catalogUrl = new URL('/api/ontology-knowledge/catalog', `http://127.0.0.1:${String(context.webServer.port)}`)
+    const headers = { host: catalogUrl.host, cookie: browserCookie(browserSession, catalogUrl.host) }
+    const unlinked = { host: catalogUrl.host, cookie: browserCookie(browserSession, catalogUrl.host) }
+    await browserSession.run({ headers }, () => context.ontologyAuthController.login({
+      username: 'alice', password: 'password123',
+    }, AbortSignal.timeout(1_000)))
+    expect((await socketFetch(catalogUrl)).status).toBe(401)
+    expect((await socketFetch(catalogUrl, { headers: unlinked })).status).toBe(403)
+    const catalog = await socketFetch(catalogUrl, { headers })
+    expect(catalog.status).toBe(200)
+    await expect(catalog.json()).resolves.toEqual({ projects: [], datasets: [{ id: 'kb-reference', name: 'Training' }] })
 
     const importedRequest = { headers: { host: 'harness.example', cookie: browserCookie(browserSession) } }
     await expect(browserSession.run(importedRequest, () => context.ontologyAuthController.importSession({

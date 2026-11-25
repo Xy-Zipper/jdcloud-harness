@@ -17,7 +17,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { ConnectionStateSource } from '@deepseek-ai/dsh-client-connection/client'
-import type { FileDragActions, MarkdownDelegateFenceInfo, MarkdownFileMentions, MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { FileDragActions, MarkdownDelegateFenceInfo, MarkdownFileMentions, MarkdownLabels, MarkdownProseRenderer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ContextMenuTriggerProps } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type { ChatKey } from '../locale.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -152,10 +152,25 @@ export interface ChatFileMentions {
   ): MarkdownFileMentions | undefined
 }
 
+/** Optional inline presentation for a finalized answer's recorded references. */
+export interface ChatAssistantProse {
+  /** Turn data that can change when earlier history is loaded. */
+  readonly turnDataKey?: keyof ConversationTurnDataMap & string
+  /**
+   * Decorate prose for one closing Turn.
+   * @param owner - Closing Turn with its projected data and assistant blocks.
+   * @param sessionId - Viewed Session, including inherited history.
+   * @returns Inline renderer bound to the closing answer, when applicable.
+   */
+  forClosing(owner: TurnTailOwnerProps, sessionId: SessionId): MarkdownProseRenderer | undefined
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Optional prose file-mention provider. */
     chatFileMentions: ChatFileMentions
+    /** Optional presentation for inline references supplied with a closing Turn. */
+    chatAssistantProse: ChatAssistantProse
   }
 }
 

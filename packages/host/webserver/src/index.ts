@@ -91,8 +91,8 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** A route permits anonymous access, requires a live Peer, or refuses all access. */
-export type WebAuthPolicy = 'anonymous' | 'required' | 'deny'
+/** A route may opt into public embedding, permit anonymous same-site access, require a Peer, or refuse access. */
+export type WebAuthPolicy = 'embed' | 'anonymous' | 'required' | 'deny'
 
 /** Authentication inputs shared by socket-backed and synthetic requests. */
 export interface WebAuthRequest {
@@ -785,7 +785,7 @@ export class WebServer extends Service {
     const policy = this.authPolicy(auth, request)
     if (policy === 'deny') return { kind: 'deny', status: 403 }
     const admission: WebAdmission = this.ctx.bail(this, 'webserver/authorize', request, policy)
-      ?? (policy === 'anonymous' ? { kind: 'allow' } : { kind: 'deny', status: 503 })
+      ?? (policy === 'anonymous' || policy === 'embed' ? { kind: 'allow' } : { kind: 'deny', status: 503 })
     if (admission.kind === 'allow') {
       if (policy === 'required' && admission.peer === undefined) return { kind: 'deny', status: 503 }
       if (admission.peer?.signal.aborted) return { kind: 'deny', status: 401 }

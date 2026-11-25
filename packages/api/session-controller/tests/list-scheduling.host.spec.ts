@@ -2,7 +2,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
-import SessionStore, { type SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SessionStore, { type SessionHeader, type SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { SessionRecord } from '@deepseek-ai/dsh-session-query'
 import { resolve } from 'node:path'
@@ -285,6 +285,34 @@ describe('Session-list work slices', () => {
     const h = await harness([])
     await expect(h.list.list()).resolves.toEqual([])
     expect(h.trace).toEqual([])
+  })
+
+  it('validates the Ontology scope once and still filters every Session by owner', async () => {
+    const h = await harness([
+      { id: 'allowed', phase: 'cold' }, { id: 'other-account', phase: 'cold' }, { id: 'also-allowed', phase: 'live' },
+    ])
+    const currentScopeKey = vi.fn<() => Promise<string | undefined>>().mockResolvedValue('current-account')
+    const owns = vi.fn(async (_kind: string, id: string, scope?: string, headers?: ReadonlyMap<SessionId, SessionHeader>) =>
+      scope === 'current-account' && headers?.has(brandString<SessionId>(id)) === true && id !== 'other-account')
+    h.ctx.provide('ontologyAuthController', { currentScopeKey, owns } as never)
+
+    const items = await h.list.list()
+    expect(currentScopeKey).toHaveBeenCalledOnce()
+    const headerLookup = owns.mock.calls[0]?.[3]
+    expect(headerLookup?.size).toBe(3)
+    expect(owns.mock.calls).toEqual([
+      ['session', 'allowed', 'current-account', headerLookup],
+      ['session', 'other-account', 'current-account', headerLookup],
+      ['session', 'also-allowed', 'current-account', headerLookup],
+    ])
+    expect(items.map(item => item.sessionId)).toEqual(['also-allowed', 'allowed'])
+
+    currentScopeKey.mockResolvedValue(undefined)
+    owns.mockClear()
+    h.listSessions.mockClear()
+    await expect(h.list.list()).resolves.toEqual([])
+    expect(owns).not.toHaveBeenCalled()
+    expect(h.listSessions).not.toHaveBeenCalled()
   })
 
   it('omits cwd-less cold rows but retains cwd-less attached Sessions', async () => {

@@ -6,7 +6,7 @@ FROM ${NODE_IMAGE} AS builder
 
 # Client artifacts embed this source revision without copying .git into the image.
 ARG DSH_CLIENT_COMMIT_HASH
-ARG DSH_CLIENT_TITLE=jdcloud-harness
+ARG DSH_CLIENT_TITLE=LSY-Agent
 
 # Keep pnpm version files in a path readable by both root and node.
 ENV COREPACK_HOME=/opt/corepack

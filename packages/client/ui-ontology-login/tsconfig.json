@@ -16,10 +16,15 @@
     { "path": "../store" },
     { "path": "../../core/session" },
     { "path": "../locale/tsconfig.client.json" },
+    { "path": "../ui-chat/tsconfig.client.json" },
     { "path": "../ui-conversation/tsconfig.client.json" },
+    { "path": "../ui-layout" },
     { "path": "../ui-primitives" },
     { "path": "../ui-renderer" },
+    { "path": "../ui-settings/tsconfig.client.json" },
     { "path": "../ui-sidebar" },
+    { "path": "../ui-sidebar-documentpreview/tsconfig.client.json" },
+    { "path": "../ui-sidebar-right" },
     { "path": "../ui-workspace" },
     { "path": "../ui-slots" }
   ]
