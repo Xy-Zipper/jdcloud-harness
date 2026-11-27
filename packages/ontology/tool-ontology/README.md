@@ -96,7 +96,7 @@ Each registration builds one fixed `/api/runtime/` request and delegates its Bea
 
 #### What the model sees
 
-The package adds one fixed discovery and Action-ordering paragraph.
+The package adds fixed guidance for discovery, Action ordering, and knowledge search. The search instructions use the `citationId` value in brackets, for example `[R-0123456789]`.
 
 ##### Ontology guidance
 
@@ -106,7 +106,7 @@ Use Ontology tools only with ids returned by discovery. List Projects before sel
 
 #### Token effect
 
-One fixed concise section is present on each request while the plugin is mounted.
+The fixed sections accompany each request while the plugin is mounted.
 
 #### KV Cache effect
 

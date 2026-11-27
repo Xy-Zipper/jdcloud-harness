@@ -96,7 +96,7 @@ Ontology 提供 `ontology-file-path` 时，知识检索会把它传给模型。�
 
 #### 模型看到的内容
 
-本包增加一段固定的发现与 Action 顺序说明。
+本包提供固定的发现、Action 顺序和知识检索指引。检索指引要求将 `citationId` 的值放在方括号内，例如 `[R-0123456789]`。
 
 ##### Ontology 指引
 
@@ -106,7 +106,7 @@ Use Ontology tools only with ids returned by discovery. List Projects before sel
 
 #### Token 影响
 
-插件挂载期间，每个请求都包含一个固定的简短区段。
+插件挂载期间，每个请求都包含这些固定指引。
 
 #### KV Cache 影响
 

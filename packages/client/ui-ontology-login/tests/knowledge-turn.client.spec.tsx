@@ -111,6 +111,17 @@ it('numbers exact sources where they appear in the answer and reuses the label a
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ sources: [second, first], index: 1 }))
 })
 
+it('renders adjacent citationId markers with recorded sources as clickable fragments', () => {
+  const text = '两份资料支持这项结论。[citationId:R-1112131415][citationId:R-0102030405] 未知编号 [citationId:R-aaaaaaaaaa]'
+  const open = vi.fn()
+  render(<MarkdownText text={text} labels={labels} renderProse={createKnowledgeProse([text], [first, second], t, open)} />)
+  const tags = screen.getAllByRole('button', { name: /^片段 [12]$/u })
+  expect(tags.map(tag => tag.textContent)).toEqual(['片段 1', '片段 2'])
+  expect(screen.getByText(/未知编号 \[citationId:R-aaaaaaaaaa\]/u)).toBeDefined()
+  fireEvent.click(screen.getByRole('button', { name: '片段 2' }))
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ sources: [second, first], index: 1 }))
+})
+
 it('renders a verified document link as a fragment and opens its authenticated original', async () => {
   vi.stubGlobal('URL', class extends URL {
     static override createObjectURL = () => 'blob:http://localhost/document-link'

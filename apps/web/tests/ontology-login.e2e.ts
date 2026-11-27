@@ -292,9 +292,9 @@ describe('web e2e: Ontology login', () => {
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
-  it('opens the source title of a saved answer with a raw document ID', async () => {
+  it('opens inline citations and original previews from a saved answer', async () => {
     const title = '《房产测量规范 第一单元 GB/T 17986.1-2000》'
-    const answer = `${citationSource.text}[${citationSource.citationId}]\n\n来源：${title}7.3.1、7.3.2（项目知识库，documentId \`${citationSource.documentId}\`）。`
+    const answer = `${citationSource.text}[citationId:${citationSource.citationId}]\n\n来源：${title}7.3.1、7.3.2（项目知识库，documentId \`${citationSource.documentId}\`）。`
     await page.goto(`${ontology.baseUrl}/embed?harness=${encodeURIComponent(scaffold.authenticatedUrl)}`)
     const frame = page.frameLocator('iframe[title="建模助手"]')
     await frame.getByRole('textbox').waitFor()
@@ -331,6 +331,12 @@ describe('web e2e: Ontology login', () => {
     await scaffold.ctx.sessions.flush(session)
     await page.reload()
 
+    await frame.getByRole('paragraph').filter({ hasText: citationSource.text })
+      .getByRole('button', { name: '片段 1', exact: true }).click()
+    expect(await frame.getByText(`[citationId:${citationSource.citationId}]`, { exact: false }).count()).toBe(0)
+    const results = frame.getByRole('dialog', { name: '检索结果', exact: true })
+    await results.getByRole('article', { name: citationSource.fileName }).waitFor()
+    await results.getByRole('button', { name: '关闭', exact: true }).click()
     await frame.getByRole('button', { name: title, exact: true }).click()
     const preview = frame.getByRole('dialog', { name: citationSource.fileName, exact: true })
     await preview.getByText('第 22 页', { exact: true }).waitFor()

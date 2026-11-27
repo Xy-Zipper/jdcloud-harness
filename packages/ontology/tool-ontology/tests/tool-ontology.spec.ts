@@ -192,9 +192,16 @@ describe('Ontology tools', () => {
       mediaType: 'application/pdf', page: 2, nodeIds: ['0000'], text: '请使用确认后的订单编号。',
       'ontology-file-path': '/业务规范/培训.pdf',
     }
-    const { execute, searchKnowledge } = await fixture({
+    const { ctx, execute, searchKnowledge } = await fixture({
       knowledgeResponse: { sources: [{ ...source, sourceUrl: 'https://untrusted.example' }] },
     })
+    ctx.tools.setExecutor({
+      describe: () => ({ schemas: ctx.tools.schemas() }),
+      execute: async () => { throw new Error('prompt assembly does not execute tools') },
+    })
+    const prompt = await ctx.systemPrompt.assemble()
+    expect(prompt.sections.find(section => section.name === 'tool:ontology-knowledge')?.text)
+      .toContain('with the exact citationId value in brackets, for example [R-0123456789].')
     const result = await execute('ontology_search_knowledge', { question: '  查找订单操作说明  ' })
     expect(searchKnowledge).toHaveBeenCalledWith('查找订单操作说明', expect.any(AbortSignal))
     expect(value(result)).toEqual([source])

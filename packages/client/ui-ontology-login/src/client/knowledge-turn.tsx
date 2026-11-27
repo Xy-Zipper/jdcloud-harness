@@ -16,8 +16,8 @@ import { NS } from './locales.ts'
 const tabKind = 'ontologyKnowledge'
 const tabId = '@deepseek-ai/dsh-client-ui-ontology-login/knowledge-results'
 const turnDataKey = 'ontology-knowledge'
-// Models sometimes put a localized citation label inside the brackets.
-const citation = /\[\s*(?:(?:引用|来源|出处|citation|source)\s*[:：]?\s*)?(R-[a-f0-9]{10})\s*\]/giu
+// Models may include the tool field name or a citation label inside the brackets.
+const citation = /\[\s*(?:(?:引用|来源|出处|citation(?:Id)?|source)\s*[:：]?\s*)?(R-[a-f0-9]{10})\s*\]/giu
 const titledDocument = /《[^《》\r\n]+》(?=[^《》\r\n]*?\bdocument[ \t]*id\b[ \t]*(?:[:：=][ \t]*)?(?:([a-z0-9_-]+)|$))/giu
 
 type Reference = { kind: 'citation' | 'document' | 'link'; value: string }
