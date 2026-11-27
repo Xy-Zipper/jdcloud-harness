@@ -65,6 +65,8 @@ type AuthenticationState =
 export interface Config {
   /** Deployment-owned Ontology Runtime service address. */
   readonly ontologyBaseUrl: string
+  /** Stable address used for resource ownership when a deployment changes its Runtime listener. */
+  readonly ontologyScopeBaseUrl?: string
   /** Network deadline for login, refresh, validation, and logout requests. */
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */
@@ -93,22 +95,28 @@ export class OntologyAuthController extends TypertRemoteService {
 
   static Config: z<Config> = z.object({
     ontologyBaseUrl: z.string().required(),
+    ontologyScopeBaseUrl: z.string().default(''),
     requestTimeoutMs: z.number().step(1).min(1).default(15_000),
     allowInsecureLoopback: z.boolean().default(false),
     userWorkspaceDirectory: z.string().default(''),
   })
 
   private readonly baseUrl: string
+  private readonly scopeBaseUrl: string
   private readonly requestTimeoutMs: number
   private readonly userWorkspaceDirectory: string
   private readonly fetcher: typeof fetch
   private readonly externalRequests = new AsyncLocalStorage<ExternalAuthPayload>()
+  private readonly resourceScope = new AsyncLocalStorage<string>()
   private readonly modelingAgents = new WeakSet<Agent>()
 
   /** @param ctx - Host context carrying browser sessions and durable credentials. @param config - Runtime connection policy. */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'ontologyAuthController', { namespace: 'ontologyAuth' })
     this.baseUrl = normalizeOntologyBaseUrl(config.ontologyBaseUrl, config.allowInsecureLoopback ?? false)
+    this.scopeBaseUrl = config.ontologyScopeBaseUrl?.trim()
+      ? normalizeOntologyBaseUrl(config.ontologyScopeBaseUrl, config.allowInsecureLoopback ?? false)
+      : this.baseUrl
     this.requestTimeoutMs = config.requestTimeoutMs ?? 15_000
     const configuredWorkspaceDirectory = config.userWorkspaceDirectory?.trim()
     this.userWorkspaceDirectory = configuredWorkspaceDirectory === undefined || configuredWorkspaceDirectory === ''
@@ -128,6 +136,7 @@ export class OntologyAuthController extends TypertRemoteService {
           { reason: state.kind },
         )
       }
+      if (state.auth.context?.mode === 'runtime') await this.assertSessionScope(request.sessionId, state.auth)
       await next()
       if (state.auth.context !== undefined) {
         const agents = this.ctx.get('agents')
@@ -349,23 +358,50 @@ export class OntologyAuthController extends TypertRemoteService {
 
   /**
    * Return the stable owner key for the current browser login or external Project request.
-   * @returns SHA-256 of the active deployment, optional Project, and stable Ontology user id.
+   * @returns A durable owner key for the deployment, user, and any selected Project.
    */
   async currentScopeKey(): Promise<string | undefined> {
+    const bound = this.resourceScope.getStore()
+    if (bound !== undefined) return bound
     const external = this.externalRequests.getStore()
     if (external !== undefined) {
       return createHash('sha256')
-        .update(this.baseUrl).update('\0')
+        .update(this.scopeBaseUrl).update('\0')
         .update(external.projectId).update('\0')
         .update(external.user.userId).digest('hex')
     }
     const state = await this.authentication(AbortSignal.timeout(this.requestTimeoutMs))
     if (state.kind !== 'authenticated') return undefined
-    if (state.auth.context?.mode === 'modeling') {
-      return createHash('sha256').update(this.baseUrl).update('\0')
-        .update(state.auth.context.projectId).update('\0').update(state.auth.user.userId).digest('hex')
+    return this.browserScopeKey(state.auth)
+  }
+
+  /**
+   * Keep path checks and durable ownership in the scope that started a resource creation.
+   * @param operation - Creation or fork operation with one verified owner.
+   * @returns The operation result. An unauthenticated request cannot start the operation.
+   */
+  async runWithResourceScope<Value>(operation: () => Promise<Value>): Promise<Value> {
+    const scopeKey = await this.currentScopeKey()
+    if (scopeKey === undefined) throw authRequired('missing')
+    return this.resourceScope.run(scopeKey, operation)
+  }
+
+  /** Match the account and selected Project from a single validated login record. */
+  private browserScopeKey(auth: AuthPayload): string {
+    const hash = createHash('sha256').update(this.scopeBaseUrl).update('\0')
+    const context = auth.context
+    if (context !== undefined) {
+      hash.update(context.projectId).update('\0')
+      // The full assistant keeps its own conversations alongside the existing modeling scope.
+      if (context.mode === 'runtime') hash.update('runtime').update('\0')
     }
-    return createHash('sha256').update(this.baseUrl).update('\0').update(state.auth.user.userId).digest('hex')
+    return hash.update(auth.user.userId).digest('hex')
+  }
+
+  /** Reject a prompt or tool request that would use another Project's active login. */
+  private async assertSessionScope(id: SessionId, auth: AuthPayload): Promise<void> {
+    if (await this.owns('session', id, this.browserScopeKey(auth))) return
+    throw new RemoteError('session/not-found', '当前项目中没有此会话。', { sessionId: id })
   }
 
   /**
@@ -609,16 +645,21 @@ export class OntologyAuthController extends TypertRemoteService {
         throw error
       }
     }
+    const sessionId = this.ctx.get('agents')?.currentInitiator()?.id
+    const sendForSession = async (auth: AuthPayload): Promise<T> => {
+      if (sessionId !== undefined) await this.assertSessionScope(sessionId, auth)
+      return send(auth.accessToken, auth.context?.projectId, operationSignal)
+    }
     let state = await this.authentication(operationSignal)
     if (state.kind !== 'authenticated') throw authRequired(state.kind)
     try {
-      return await send(state.auth.accessToken, state.auth.context?.projectId, operationSignal)
+      return await sendForSession(state.auth)
     } catch (error) {
       if (!(error instanceof OntologyApiError && isUnauthenticated(error))) throw error
     }
     state = await this.authentication(operationSignal)
     if (state.kind !== 'authenticated') throw authRequired(state.kind)
-    return send(state.auth.accessToken, state.auth.context?.projectId, operationSignal)
+    return sendForSession(state.auth)
   }
 
   private client(): OntologyClient {

@@ -398,7 +398,7 @@ HTTP 200 JSON 响应和流式 `done` 事件使用以下字段。
 
 | 响应字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `answer` | 字符串 | 本轮完整的回答正文。 |
+| `answer` | 字符串 | 本轮完整的回答正文，包含内联引用标记。 |
 | `sources` | 对象数组 | 支持答复的引用片段。资料不足时返回空数组。 |
 | `version` | 整数 | 生成该回答时使用的 Skill 发布版本。 |
 | `sessionId` | 字符串 | 本轮保存到的会话 ID。有会话时返回。 |
@@ -406,23 +406,32 @@ HTTP 200 JSON 响应和流式 `done` 事件使用以下字段。
 
 ```json
 {
-  "answer": "当前所选资料中未找到足够依据。",
-  "sources": [],
+  "answer": "培训介绍了系统操作流程。[R-0123456789]",
+  "sources": [{
+    "citationId": "R-0123456789", "text": "系统操作培训",
+    "projectId": "project_example", "fileId": "file_example",
+    "fileName": "training.pdf", "mediaType": "application/pdf",
+    "knowledgeBaseId": "kb_example", "documentId": "doc_example",
+    "chunkId": "chunk_example", "nodeIds": ["0001"]
+  }],
   "version": 1,
   "sessionId": "ss_example",
   "number": 1
 }
 ```
 
+引用标记跟在所支持的句段后。取出 `[R-0123456789]` 方括号中的 ID，在 `sources[].citationId` 中找到对应原文，即可在标记位置渲染「片段 1」等标签。同一来源可在多处被引用。资料不足时，正文没有标记，`sources` 为空数组。
+
 #### `sources[]` 引用字段
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `citationId` | 字符串 | 该引用的标识，用于关联回答与来源。 |
+| `citationId` | 字符串 | 正文引用标记中的 ID，例如 `R-0123456789`。 |
 | `text` | 字符串 | 返回的原文片段正文。 |
 | `projectId` | 字符串 | 原件所属的 Ontology 项目 ID。 |
 | `fileId` | 字符串 | Ontology 原文件 ID。 |
 | `fileName` | 字符串 | 原件文件名。 |
+| `ontology-file-path` | 字符串 | 可选。原件在 Ontology 项目内的位置，例如 `/政策法规/办理指南.pdf`。 |
 | `mediaType` | 字符串 | 原件媒体类型，例如 `application/pdf`。 |
 | `knowledgeBaseId` | 字符串 | RAGFlow 知识库 ID。 |
 | `documentId` | 字符串 | RAGFlow 文档 ID。 |
@@ -445,7 +454,7 @@ curl --no-buffer --request POST "$SKILL_API/chat" \
 
 | `event` | `data` 字段 | 说明 |
 | --- | --- | --- |
-| `delta` | `text`，字符串 | 本次新增的正文。按顺序拼接，保留空格和换行。可能出现多次。 |
+| `delta` | `text`，字符串 | 本次新增的正文，可能包含内联标记。按顺序拼接，保留空格和换行。 |
 | `done` | 与 JSON 响应相同 | 成功结束。以完整的 `answer` 和 `sources` 为准。有会话时，该轮已保存。资料不足时可直接返回 `done`。 |
 | `error` | `status`、`code`、`message`、`requestId` | 流开启后的失败。`status` 是对应的 HTTP 状态整数。该事件结束本次响应。 |
 
@@ -454,10 +463,10 @@ event: delta
 data: {"text":"培训介绍了"}
 
 event: delta
-data: {"text":"系统操作流程。"}
+data: {"text":"系统操作流程。[R-0123456789]"}
 
 event: done
-data: {"answer":"培训介绍了系统操作流程。","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"系统操作培训","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
+data: {"answer":"培训介绍了系统操作流程。[R-0123456789]","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"系统操作培训","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
 ```
 
 首个 SSE 事件发出前，失败以 HTTP 错误状态和 JSON 返回。收到 `error` 后可以丢弃临时正文。如果连接提前关闭且未收到 `done`，重试前先读取会话历史。
@@ -496,7 +505,7 @@ curl "$SKILL_API/sessions?page=1&pageSize=20" \
 | `turns` | 对象数组 | 当前页按轮次升序排列的问答记录。 |
 | `turns[].number` | 整数 | 会话中的轮次序号，从 1 开始。 |
 | `turns[].question` | 字符串 | 本轮保存的问题正文。 |
-| `turns[].answer` | 字符串 | 本轮保存的完整回答。 |
+| `turns[].answer` | 字符串 | 本轮保存的完整回答。旧问答可能没有内联标记。 |
 | `turns[].sources` | 对象数组 | 本轮的引用，使用与发起对话相同的 `sources[]` 字段。 |
 | `turns[].version` | 整数 | 生成该轮回答时使用的 Skill 发布版本。 |
 | `turns[].createdAt` | 字符串 | 保存该轮问答的时间，RFC 3339。 |

@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { mkdir } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { createAssistantMessage, createToolResultMessage, createUserMessage, type ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Browser, Page } from 'playwright'
@@ -60,24 +60,38 @@ async function startOntologyServer(): Promise<OntologyServer> {
       authorizationVersion: '1',
     }
     if (request.method === 'GET' && url.pathname === '/embed') {
+      const runtime = url.searchParams.get('mode') === 'runtime'
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      response.end(`<!doctype html><html lang="zh"><body><iframe title="建模助手" style="width:520px;height:720px;border:0"></iframe><script>
+      response.end(`<!doctype html><html lang="zh"><body>${runtime ? '<button id="sales">销售项目</button><button id="training">培训项目</button>' : ''}
+      <iframe title="${runtime ? '智能助手' : '建模助手'}" style="width:${runtime ? 1260 : 520}px;height:${runtime ? 860 : 720}px;border:0"></iframe><script>
         const frame = document.querySelector('iframe');
         const harness = new URL(${JSON.stringify(url.searchParams.get('harness'))});
-        harness.searchParams.set('ontologyEmbed', '1');
+        const runtime = ${String(runtime)};
+        if (!runtime) harness.searchParams.set('ontologyEmbed', '1');
         window.handoff = null;
+        let sequence = 0;
+        function selectProject(projectId, projectName) {
+          const count = ++sequence;
+          window.handoff = null;
+          frame.contentWindow.postMessage({
+            type: 'ontology/runtime-session', version: 1, nonce: runtime ? 'runtime-' + count : 'modeling-e2e',
+            context: { projectId, projectName, mode: runtime ? 'runtime' : 'modeling' },
+            session: {
+              accessToken: 'access-alice-' + count, accessTokenExpiresAt: '2026-11-12T12:15:00Z',
+              refreshToken: 'refresh-alice-' + count, refreshTokenExpiresAt: '2026-12-12T12:00:00Z',
+              user: ${JSON.stringify(identity)}
+            }
+          }, harness.origin);
+        }
+        if (runtime) {
+          document.querySelector('#sales').onclick = () => selectProject('project-sales', '销售项目');
+          document.querySelector('#training').onclick = () => selectProject('project-unpublished', '培训项目');
+        }
         window.addEventListener('message', event => {
           if (event.source !== frame.contentWindow || event.origin !== harness.origin) return;
           if (event.data.type === 'ontology/runtime-session-ready') {
-            frame.contentWindow.postMessage({
-              type: 'ontology/runtime-session', version: 1, nonce: 'modeling-e2e',
-              context: { projectId: 'project-unpublished', projectName: '未发布项目', mode: 'modeling' },
-              session: {
-                accessToken: 'access-alice', accessTokenExpiresAt: '2026-11-12T12:15:00Z',
-                refreshToken: 'refresh-alice', refreshTokenExpiresAt: '2026-12-12T12:00:00Z',
-                user: ${JSON.stringify(identity)}
-              }
-            }, harness.origin);
+            if (runtime) selectProject('project-sales', '销售项目');
+            else selectProject('project-unpublished', '未发布项目');
           }
           if (event.data.type === 'ontology/runtime-session-result') window.handoff = event.data;
         });
@@ -85,9 +99,10 @@ async function startOntologyServer(): Promise<OntologyServer> {
       </script></body></html>`)
       return
     }
-    if (request.method === 'GET' && url.pathname === '/api/runtime/projects/project-unpublished/draft') {
+    if (request.method === 'GET' && (url.pathname === '/api/runtime/projects/project-unpublished/draft'
+      || url.pathname === '/api/runtime/projects/project-sales/draft')) {
       response.writeHead(200, { 'content-type': 'application/json' })
-      response.end(JSON.stringify({ project: { id: 'project-unpublished', name: '未发布项目' }, draft: {} }))
+      response.end(JSON.stringify({ project: { id: url.pathname.split('/')[4] }, draft: {} }))
       return
     }
     const filePath = `/api/runtime/knowledge/files/${citationSource.projectId}/${citationSource.fileId}`
@@ -321,6 +336,61 @@ describe('web e2e: Ontology login', () => {
     await preview.getByText('第 22 页', { exact: true }).waitFor()
     expect(await preview.locator('iframe').getAttribute('src')).toMatch(/^blob:.*#page=22$/u)
     expect(await frame.getByRole('button', { name: '片段 1', exact: true }).count()).toBe(1)
+  }, 60_000)
+
+  it('restores the folders and conversations of the selected runtime Project', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-ontology-project-scope'))
+    await page.goto(`${ontology.baseUrl}/embed?mode=runtime&harness=${encodeURIComponent(scaffold.authenticatedUrl)}`)
+    const frame = page.frameLocator('iframe[title="智能助手"]')
+    const selected = async (projectId: string): Promise<void> => {
+      await expect.poll(() => page.evaluate(() => Reflect.get(window, 'handoff'))).toMatchObject({
+        type: 'ontology/runtime-session-result', ok: true, projectId, mode: 'runtime',
+      })
+    }
+    const folderRow = (name: string) => frame.getByRole('treeitem').filter({ hasText: name }).first()
+    const addConversation = async (folderName: string, title: string) => {
+      await frame.getByRole('button', { name: '添加工作区', exact: true }).click()
+      const picker = frame.getByRole('dialog', { name: '选择工作区目录' })
+      await picker.getByRole('button', { name: '新建文件夹' }).click()
+      await frame.getByLabel('文件夹名称').fill(folderName)
+      await frame.getByRole('button', { name: '创建', exact: true }).click()
+      await picker.getByRole('button', { name: '打开', exact: true }).click()
+      await picker.waitFor({ state: 'hidden' })
+      const findWorkspace = () => scaffold.ctx.workspaceRegistry.list().find(item => item.title === folderName)
+      await expect.poll(() => findWorkspace()?.sessionIds.length).toBe(1)
+      const workspace = findWorkspace()
+      const id = workspace?.sessionIds[0]
+      const session = id === undefined ? undefined : scaffold.ctx.sessions.get(id)
+      if (workspace === undefined || session === undefined) throw new Error('Missing conversation created by the directory picker')
+      // Seed a completed turn through the durable Session without calling an LLM provider.
+      session.append('turn/start', { turn: 1 })
+      session.append('user/message', createUserMessage({ content: [{ type: 'text', text: title }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+      session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+      scaffold.ctx.sessionTitle.rename(session, title)
+      await scaffold.ctx.sessions.flush(session)
+      await folderRow(folderName).waitFor()
+      await frame.getByRole('treeitem').getByText(title, { exact: true }).waitFor()
+      return workspace.path
+    }
+
+    await selected('project-sales')
+    const salesPath = await addConversation('销售文件夹', '销售对话')
+    await page.getByRole('button', { name: '培训项目', exact: true }).click()
+    await selected('project-unpublished')
+    await folderRow('销售文件夹').waitFor({ state: 'hidden' })
+    await frame.getByRole('treeitem').getByText('销售对话', { exact: true }).waitFor({ state: 'hidden' })
+    const trainingPath = await addConversation('培训文件夹', '培训对话')
+    expect(dirname(salesPath)).not.toBe(dirname(trainingPath))
+
+    await page.getByRole('button', { name: '销售项目', exact: true }).click()
+    await selected('project-sales')
+    await folderRow('培训文件夹').waitFor({ state: 'hidden' })
+    await frame.getByRole('treeitem').getByText('培训对话', { exact: true }).waitFor({ state: 'hidden' })
+    const folder = folderRow('销售文件夹')
+    await folder.waitFor()
+    if (await folder.getAttribute('aria-expanded') === 'false') await folder.click()
+    await frame.getByRole('treeitem').getByText('销售对话', { exact: true }).click()
+    await frame.getByText('销售对话', { exact: true }).last().waitFor()
   }, 60_000)
 
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {

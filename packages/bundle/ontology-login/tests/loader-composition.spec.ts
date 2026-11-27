@@ -248,8 +248,22 @@ describe('Ontology login through a real Loader composition', () => {
     expect(seen.at(-1)?.system).toContain('事实依据与引证必须来自当前 sources')
     expect(seen.at(-1)?.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: JSON.stringify(followUp) }] }])
     expect((await post({ ...input, history: [{ question: 1, answer: 'invalid' }] })).status).toBe(400)
+    const publicId = 'R-0123456789'
+    const otherPublicId = 'R-abcdef0123'
+    const inline = { ...input, inlineCitations: true, sources: [
+      { ...input.sources[0], id: publicId }, { id: otherPublicId, fileName: '验收清单.pdf', text: '验收需提交报告。' },
+    ] }
+    const marked = { answer: `${supported.answer}[${publicId}]\n\n验收需提交报告。[${otherPublicId}]`, sourceIds: [publicId, otherPublicId] }
+    output = JSON.stringify(marked)
+    await expect((await post(inline)).json()).resolves.toEqual(marked)
+    expect(seen.at(-1)?.system).toContain('把 [片段 id] 放在所支持的句子或段落后')
+    output = JSON.stringify({ answer: supported.answer, sourceIds: [publicId] })
+    expect((await post(inline)).status).toBe(502)
+    output = JSON.stringify({ answer: supported.answer + '[R-9999999999]', sourceIds: [publicId] })
+    expect((await post(inline)).status).toBe(502)
     output = JSON.stringify({ answer: '无依据的猜测', sourceIds: [] })
     await expect((await post(input)).json()).resolves.toEqual(absent)
+    await expect((await post(inline)).json()).resolves.toEqual(absent)
     for (const invalid of [
       'not JSON', '{"answer":"答复","sourceIds":["S2"]}', '{"answer":"答复","sourceIds":["S1","S1"]}',
     ]) {
@@ -303,17 +317,18 @@ describe('Ontology login through a real Loader composition', () => {
     expect((await post(input)).status).toBe(401)
   })
 
-  it('emits answer deltas while the model is still generating and rejects unknown source IDs', async () => {
+  it('streams complete inline markers and rejects unknown source IDs', async () => {
     const context = await bootComposition(vi.fn())
     vi.stubEnv('FILE_ASSISTANT_SERVICE_TOKEN', 'test-only')
     const finish = Promise.withResolvers<undefined>()
-    let supported = true
+    let sourceId = 'R-0123456789'
+    let markerEnd = '56789'
     context.llm.registerAdapter(['fixture'], new class extends LlmAdapter {
       async * stream(): AsyncIterable<StreamChunk> {
         yield { type: 'reasoning-delta', index: 0, text: 'private' }
-        yield { type: 'text-delta', index: 1, text: `{"sourceIds":["${supported ? 'S1' : 'S2'}"],"answer":"依据\\n` }
+        yield { type: 'text-delta', index: 1, text: `{"sourceIds":["${sourceId}"],"answer":"依据\\n[R-01234` }
         await finish.promise
-        yield { type: 'text-delta', index: 1, text: '文件。"}' }
+        yield { type: 'text-delta', index: 1, text: `${markerEnd}]文件。"}` }
         yield { type: 'finish', reason: { kind: 'stop' } }
       }
     }())
@@ -321,7 +336,7 @@ describe('Ontology login through a real Loader composition', () => {
     const post = () => socketFetch(endpoint, {
       method: 'POST', signal: AbortSignal.timeout(5000),
       headers: { authorization: 'Bearer test-only', 'content-type': 'application/json', accept: 'application/x-ndjson' },
-      body: JSON.stringify({ question: '原文在哪里？', sources: [{ id: 'S1', text: '依据文件。', fileName: '培训.pdf' }] }),
+      body: JSON.stringify({ question: '原文在哪里？', inlineCitations: true, sources: [{ id: 'R-0123456789', text: '依据文件。', fileName: '培训.pdf' }] }),
     })
     try {
       const response = await post()
@@ -336,9 +351,14 @@ describe('Ontology login through a real Loader composition', () => {
         rest += next.value
       }
       expect(rest.trim().split('\n').map(line => JSON.parse(line))).toEqual([
-        { type: 'delta', text: '文件。' }, { type: 'done', answer: '依据\n文件。', sourceIds: ['S1'] },
+        { type: 'delta', text: '[R-0123456789]文件。' },
+        { type: 'done', answer: '依据\n[R-0123456789]文件。', sourceIds: ['R-0123456789'] },
       ])
-      supported = false
+      markerEnd = '00000'
+      expect((await (await post()).text()).trim().split('\n').map(line => JSON.parse(line))).toEqual([
+        { type: 'delta', text: '依据\n' }, { type: 'error', error: 'invalid_model_answer' },
+      ])
+      sourceId = 'R-9999999999'
       expect(JSON.parse(await (await post()).text())).toEqual({ type: 'error', error: 'invalid_model_answer' })
     } finally {
       finish.resolve(undefined)

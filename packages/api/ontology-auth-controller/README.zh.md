@@ -42,6 +42,7 @@ kind: "package-reference"
 | `requestTimeoutMs` | `15000` | 登录、当前用户校验、刷新与注销的网络截止时间。 |
 | `allowInsecureLoopback` | `false` | 只允许 `localhost`、`127.0.0.1` 或 `::1` 显式使用 HTTP。 |
 | `userWorkspaceDirectory` | `$DSH_HOME/account-workspaces` | 可选覆盖目录，用于持久化并隔离每个 Ontology 用户的 Workspace 与个人 skill 路径。 |
+| `ontologyScopeBaseUrl` | `ontologyBaseUrl` | 同一 Ontology 数据库切换监听地址时，可填写旧 Runtime 地址以保留资源归属。 |
 
 完整字段以生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-ontology-auth-controller)为准。
 
@@ -51,15 +52,17 @@ kind: "package-reference"
 
 导入的 Session 可以包含 `context: { projectId, projectName, mode: 'modeling' }`。Host 通过该 Project 的草稿接口校验访问权限，因此支持已授权但尚未发布的 Project，并在 Token 刷新后保留上下文。其归属键包含 Project id、部署地址与用户，从而按 Project 隔离对话历史、文件和 Workspace。每个存活 Agent 首次接收已接受 Prompt 前，准入流程会加载 `ontology-modeler`，并排入一条原生注入消息，其中包含选中的 Project 与规范化的 skill 指令；agent loop 会在下一次请求准入时记录它。
 
-完整助手通过 `mode: 'runtime'` 选择业务 Project，不进入草稿建模，也不改变账号归属的历史。管理员通过草稿接口校验选择，支持未发布的 Project；成员通过已发布 Project 列表校验。每个已接受 Prompt 都会排入一条已记录的 `ontology-project` 快照，包含最新选择。查询默认使用该 Project；若选择不可访问或尚未发布，应说明原因，而不替换为其他 Project。
+完整助手通过 `mode: 'runtime'` 选择业务 Project。管理员通过草稿接口校验选择，支持未发布的 Project。成员通过已发布 Project 列表校验。工作区文件夹、对话和个人 Skill 归属于该 Project 的完整助手。每个已接受的 Prompt 都会排入该 Project 的 `ontology-project` 快照。切换 Project 后，运行中的对话只能使用所属 Project 的浏览器登录。查询默认使用选中的 Project。
 
 没有独立归属记录的子智能体 Session 通过存活或持久化的直接父会话元数据继承归属。嵌套子智能体沿同一关系查找。显式归属记录优先；普通分叉与无关 Session 不会继承这项访问权限。
 
 仅 Host 可见的消费者使用固定 `/api/runtime/` 路径、方法与可选 JSON 请求体调用 `requestAuthenticated()`。Controller 选择当前浏览器 record，校验或刷新它，附加 Access Token，并在该请求报告 Access Token 过期时重试一次。消费者仍负责校验返回的不可信 JSON。
 
+`readOntologyKnowledgeSources()` 支持可选的 `ontology-file-path`，其值是原件在 Project 内的位置。早期保存的引用可能没有该字段。
+
 外部服务集成把 Go Runtime Access Token 与 `X-Project-Id` 的值传给 `runExternalRequest()`。Controller 通过 `/api/runtime/auth/current` 校验 Token，确认 `/api/runtime/projects` 中包含该 Project，并且只在请求级异步存储中设置身份。它不会保存或刷新外部 Token，并拒绝用户不可见的 Project。
 
-Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。浏览器 `currentScopeKey()` 则包含服务地址与稳定用户 id，因此同一 Ontology 用户的独立登录会得到同一归属。外部请求会额外包含 Project id，从而按 Project 与用户隔离个人 Skill、Workspace、Session、文件和引用。Controller 默认使用 `$DSH_HOME/account-workspaces` 作为父目录；部署需要把账号数据放到其他持久卷时，可用 `userWorkspaceDirectory` 覆盖。`currentSkillAccess()` 另外把该父目录的 `.dsh/skills` 作为内置 skill 目录，并且只有管理员账号可以向其中安装。Prompt 准入会在 Session 投递前校验或刷新当前浏览器登录，而 terminal 访问与 `danger-full-access` 要求管理员账号。
+Credential id 包含 `SHA256(ontologyBaseUrl + browserSessionId)`。归属键包含服务地址与稳定用户 id，内嵌与外部请求还包含 Project id。完整助手使用独立的归属键，建模和外部请求沿用各自已有的 Project 键。`runWithResourceScope()` 在创建或分叉资源前确定归属，确保切换 Project 时仍保存到发起时的范围。Controller 默认使用 `$DSH_HOME/account-workspaces` 作为父目录。可用 `userWorkspaceDirectory` 把这些目录放到其他持久卷。`currentSkillAccess()` 另外把该父目录的 `.dsh/skills` 作为内置 Skill 目录，仅管理员可以向其中安装。Prompt 准入会在投递前校验或刷新浏览器登录。终端访问与 `danger-full-access` 要求管理员账号。
 
 -----
 

@@ -41,7 +41,8 @@ export function readDraftResult(value: unknown, projectId: string, added = false
       })),
       linkTypes: list(draft, 'linkTypes', link => ({
         ...strings(link, ['id', 'label', 'description', 'sourceType', 'targetType', 'sourceProperty', 'targetProperty']),
-        cardinality: choice(link, 'cardinality', ['one-to-one', 'one-to-many', 'many-to-one']),
+        // Dataset bridges can represent many-to-many relationships in the Runtime draft.
+        cardinality: choice(link, 'cardinality', ['one-to-one', 'one-to-many', 'many-to-one', 'many-to-many']),
       })),
       actionTypes: list(draft, 'actionTypes', action => ({
         ...strings(action, ['id', 'label', 'description', 'targetType', 'executorRef']),

@@ -43,9 +43,11 @@ kind: "package-reference"
 
 查询与遍历分页默认返回 20 条记录，并拒绝超过 100 的 `page_size`。等值过滤使用 Object 详情中的 Property id，而不是源列名。Host 生成预备幂等键；执行不接受替换参数。用户拒绝时不会发出执行请求；顺序重试会重新读取 Invocation，而不是复用早先的预览。
 
+Ontology 提供 `ontology-file-path` 时，知识检索会把它传给模型。该字段表示原件在项目内的位置，例如 `/政策法规/办理指南.pdf`。引用 ID 仍用于打开原件。
+
 ### 草稿建模
 
-使用当前管理页面的 Project id 调用 `ontology_get_draft`，未发布 Project 也适用。复用返回的已有定义、数据源 id 与受信任执行器 key。通过 `ontology_add_draft_resources` 提交新增项，将准确的 `project.updatedAt` 作为 `expected_updated_at`；嵌套定义沿用草稿的 camelCase 字段。Runtime 会拒绝过时版本与冲突定义，不会保存部分批次。重试冲突前应重新读取草稿。嵌入式建模调用必须匹配管理页面传递的 Project。
+使用当前管理页面的 Project id 调用 `ontology_get_draft`，未发布 Project 也适用。读取草稿时保留已定义的关系基数，包括多对多（`many-to-many`）。复用返回的已有定义、数据源 id 与受信任执行器 key。通过 `ontology_add_draft_resources` 提交新增项，将准确的 `project.updatedAt` 作为 `expected_updated_at`。嵌套定义沿用草稿的 camelCase 字段。Runtime 会拒绝过时版本与冲突定义，不会保存部分批次。重试冲突前应重新读取草稿。嵌入式建模调用必须匹配管理页面传递的 Project。
 
 使用 `ontology_inspect_data_source` 通过 Project 网关发现真实资源名和字段元数据。通过 `ontology_update_draft_bindings` 携带最新草稿版本，原位修正已有 `resourceRef`、`primaryKey` 与 Property `sourceField`。业务 Property id 保持稳定，不必与物理字段名一致。Runtime 在原子保存批次前校验目标资源与映射字段，并保留关系与发布版本。
 

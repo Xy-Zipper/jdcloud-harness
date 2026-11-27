@@ -91,6 +91,8 @@ export interface OntologyKnowledgeSource {
   readonly projectId: string
   readonly fileId: string
   readonly fileName: string
+  /** Original's location within Ontology. */
+  readonly 'ontology-file-path'?: string
   readonly knowledgeBaseId: string
   readonly documentId: string
   readonly chunkId: string
@@ -114,6 +116,7 @@ export function readOntologyKnowledgeSources(value: unknown): OntologyKnowledgeS
     if (typeof source !== 'object' || source === null || Array.isArray(source)) return undefined
     const { citationId, projectId, fileId, fileName, knowledgeBaseId, documentId, chunkId, mediaType, nodeIds, text, page } =
       source as Record<string, unknown>
+    const originalPath = Reflect.get(source, 'ontology-file-path')
     if (!id(citationId) || !/^R-[a-f0-9]{10}$/u.test(citationId)
       || !id(projectId) || !id(fileId) || !id(knowledgeBaseId) || !id(documentId)
       || typeof chunkId !== 'string' || chunkId === ''
@@ -121,6 +124,7 @@ export function readOntologyKnowledgeSources(value: unknown): OntologyKnowledgeS
       || !Array.isArray(nodeIds) || !nodeIds.every(id)
       || (page !== undefined && (typeof page !== 'number' || !Number.isSafeInteger(page) || page < 1))) return undefined
     sources.push({ citationId, projectId, fileId, fileName, knowledgeBaseId, documentId, chunkId, mediaType, nodeIds, text,
+      ...(typeof originalPath === 'string' && originalPath.startsWith('/') ? { 'ontology-file-path': originalPath } : {}),
       ...(page === undefined ? {} : { page }) })
   }
   return sources

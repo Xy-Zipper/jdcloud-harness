@@ -43,9 +43,11 @@ The package has no configuration fields. Runtime address, HTTPS policy, deadline
 
 Query and traversal pages default to 20 records and reject a `page_size` above 100. Equality filters use Property ids from Object detail, never source-column names. The Host generates the preparation idempotency key; execution accepts no replacement parameters. A rejected approval performs no execution request, and a sequential retry rereads the Invocation instead of reusing the earlier preview.
 
+Knowledge search gives the model `ontology-file-path` when Ontology provides it. The value is the original's location within the Project, such as `/Policies/Manual.pdf`. The citation ID still links the answer to the original.
+
 ### Draft modeling
 
-Call `ontology_get_draft` with the current management Project id, including for an unpublished Project. Reuse its existing definitions, data-source ids, and trusted executor keys. Send additions through `ontology_add_draft_resources` with that exact `project.updatedAt` as `expected_updated_at`; nested definitions use the draft's camelCase fields. The Runtime rejects stale revisions and conflicting definitions without saving part of the batch. Read the draft again before retrying a conflict. Embedded modeling calls must match the Project transferred by the management page.
+Call `ontology_get_draft` with the current management Project id, including for an unpublished Project. Draft reads preserve the declared relationship cardinality, including `many-to-many`. Reuse the returned definitions, data-source ids, and trusted executor keys. Send additions through `ontology_add_draft_resources` with that exact `project.updatedAt` as `expected_updated_at`. Nested definitions use the draft's camelCase fields. The Runtime rejects stale revisions and conflicting definitions without saving part of the batch. Read the draft again before retrying a conflict. Embedded modeling calls must match the Project transferred by the management page.
 
 Use `ontology_inspect_data_source` to discover actual resource names and field metadata through the Project gateway. Correct existing `resourceRef`, `primaryKey`, and Property `sourceField` values with `ontology_update_draft_bindings` and the latest draft revision. Business Property ids remain stable; they do not have to match physical field names. Runtime validates the addressed resources and mapped fields before atomically saving the batch, preserving relationships and releases.
 

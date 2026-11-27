@@ -55,6 +55,7 @@ declare module '@deepseek-ai/cordis' {
 
 interface ScopeOwner {
   currentScopeKey(): Promise<string | undefined>
+  runWithResourceScope<T>(operation: () => Promise<T>): Promise<T>
   owns(kind: 'session' | 'workspace', id: string, expectedScopeKey?: string): Promise<boolean>
   ownedSessionIds(ids: readonly SessionId[], scopeKey: string, signal: AbortSignal): Promise<ReadonlySet<SessionId>>
 }
@@ -98,7 +99,8 @@ export class WorkspaceController extends TypertRemoteService {
    */
   @Remote('create')
   async create(request: WorkspaceCreateRequest): Promise<WorkspaceCreateValue> {
-    return this.commands.create(request)
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
+    return owner === undefined ? this.commands.create(request) : owner.runWithResourceScope(() => this.commands.create(request))
   }
 
   /**

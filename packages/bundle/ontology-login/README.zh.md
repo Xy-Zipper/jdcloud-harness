@@ -53,11 +53,15 @@ ONTOLOGY_REQUEST_TIMEOUT_MS=15000
 
 Agent 对话检索项目文档，并在回答中显示可点击的引用。已发布的角色和知识库范围用于全屏 iframe、悬浮聊天组件和服务端 Skill API。API 会话历史按密钥隔离，对话接口默认返回 JSON，也可以按需接收 SSE 正文增量。参见[知识 Skill 集成](../../../EXTERNAL_API.md#knowledge-skill-integration)。
 
+Ontology 内嵌助手显示当前账号在所选 Project 下的工作区文件夹和对话。用同一账号独立打开 Harness，可查看未绑定 Project 的账号历史。
+
 该 layer 禁用 `authentication-token`，并把 `@deepseek-ai/dsh-client-connection/browser-session` 安装为 Connection 认证 Provider。Client 把不透明 Host 身份保存在当前标签页的 `sessionStorage`，通过 Bearer header 认证同源请求，并为每次 WebSocket 连接取得短期单次 ticket。该 layer 还会用应用内目录浏览器替换自适应操作系统选择器；选择器打开后位于已登录用户的 Workspace 根目录，只列出 Host 校验通过的后代目录，并允许在其中创建子文件夹。它还会插入 `ontology-auth-controller`、`tool-ontology` 与 `ui-ontology-login`，并关闭首次运行的模型凭证弹窗。需要确认的 Action 会复用 Web profile 的共享 approval 面板，而 Ontology Runtime 仍然拥有 Project 访问、当前 Invocation 状态、原子执行与写入授权。
 
 外部 Runtime API 校验 Go Runtime Access Token 和 `X-Project-Id`，并按项目与用户隔离个人 Skill、Workspace 和 Session。
 
 Go 文件助手调用 `POST /api/internal/file-assistant/answer`，携带 `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` 和 JSON 请求体 `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`。两个服务端设置相同的私有令牌。Go 负责文件访问授权，在 512 KiB 以内发送至多八个片段。响应包含 `answer` 和来自本次请求的唯一 `sourceIds`。空数组表示资料不足。未配置服务令牌时返回 503，令牌错误时返回 401，模型失败或引用无效时返回 502。
+
+已发布 Skill 的 API 对话由 Go 发送 `inlineCitations: true`，片段 ID 使用 `R-0123456789` 形式的公开 ID。正文在有依据的句段后标注 `[R-0123456789]`。JSON 和 NDJSON 响应中的标记均与最终的 `sourceIds` 对应。
 
 传入非空片段组时，使用 `task: "qa"` 生成 `questions`，或使用 `task: "extract"` 抽取 `entities` 和 `relations`。请求包含 `task` 和 `sources`。每条结果携带当前批次的 `sourceIds`，关系两端引用同一响应中的实体名称。
 

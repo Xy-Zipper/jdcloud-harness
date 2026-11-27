@@ -262,13 +262,15 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-ontology-auth-controller`
 
 - `inject`: `credentials` · `browserSession`
-- `source`: [`packages/api/ontology-auth-controller/src/index.ts:64`](../packages/api/ontology-auth-controller/src/index.ts)
+- `source`: [`packages/api/ontology-auth-controller/src/index.ts:65`](../packages/api/ontology-auth-controller/src/index.ts)
 
 ```ts config-catalog
 /** Ontology authentication controller configuration. */
 export interface Config {
   /** Deployment-owned Ontology Runtime service address. */
   readonly ontologyBaseUrl: string
+  /** Stable address used for resource ownership when a deployment changes its Runtime listener. */
+  readonly ontologyScopeBaseUrl?: string
   /** Network deadline for login, refresh, validation, and logout requests. */
   readonly requestTimeoutMs?: number
   /** Permit explicit HTTP only for loopback development addresses. */

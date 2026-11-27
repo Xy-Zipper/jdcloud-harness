@@ -136,6 +136,7 @@ export interface SessionControllerInternals {
 
 interface ScopeOwner {
   owns(kind: 'session' | 'workspace', id: string): Promise<boolean>
+  runWithResourceScope<T>(operation: () => Promise<T>): Promise<T>
 }
 
 
@@ -314,7 +315,8 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('create')
   create(request: SessionCreateRequest): Promise<SessionCreateValue> {
-    return this.commands.create(request)
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
+    return owner === undefined ? this.commands.create(request) : owner.runWithResourceScope(() => this.commands.create(request))
   }
 
   /**
@@ -465,7 +467,8 @@ export class SessionController extends TypertRemoteService {
         })
       }
     }
-    return this.commands.fork(request)
+    const owner = this.ctx.get('ontologyAuthController') as ScopeOwner | undefined
+    return owner === undefined ? this.commands.fork(request) : owner.runWithResourceScope(() => this.commands.fork(request))
   }
 
   /**

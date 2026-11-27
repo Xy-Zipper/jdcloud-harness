@@ -64,14 +64,16 @@ export function SkillApiDocs({ base, t }: Copy & { base: URL }) {
   const question = t('knowledgeExampleQuestion')
   const session = { id: sessionId, name: t('knowledgeApiExampleName'), turnCount: 0,
     createdAt: '2026-11-20T01:00:00Z', updatedAt: '2026-11-20T01:00:00Z' }
-  const answer = { answer: t('knowledgeApiExampleAnswer'), sources: [{
-    citationId: 'R-0123456789', projectId: 'project_example', fileId: 'file_example', fileName: 'training.pdf', mediaType: 'application/pdf',
-    knowledgeBaseId: 'kb_example', documentId: 'doc_example', chunkId: 'chunk_example', nodeIds: ['0001'], page: 4, text: t('knowledgeApiExampleAnswer'),
+  const citationId = 'R-0123456789'
+  const excerpt = t('knowledgeApiExampleAnswer')
+  const answer = { answer: `${excerpt}[${citationId}]`, sources: [{
+    citationId, projectId: 'project_example', fileId: 'file_example', fileName: 'training.pdf', mediaType: 'application/pdf',
+    knowledgeBaseId: 'kb_example', documentId: 'doc_example', chunkId: 'chunk_example', nodeIds: ['0001'], page: 4, text: excerpt,
   }], version: 1 }
   const chatInput = { question, sessionId, stream: false }
   const chatResult = { ...answer, sessionId, number: 1 }
   const endpoints: readonly {
-    label: OntologyLoginKey
+    labelKey: OntologyLoginKey
     method: 'POST' | 'GET' | 'DELETE'
     path: string
     example: string
@@ -81,22 +83,22 @@ export function SkillApiDocs({ base, t }: Copy & { base: URL }) {
     output?: object
     fields?: readonly Parameter[]
   }[] = [
-    { label: 'knowledgeApiCreate', method: 'POST', path: 'sessions', example: 'sessions', status: 201,
+    { labelKey: 'knowledgeApiCreate', method: 'POST', path: 'sessions', example: 'sessions', status: 201,
       parameters: [['name', 'string', 'knowledgeApiNameParam']], input: { name: session.name }, output: session, fields: sessionFields },
-    { label: 'knowledgeApiChat', method: 'POST', path: 'chat', example: 'chat', status: 200,
+    { labelKey: 'knowledgeApiChat', method: 'POST', path: 'chat', example: 'chat', status: 200,
       parameters: [['question', 'string', 'knowledgeApiQuestionParam'], ['sessionId', 'string', 'knowledgeApiChatSessionParam'],
         ['stream', 'boolean', 'knowledgeApiStreamParam']], input: chatInput, output: chatResult,
       fields: [...answerFields, ['sessionId', 'string', 'knowledgeApiOutSavedSession'], ['number', 'integer', 'knowledgeApiOutSavedNumber']] },
-    { label: 'knowledgeApiList', method: 'GET', path: 'sessions', example: 'sessions?page=1&pageSize=20', status: 200,
+    { labelKey: 'knowledgeApiList', method: 'GET', path: 'sessions', example: 'sessions?page=1&pageSize=20', status: 200,
       parameters: pagination, output: { sessions: [session], page: 1, pageSize: 20, hasMore: false },
       fields: [['sessions', 'object[]', 'knowledgeApiOutSessions'], ...under('sessions[]', sessionFields), ...pageFields] },
-    { label: 'knowledgeApiHistory', method: 'GET', path: 'sessions/{sessionId}', example: `sessions/${sessionId}?page=1&pageSize=20`, status: 200,
+    { labelKey: 'knowledgeApiHistory', method: 'GET', path: 'sessions/{sessionId}', example: `sessions/${sessionId}?page=1&pageSize=20`, status: 200,
       parameters: [['sessionId', 'string', 'knowledgeApiPathParam'], ...pagination], output: { session: { ...session, turnCount: 1 },
         turns: [{ number: 1, question, ...answer, createdAt: session.createdAt }], page: 1, pageSize: 20, hasMore: false },
       fields: [['session', 'object', 'knowledgeApiOutSession'], ...under('session', sessionFields), ['turns', 'object[]', 'knowledgeApiOutTurns'],
         ...under('turns[]', [['number', 'integer', 'knowledgeApiOutNumber'], ['question', 'string', 'knowledgeApiOutQuestion'],
           ['createdAt', 'string', 'knowledgeApiOutTurnDate'], ...answerFields]), ...pageFields] },
-    { label: 'knowledgeApiDelete', method: 'DELETE', path: 'sessions/{sessionId}', example: `sessions/${sessionId}`, status: 204,
+    { labelKey: 'knowledgeApiDelete', method: 'DELETE', path: 'sessions/{sessionId}', example: `sessions/${sessionId}`, status: 204,
       parameters: [['sessionId', 'string', 'knowledgeApiPathParam']] },
   ]
   const codeLabels = { copyLabel: t('knowledgeCopyValue'), copiedLabel: t('knowledgeCopied') }
@@ -113,15 +115,15 @@ export function SkillApiDocs({ base, t }: Copy & { base: URL }) {
       ['skillId', 'string', 'knowledgeApiSkillParam'], ['Authorization', 'header', 'knowledgeApiAuthParam'],
       ['Content-Type', 'header', 'knowledgeApiMediaParam'], ['X-Request-ID', 'header', 'knowledgeApiRequestIdParam'],
     ]} />
-    {endpoints.map(({ label, method, path, example, parameters, input, status, output, fields }) =>
-      <details key={label} className={css.apiOperation}>
-        <summary><span>{t(label)}</span> <code>{method} /{path}</code></summary>
+    {endpoints.map(({ labelKey, method, path, example, parameters, input, status, output, fields }) =>
+      <details key={labelKey} className={css.apiOperation}>
+        <summary><span>{t(labelKey)}</span> <code>{method} /{path}</code></summary>
         <div className={css.apiDetails}>
           <h4>{t('knowledgeApiRequest')}</h4>
           <Fields fields={parameters} t={t} />
           <h4>{t('knowledgeAPICurl')}</h4>
           <CodeBlock code={curl(method, example, input)} lang="bash" {...codeLabels} />
-          {label === 'knowledgeApiChat' && <>
+          {labelKey === 'knowledgeApiChat' && <>
             <h4>{t('knowledgeApiStreamCurl')}</h4>
             <CodeBlock code={curl(method, example, { ...chatInput, stream: true }, true)} lang="bash" {...codeLabels} />
           </>}
@@ -129,14 +131,14 @@ export function SkillApiDocs({ base, t }: Copy & { base: URL }) {
             <h4>{t('knowledgeApiResponseFields')}</h4>
             <Fields fields={fields} t={t} />
           </>}
-          {(label === 'knowledgeApiChat' || label === 'knowledgeApiHistory') && <details>
+          {(labelKey === 'knowledgeApiChat' || labelKey === 'knowledgeApiHistory') && <details>
             <summary>{t('knowledgeApiCitationFields')}</summary>
             <Fields fields={citationFields} t={t} />
           </details>}
           <h4>{t('knowledgeApiResponse', { status: String(status) })}</h4>
           {output === undefined ? <p className={css.releaseHint}>{t('knowledgeApiNoBody')}</p>
             : <CodeBlock code={JSON.stringify(output, null, 2)} lang="json" {...codeLabels} />}
-          {label === 'knowledgeApiChat' && <>
+          {labelKey === 'knowledgeApiChat' && <>
             <h4>{t('knowledgeApiStreamTitle')}</h4>
             <p className={css.releaseHint}>{t('knowledgeApiStreamHint')}</p>
             <Fields t={t} fields={[

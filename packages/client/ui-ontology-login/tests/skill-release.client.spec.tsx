@@ -39,6 +39,8 @@ it('provides distinct browser and server integration codes for the same released
     expect(curl).toContain('curl --no-buffer --request POST')
     expect(curl).toContain('"stream":true')
     expect(curl).toContain('event: done')
+    expect(curl).toContain(`"answer": "${zh.knowledgeApiExampleAnswer}[R-0123456789]"`)
+    expect(curl).toContain(`event: delta\ndata: ${JSON.stringify({ text: `${zh.knowledgeApiExampleAnswer.slice(6)}[R-0123456789]` })}`)
     expect(curl).toContain('响应字段')
     expect(curl).toContain('此次回答使用的 Skill 发布版本')
     expect(curl).toContain('RAGFlow 知识库 ID')

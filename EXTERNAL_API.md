@@ -386,7 +386,7 @@ The HTTP 200 JSON response and the SSE `done` event share these fields.
 
 | Response field | Type | Meaning |
 | --- | --- | --- |
-| `answer` | String | Complete answer text for the turn. |
+| `answer` | String | Complete answer text with inline citation markers. |
 | `sources` | Object array | Excerpts supporting the answer. An empty array indicates insufficient evidence. |
 | `version` | Integer | Published Skill version used for the answer. |
 | `sessionId` | String | Session ID present when the turn was saved. |
@@ -394,11 +394,12 @@ The HTTP 200 JSON response and the SSE `done` event share these fields.
 
 | `sources[]` field | Type | Meaning |
 | --- | --- | --- |
-| `citationId` | String | Citation identifier that connects the answer with its evidence. |
+| `citationId` | String | ID inside an inline citation marker, such as `R-0123456789`. |
 | `text` | String | Text from the cited excerpt. |
 | `projectId` | String | Ontology project that owns the original file. |
 | `fileId` | String | Original file ID in Ontology. |
 | `fileName` | String | Original filename. |
+| `ontology-file-path` | String | Optional logical location of the original within its Ontology project, such as `/Policies/Manual.pdf`. |
 | `mediaType` | String | Media type of the original file. |
 | `knowledgeBaseId` | String | RAGFlow knowledge base ID. |
 | `documentId` | String | RAGFlow document ID. |
@@ -407,6 +408,8 @@ The HTTP 200 JSON response and the SSE `done` event share these fields.
 | `nodeId` | String | Optional ID of a single original slice node. |
 | `page` | Integer | Optional verified PDF page, starting at 1. |
 | `endPage` | Integer | Optional verified last page of a multi-page excerpt. |
+
+In an answer such as `The training covers cafeteria operations.[R-0123456789]`, match the marker's ID to `sources[].citationId` and render a label such as “Excerpt 1” in its place. The same source can be cited at several positions. An insufficient-evidence reply has no marker and an empty `sources` array.
 
 #### Streaming response
 
@@ -421,7 +424,7 @@ Successful SSE responses use HTTP 200 and `Content-Type: text/event-stream`. Eac
 
 | Event | Data | Meaning |
 | --- | --- | --- |
-| `delta` | `text` string | New answer text. Append in order and retain whitespace. |
+| `delta` | `text` string | New answer text, including any inline markers. Append in order and retain whitespace. |
 | `done` | JSON response fields | Successful completion. Use the full answer and verified sources. A session turn is saved before this event. An insufficient-evidence answer can go straight to `done`. |
 | `error` | `status`, `code`, `message`, `requestId` | Terminal failure after streaming began. `status` is the corresponding HTTP status integer. |
 
@@ -430,10 +433,10 @@ event: delta
 data: {"text":"The training "}
 
 event: delta
-data: {"text":"covers cafeteria operations."}
+data: {"text":"covers cafeteria operations.[R-0123456789]"}
 
 event: done
-data: {"answer":"The training covers cafeteria operations.","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"Cafeteria operations training","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
+data: {"answer":"The training covers cafeteria operations.[R-0123456789]","version":1,"sessionId":"ss_example","number":1,"sources":[{"citationId":"R-0123456789","text":"Cafeteria operations training","projectId":"project_example","fileId":"file_example","fileName":"training.pdf","mediaType":"application/pdf","knowledgeBaseId":"kb_example","documentId":"doc_example","chunkId":"chunk_example","nodeIds":["0001"]}]}
 ```
 
 Failures before the first SSE event use an HTTP status and JSON. Discard provisional text on `error`. If the connection closes without `done`, read session history before retrying.
@@ -464,7 +467,7 @@ curl "$SKILL_API/sessions?page=1&pageSize=20" \
 | `turns` | Object array | Saved turns on this page in ascending order. |
 | `turns[].number` | Integer | Turn number starting at 1. |
 | `turns[].question` | String | Saved question for the turn. |
-| `turns[].answer` | String | Complete saved answer. |
+| `turns[].answer` | String | Complete saved answer. Older turns may have no inline markers. |
 | `turns[].sources` | Object array | Same citation fields as Send a question. |
 | `turns[].version` | Integer | Published Skill version used for the turn. |
 | `turns[].createdAt` | String | Time the turn was saved, in RFC 3339 format. |

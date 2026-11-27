@@ -190,6 +190,7 @@ describe('Ontology tools', () => {
       citationId: 'R-0102030405', projectId: 'project-sales', fileId: 'file-manual', fileName: '培训.pdf',
       knowledgeBaseId: 'kb-manuals', documentId: 'doc-chunk-one', chunkId: 'ragflow-chunk-one',
       mediaType: 'application/pdf', page: 2, nodeIds: ['0000'], text: '请使用确认后的订单编号。',
+      'ontology-file-path': '/业务规范/培训.pdf',
     }
     const { execute, searchKnowledge } = await fixture({
       knowledgeResponse: { sources: [{ ...source, sourceUrl: 'https://untrusted.example' }] },
@@ -201,6 +202,7 @@ describe('Ontology tools', () => {
     expect(result.content).toEqual([{ type: 'text', text: JSON.stringify([{
       citationId: source.citationId, projectId: source.projectId, fileId: source.fileId, fileName: source.fileName,
       text: source.text, knowledgeBaseId: source.knowledgeBaseId, documentId: source.documentId,
+      'ontology-file-path': source['ontology-file-path'],
     }]) }])
     expect(failure(await execute('ontology_search_knowledge', { question: '  ' })).error.info?.code).toBe('INVALID_ARGS')
     expect(searchKnowledge).toHaveBeenCalledOnce()
@@ -421,13 +423,17 @@ describe('Ontology tools', () => {
 
   it('reads unpublished draft metadata while omitting connection references and executor internals', async () => {
     const { execute, requestAuthenticated } = await fixture()
-    requestAuthenticated.mockResolvedValueOnce(draftResponse())
+    requestAuthenticated.mockResolvedValueOnce(draftResponse('many-to-many'))
 
     const result = value(await execute('ontology_get_draft', { project_id: 'project-sales' }))
 
     expect(result).toMatchObject({
       project: { id: 'project-sales', updatedAt: '2026-11-12T10:00:00Z', publishedVersion: 0 },
-      draft: { dataSources: [{ id: 'source-1' }], objectTypes: [{ id: 'object-order' }] },
+      draft: {
+        dataSources: [{ id: 'source-1' }],
+        objectTypes: [{ id: 'object-order' }],
+        linkTypes: [{ id: 'link-orders', cardinality: 'many-to-many' }],
+      },
       executors: [{ key: 'sales.order.check' }],
     })
     expect(JSON.stringify(result)).not.toContain('connectionRef')
@@ -497,6 +503,7 @@ describe('Ontology tools', () => {
     ['revision', { project: { ...draftResponse().project, updatedAt: 'bad' } }],
     ['objectTypes', { draft: { ...draftResponse().draft, objectTypes: null } }],
     ['enabled', { draft: { ...draftResponse().draft, dataSources: [{ ...draftResponse().draft.dataSources[0], enabled: 'yes' }] } }],
+    ['cardinality', { draft: draftResponse('invalid-cardinality').draft }],
   ])('rejects malformed draft %s', async (_field, changes) => {
     const { execute, requestAuthenticated } = await fixture()
     requestAuthenticated.mockResolvedValueOnce({ ...draftResponse(), ...changes })
@@ -571,7 +578,7 @@ describe('Ontology tools', () => {
   })
 })
 
-function draftResponse() {
+function draftResponse(cardinality = 'one-to-many') {
   return {
     project: {
       id: 'project-sales', name: '销售', description: '销售草稿', status: 'active',
@@ -590,7 +597,7 @@ function draftResponse() {
       linkTypes: [{
         id: 'link-orders', label: '订单关联', description: '', sourceType: 'object-order',
         targetType: 'object-order', sourceProperty: 'property-id', targetProperty: 'property-id',
-        cardinality: 'one-to-many',
+        cardinality,
       }],
       actionTypes: [{
         id: 'action-check', label: '检查订单', description: '', kind: 'function', operation: 'invoke',

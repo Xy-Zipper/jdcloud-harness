@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.3/ontology-project-conversations/guide.md
+/:
+  en: 04913d506fdceb83
+  zh: f5ba366695f02b10
+/project-history-in-the-ontology-assistant:
+  en: 5db3fb572b69760d
+  zh: 4be686db2d978d7a
+/project-history-in-the-ontology-assistant/change:
+  en: c69e804449a710e3
+  zh: a5344ff7fec29beb
+/project-history-in-the-ontology-assistant/migration:
+  en: 63423567ddd89758
+  zh: 6cad5f683b9b4055

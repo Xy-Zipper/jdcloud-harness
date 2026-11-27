@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`Ontology authentication controller > queues the latest runtime Project on every prompt, including a switch in the same conversation 1`] = `
+exports[`Ontology authentication controller > queues the selected runtime Project on prompts in each Project conversation 1`] = `
 [
   {
     "content": [

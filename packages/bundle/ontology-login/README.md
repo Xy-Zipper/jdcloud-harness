@@ -53,11 +53,15 @@ The sidebar uses Ontology account controls at the top and More at the bottom. Mo
 
 Agent chat retrieves project documents and displays clickable citations. A published Skill uses its released role and knowledge-base scope for full-page iframes, floating chat widgets, and a server API with key-owned session history. The API returns JSON by default and offers SSE answer deltas on request. See [Knowledge Skill integration](../../../EXTERNAL_API.md#knowledge-skill-integration).
 
+The assistant embedded in Ontology displays the signed-in account's Workspace folders and conversations for the selected Project. Opening Harness directly with the same account shows account-level history created without a Project.
+
 The layer disables `authentication-token` and installs `@deepseek-ai/dsh-client-connection/browser-session` as the Connection authentication provider. The Client keeps the opaque Host identity in the current tab's `sessionStorage`, authenticates same-origin requests with a Bearer header, and obtains a short-lived single-use ticket for each WebSocket connection. The layer also replaces the adaptive operating-system chooser with the in-app directory browser, which opens at the authenticated user's Workspace root, lists only descendants accepted by the Host, and creates child folders there. It inserts `ontology-auth-controller`, `tool-ontology`, and `ui-ontology-login`, and suppresses the first-run model credential dialog. Confirmation-required Actions reuse the Web profile's shared approval panel, while Ontology Runtime remains the authority for Project access, current Invocation state, atomic execution, and writes.
 
 The external Runtime API validates the Go Runtime Access Token and `X-Project-Id`. It isolates personal Skills, Workspaces, and Sessions by project and user.
 
 The Go file assistant calls `POST /api/internal/file-assistant/answer` with `Authorization: Bearer <FILE_ASSISTANT_SERVICE_TOKEN>` and JSON `{"question":"…","sources":[{"id":"S1","fileName":"…","text":"…"}]}`. Set the same private service token on both servers. Go authorizes file access and sends up to eight excerpts within a 512 KiB request. The response contains `answer` and unique `sourceIds` from this request. An empty list signals insufficient evidence. A missing service token returns 503, an incorrect token returns 401, and a model failure or invalid citation returns 502.
+
+For published Skill API chat, Go sends `inlineCitations: true` with public source IDs such as `R-0123456789`. The answer places `[R-0123456789]` after the supported sentence or paragraph. The markers match the final `sourceIds` in JSON and NDJSON.
 
 For a nonempty batch of excerpts, send `task: "qa"` to generate `questions` or `task: "extract"` to extract `entities` and `relations`. These requests contain `task` and `sources`. Every returned row carries `sourceIds` from the supplied batch. Relation endpoints are named entities in the same response.
 

@@ -178,7 +178,10 @@ function currentSelection(ctx: Context, sessionId: SessionId) {
 describe('Web session model selection', () => {
   it('refuses a blank Session owned by another Ontology account before reusing it', async () => {
     const { ctx, sessionId } = await harness()
-    ctx.provide('ontologyAuthController', { owns: () => Promise.resolve(false) } as never)
+    ctx.provide('ontologyAuthController', {
+      owns: () => Promise.resolve(false),
+      runWithResourceScope: <Value>(operation: () => Promise<Value>) => operation(),
+    } as never)
     const remote = await createSessionTestRemote(ctx, {
       defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
       cwd: '/tmp',
