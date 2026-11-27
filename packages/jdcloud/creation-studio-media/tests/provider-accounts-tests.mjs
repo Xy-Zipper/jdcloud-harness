@@ -52,6 +52,16 @@ it('restores reservations after restart, keeps disabled original accounts for po
   f.rows.splice(f.rows.findIndex(row => row._id === first.account._id), 1)
   await expect(restarted.resolve('ark', first.receipt)).rejects.toMatchObject({ code: 'accounts/original-account-missing' })
 })
+it('pins replacement subject images of the same remake to its original account across restarts', async () => {
+  const f = await setup()
+  const input = { ...f.input, planId: undefined }
+  const first = await f.create().acquire('ark', input)
+  const restarted = f.create()
+  await expect(restarted.acquire('ark', { ...input, requestId: 'other-subject' })).rejects.toMatchObject({ code: 'accounts/busy' })
+  expect((await restarted.acquire('ark', { ...input, projectId: 'other-project' })).account._id).not.toBe(first.account._id)
+  await restarted.settle(first.receipt, 'succeeded')
+  expect((await restarted.acquire('ark', { ...input, model: SEEDREAM_MODELS[1], requestId: 'other-subject' })).account._id).toBe(first.account._id)
+})
 it('waits for a confirmed slot release and does not release unknown paid outcomes', async () => {
   const f = await setup()
   const pool = f.create()

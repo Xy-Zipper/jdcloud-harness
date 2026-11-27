@@ -1,4 +1,6 @@
 /** 按已发布售价与实际用量精确计算，每次调用最终四舍五入为两位小数金额，不写余额或流水。 */
+import { SEEDANCE_MODEL } from './seedance-request.mjs'
+
 const integer = value => Number.isSafeInteger(value) && value >= 0
 const amount = value => {
   if (typeof value !== 'string' || !/^(0|[1-9]\d*)(\.\d{1,6})?$/u.test(value)) return undefined
@@ -21,8 +23,11 @@ export function calculateShadowCharge(row, prices) {
     return { chargeStatus: 'waived', customerCharge: '0.00', reason: '媒体明确失败，不向客户计费。' }
   if (row.usageStatus !== 'reported')
     return { chargeStatus: 'pending', reason: '实际用量尚未完整返回，暂不计算费用。' }
+  // Seedance 2.5 uses the published Ark rate across both channels. Usage keeps the actual provider.
+  const priceProvider = row.scenario === 'video' && row.modelKey === SEEDANCE_MODEL && row.provider === 'malanshan'
+    ? 'ark' : row.provider
   const candidates = prices.filter(price => price.pricingStatus === 'published' && price.currency === 'CNY'
-    && price.provider === row.provider && price.modelKey === row.modelKey && price.scenario === row.scenario
+    && price.provider === priceProvider && price.modelKey === row.modelKey && price.scenario === row.scenario
     && (!price.effectiveFrom || Number(price.effectiveFrom) <= row.occurredAt)
     && (!price.effectiveTo || Number(price.effectiveTo) > row.occurredAt)
     && (!price.imageMinPixels || row.parameters?.imagePixels >= Number(price.imageMinPixels))

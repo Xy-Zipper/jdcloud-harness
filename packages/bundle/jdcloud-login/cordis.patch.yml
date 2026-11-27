@@ -60,6 +60,13 @@
         accountPoolKeyRef: CREATION_STUDIO_ACCOUNT_POOL_TOKEN
         accountPoolUsernameRef: CREATION_STUDIO_ACCOUNT_POOL_USERNAME
         accountPoolPasswordRef: CREATION_STUDIO_ACCOUNT_POOL_PASSWORD
+        videoRemake:
+          workerURL: !!js process.env.CREATION_STUDIO_VIDEO_REMAKE_WORKER_URL
+          secondCents: !!js "process.env.CREATION_STUDIO_VIDEO_REMAKE_SECOND_CENTS ? Number(process.env.CREATION_STUDIO_VIDEO_REMAKE_SECOND_CENTS) : undefined"
+          mibCents: !!js "process.env.CREATION_STUDIO_VIDEO_REMAKE_MIB_CENTS ? Number(process.env.CREATION_STUDIO_VIDEO_REMAKE_MIB_CENTS) : undefined"
+          balanceDebitAssistant:
+            id: 6aec39e14ecc1c457a578b36
+            nodeId: update2
 
     - id: tool-jdcloud-lowcode
       name: '@deepseek-ai/dsh-tool-jdcloud-lowcode'

@@ -243,7 +243,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-jdcloud-auth-controller`
 
 - `inject`: `credentials`
-- `source`: [`packages/api/jdcloud-auth-controller/src/index.ts:66`](../packages/api/jdcloud-auth-controller/src/index.ts)
+- `source`: [`packages/api/jdcloud-auth-controller/src/index.ts:67`](../packages/api/jdcloud-auth-controller/src/index.ts)
 
 ```ts config-catalog
 /** JDCloud authentication controller configuration. */
@@ -907,7 +907,8 @@ export interface Config {
 ## `@deepseek-ai/dsh-creation-studio-media`
 
 - `inject`: `attachments` · `credentials` · `jdcloudAuthController` · `tools` · `webServer`
-- `source`: [`packages/jdcloud/creation-studio-media/src/index.ts:12`](../packages/jdcloud/creation-studio-media/src/index.ts)
+- `refs`: [`VideoRemakeConfig`](../packages/jdcloud/creation-studio-video-remake/src/index.ts)
+- `source`: [`packages/jdcloud/creation-studio-media/src/index.ts:14`](../packages/jdcloud/creation-studio-media/src/index.ts)
 
 ```ts config-catalog
 /** Fixed platform, persistent receipts, and Host-only credential references. */
@@ -926,7 +927,7 @@ export interface Config {
   imageKeyRef: string
   /** Single Ark credential used when the private account-pool reader is absent. */
   arkKeyRef: string
-  /** Administrator-only table containing numbered Ark and Jimeng credentials. */
+  /** Administrator-only table containing numbered media provider credentials. */
   accountPoolTableId: string
   /** Optional legacy token reference; password login takes priority when configured. */
   accountPoolKeyRef: string
@@ -940,6 +941,8 @@ export interface Config {
   jimengAccessKeyRef: string
   /** Legacy Jimeng secret-key reference used without a private pool reader. */
   jimengSecretKeyRef: string
+  /** Optional child plugin for paid reference-video analysis. */
+  videoRemake?: VideoRemakeConfig
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-creation-studio-media -->
@@ -5471,6 +5474,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 | `@deepseek-ai/dsh-client-ui-slots` | — | [`packages/client/ui-slots/src/index.ts`](../packages/client/ui-slots/src/index.ts) |
 | `@deepseek-ai/dsh-client-web` | — | [`packages/client/web/src/index.ts`](../packages/client/web/src/index.ts) |
 | `@deepseek-ai/dsh-cmdline` | — | [`packages/boot/cmdline/src/index.ts`](../packages/boot/cmdline/src/index.ts) |
+| `@deepseek-ai/dsh-creation-studio-video-remake` | — | [`packages/jdcloud/creation-studio-video-remake/src/index.ts`](../packages/jdcloud/creation-studio-video-remake/src/index.ts) |
 | `@deepseek-ai/dsh-cua-bundle` | — | [`packages/experimental/cua-bundle/src/index.ts`](../packages/experimental/cua-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-deque` | — | [`packages/util/deque/src/index.ts`](../packages/util/deque/src/index.ts) |
 | `@deepseek-ai/dsh-error` | — | [`packages/util/error/src/index.ts`](../packages/util/error/src/index.ts) |

@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/jdcloud/creation-studio-video-remake/README.md
+/:
+  en: f51e9f1a391fba08
+  zh: 338f07650e6c3786
+/deepseek-ai-dsh-creation-studio-video-remake:
+  en: a3d972a91ec0ae08
+  zh: 5eccb30a0fb71b2b
+/deepseek-ai-dsh-creation-studio-video-remake/summary:
+  en: adefa941e6eefeab
+  zh: 56ed3f7a953597c5
+/deepseek-ai-dsh-creation-studio-video-remake/table-of-contents:
+  en: 4e53164159b5ce41
+  zh: b3e6d297c728dca9
+/deepseek-ai-dsh-creation-studio-video-remake/use-this-package:
+  en: 315a72e914cbd710
+  zh: 4f355eaaec12716d
+/deepseek-ai-dsh-creation-studio-video-remake/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-creation-studio-video-remake/model-experience/reference-video-analysis:
+  en: 92224caf335ce4fd
+  zh: 63c08ca315da5a48
+/deepseek-ai-dsh-creation-studio-video-remake/model-experience/reference-video-analysis/what-the-model-sees:
+  en: 96294d5bc9650cab
+  zh: 48b4ad8ad7f9c54f
+/deepseek-ai-dsh-creation-studio-video-remake/model-experience/reference-video-analysis/token-effect:
+  en: efc7a2fb721dfd7a
+  zh: 023b08896f239404
+/deepseek-ai-dsh-creation-studio-video-remake/model-experience/reference-video-analysis/kv-cache-effect:
+  en: b3b3edcbed363ee5
+  zh: 94c3240a4dd06a28
+/deepseek-ai-dsh-creation-studio-video-remake/known-limitations-and-deferred-work:
+  en: e54543af0dc14414
+  zh: 2ec474e0907bff9b
+/deepseek-ai-dsh-creation-studio-video-remake/known-limitations-and-deferred-work/dev-note:
+  en: 0a1253c6f7b5e8b9
+  zh: 9f56528562c7c914

@@ -35,6 +35,9 @@
     },
     {
       "path": "../../core/tools"
+    },
+    {
+      "path": "../creation-studio-video-remake"
     }
   ]
 }

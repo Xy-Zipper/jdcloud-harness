@@ -3,6 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-jdcloud-auth-controller'
 import type {} from '@deepseek-ai/dsh-attachment'
 import type {} from '@deepseek-ai/dsh-credentials'
+import type { Config as VideoRemakeConfig, CreationStudioRemakeBilling } from '@deepseek-ai/dsh-creation-studio-video-remake'
+import { Config as videoRemakeSchema, videoRemakePlugin } from '@deepseek-ai/dsh-creation-studio-video-remake'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
@@ -24,7 +26,7 @@ export interface Config {
   imageKeyRef: string
   /** Single Ark credential used when the private account-pool reader is absent. */
   arkKeyRef: string
-  /** Administrator-only table containing numbered Ark and Jimeng credentials. */
+  /** Administrator-only table containing numbered media provider credentials. */
   accountPoolTableId: string
   /** Optional legacy token reference; password login takes priority when configured. */
   accountPoolKeyRef: string
@@ -38,6 +40,8 @@ export interface Config {
   jimengAccessKeyRef: string
   /** Legacy Jimeng secret-key reference used without a private pool reader. */
   jimengSecretKeyRef: string
+  /** Optional child plugin for paid reference-video analysis. */
+  videoRemake?: VideoRemakeConfig
 }
 
 export const name = media.name
@@ -58,6 +62,7 @@ export const Config = z.object({
   billingWriterKeyRef: z.string().default('CREATION_STUDIO_BILLING_WRITER_TOKEN'),
   jimengAccessKeyRef: z.string().default('JIMENG_ACCESS_KEY_ID'),
   jimengSecretKeyRef: z.string().default('JIMENG_SECRET_ACCESS_KEY'),
+  videoRemake: videoRemakeSchema,
 })
 
 /**
@@ -66,5 +71,9 @@ export const Config = z.object({
  * @param config - Fixed platform, task storage, and credential references.
  */
 export function apply(ctx: Context, config: Config): void {
-  media.apply(ctx, config)
+  const assistant = config.videoRemake?.balanceDebitAssistant
+  if (Boolean(assistant?.id) !== Boolean(assistant?.nodeId))
+    throw new Error('Configure both the Creation Studio balance debit assistant and node ID.')
+  const billing: CreationStudioRemakeBilling = media.apply(ctx, config)
+  if (config.videoRemake) ctx.plugin(videoRemakePlugin(config.platformURL, config.tenantId, billing), config.videoRemake)
 }

@@ -64,6 +64,7 @@ const experimentalPackageDirectory = /^packages\/experimental\/[^/]+$/
 /** Product-specific packages that remain local to this private fork. */
 const privateWorkspacePackages = new Set([
   '@deepseek-ai/dsh-creation-studio-media',
+  '@deepseek-ai/dsh-creation-studio-video-remake',
   '@deepseek-ai/dsh-tool-jdcloud-lowcode',
 ])
 /** Private reference tool run from the repository; it publishes no files. */

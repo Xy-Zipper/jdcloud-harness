@@ -10,7 +10,7 @@ import { IMAGE_SIZES } from './image-generation.mjs';
 import { DEFAULT_IMAGE_MODEL, SEEDREAM_MODELS } from './seedream.mjs';
 export const name = 'creation-studio-media';
 const prefix = '/api/external/v1/creation-studio/media/';
-const operations = ['config', 'images/generate', 'images/quote', 'images/tasks', 'images/refresh', 'images/list', 'video/tasks', 'video/refresh', 'video/list', 'billing/list', 'billing/sync', 'white-background/tasks', 'white-background/refresh', 'white-background/list'];
+const operations = ['config', 'images/generate', 'images/quote', 'images/tasks', 'images/refresh', 'images/list', 'video/tasks', 'video/refresh', 'video/list', 'video/remake-transcript', 'billing/list', 'billing/sync', 'white-background/tasks', 'white-background/refresh', 'white-background/list'];
 /** 工具只能操作本轮真实用户消息绑定的项目，工具结果不能重绑定项目上下文。 */
 function assertProjectTurn(exec, args, tenantId, paidImage = false) {
     const event = exec.agent?.session.snapshotEvents().findLast((event) => event.type === 'user/message' && event.data.source?.kind === 'user');
@@ -155,4 +155,5 @@ export function apply(ctx, config) {
         const result = await runtime.run(action === 'submit' ? 'video/tasks' : action === 'refresh' ? 'video/refresh' : 'video/list', args);
         return action === 'list' ? { tasks: result } : result;
     });
+    return { settle: billing.remake, checkRemake: billing.checkRemake };
 }

@@ -148,6 +148,8 @@
     "tests/models-settings-recovery.e2e.ts",
     "tests/default-model.e2e.ts",
     "tests/jdcloud-ordinary-user.e2e.ts",
+    "tests/creation-studio-video-remake.e2e.ts",
+    "tests/creation-studio-remake-generation.e2e.ts",
     "tests/jdcloud-current-member.e2e.ts",
     "tests/model-menu-observer.e2e.ts",
     "tests/default-workspace.e2e.ts",

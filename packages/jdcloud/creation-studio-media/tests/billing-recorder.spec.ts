@@ -101,6 +101,54 @@ it('persists the provider video task ID with formal metered billing and restores
   expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
 })
 
+it('keeps the Malanshan provider receipt and uses the published Ark rate after reporting usage', async () => {
+  const f = await setup()
+  f.allowUsageWrites()
+  const model = 'doubao-seedance-2-5-260628'
+  for (const [provider, rate, id] of [['ark', '70', 'e'], ['malanshan', '50', 'f']] as const) {
+    f.prices.push({ ...f.prices[0]!, _id: id.repeat(24), provider, modelKey: model,
+      scenario: 'video', videoPerMillionYuan: rate } as typeof f.prices[number])
+  }
+  const input = { ...f.input, planId: '1'.repeat(24), requestId: 'malanshan-video' }
+  const binding = await f.recorder.beginMedia(input)
+  const task = { id: 'provider-task', provider: 'malanshan', providerAccountRef: 'MLS-01',
+    model, status: 'succeeded', createdAt: new Date().toISOString(), videoRefId: '2'.repeat(24) }
+  await f.recorder.media(input, binding, 'video', task, {})
+  expect(f.remoteRows[0]).toMatchObject({
+    provider: 'malanshan', providerRequestId: task.id, providerAccountRef: task.providerAccountRef,
+    usageSource: 'malanshan-task-usage', usageStatus: 'pending', chargeStatus: 'pending',
+  })
+  expect(f.remoteRows[0]).not.toHaveProperty('customerCharge')
+  const restored = createBillingRecorder(f.config, f.auth, async () => '')
+  await restored.media(input, binding, 'video', { status: 'submitting' }, {})
+  expect(f.remoteRows[0]).toMatchObject({ provider: 'malanshan', providerRequestId: task.id, chargeStatus: 'pending' })
+  await restored.media(input, binding, 'video', {
+    ...task, usage: { completion_tokens: 100000, total_tokens: 100000 },
+  }, {})
+  expect(f.remoteRows[0]).toMatchObject({
+    provider: 'malanshan', providerRequestId: task.id, chargeStatus: 'settled', customerCharge: '7.00',
+    priceVersionId: 'e'.repeat(24),
+  })
+  expect(f.remoteRows).toHaveLength(1)
+
+  // Simulate a settled receipt retained from the former provider-specific price policy.
+  const directory = join(f.config.stateDirectory, 'billing')
+  const receiptPath = join(directory, (await readdir(directory))[0]!)
+  const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
+  const historicalPrice = f.prices.find(price => price.provider === 'malanshan')!
+  const historicalFee = { priceVersionId: historicalPrice._id, priceSnapshot: JSON.stringify(historicalPrice), customerCharge: '5.00' }
+  Object.assign(receipt.row, historicalFee)
+  Object.assign(f.remoteRows[0]!, historicalFee)
+  await writeFile(receiptPath, JSON.stringify(receipt))
+  f.auth.requestAuthenticated.mockClear()
+  const recovered = await restored.media(input, binding, 'video', {
+    ...task, usage: { completion_tokens: 100000, total_tokens: 100000 },
+  }, {})
+  expect(recovered).toMatchObject(historicalFee)
+  expect(JSON.parse(await readFile(receiptPath, 'utf8'))).toEqual(receipt)
+  expect(f.auth.requestAuthenticated.mock.calls.filter(([request]) => request.path.endsWith('/update'))).toHaveLength(0)
+})
+
 it('does not update a settled usage row when the same model receipt is recovered again', async () => {
   const f = await setup()
   f.allowUsageWrites()

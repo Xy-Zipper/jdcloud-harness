@@ -14,6 +14,7 @@ import { calculateShadowCharge } from './billing-price.mjs'
 import { SEEDANCE_MODEL, SEEDANCE_MODELS } from './seedance-request.mjs'
 import { assertSpacePoints } from './project-points.mjs'
 import { createOriginalImageReader } from './original-images.mjs'
+import { createRemakeClipEditor, readRemakeVideoBytes } from './remake-clips.mjs'
 
 const MATERIAL = '6ad81c871f280486bb45ac43'
 const RELATION = '6ad81c871f280486bb45ac45'
@@ -32,7 +33,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
   const jobKey = input => JSON.stringify([input.spaceId, input.projectId, input.planId, input.requestId])
   /** Background generation remains owned until its receipt is durable, including during plugin disposal. */
   const imageBackground = {
-    authorize: input => authorizeWrites(input),
+    authorize: input => authorizeWrites(input, input.planId !== undefined),
     start(input, operation) {
       const key = jobKey(input)
       const job = Promise.resolve().then(operation)
@@ -78,7 +79,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       throw new Error('平台创建接口未返回有效记录 ID。')
     return id
   }
-  async function authorizeWrites(input) {
+  async function authorizeWrites(input, planRequired = true) {
     // 空间角色由生成服务核对，表写权限由 Host 菜单快照和平台接口共同检查。
     const status = await auth.status()
     if (!status.authenticated || status.corpId !== config.tenantId || status.baseUrl.replace(/\/$/u, '') !== platform)
@@ -88,13 +89,24 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       if (!menus.menus.some(menu => menu.menuId === menuId && menu.agentPermissions.includes('addData')))
         throw new Error('当前账号没有创建项目素材或引用的权限。')
     }
-    if (![input.projectId, input.planId, input.spaceId].every(recordId))
+    if (![input.projectId, input.spaceId].every(recordId) || (planRequired && !recordId(input.planId)))
       throw new Error('项目、方案或空间 ID 无效。')
   }
   async function persist(path, data) {
     await writeFile(`${path}.tmp`, JSON.stringify(data), { mode: 0o600 })
     await rename(`${path}.tmp`, path)
   }
+  async function uploadFile(bytes, mime, name) {
+    const body = new FormData()
+    body.set('file', new Blob([bytes], { type: mime }), name)
+    const uploaded = await (await transport(`${platform}/api/file/uploader`, { method: 'POST', body })).json()
+    const url = new URL(uploaded.data?.url, platform)
+    const match = /^\/api\/file\/(?:previewImage|dowloadFile)\/([a-f0-9]{24})\/([a-f0-9]{24})$/iu.exec(url.pathname)
+    if (url.origin !== new URL(platform).origin || !match || match[1] !== config.tenantId)
+      throw new Error('上传结果不是当前平台的有效文件引用。')
+    return match[2]
+  }
+  const clips = createRemakeClipEditor(config, transport)
   const uploadPath = (input, kind) => join(config.stateDirectory, 'uploads', `${createHash('sha256').update(JSON.stringify([config.tenantId, input.spaceId, input.projectId, input.planId, input.requestId, kind])).digest('hex')}.json`)
   async function saveResult(input, kind, source, getBytes) {
     const directory = join(config.stateDirectory, 'uploads')
@@ -122,23 +134,18 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     if (!progress.fileId) {
       const { bytes, mime, dimensions } = await getBytes()
       const name = `${kind === 'image' ? 'AI' : 'Seedance'}-${input.requestId}.${kind === 'image' ? mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png' : 'mp4'}`
-      const body = new FormData()
-      body.set('file', new Blob([bytes], { type: mime }), name)
-      const uploaded = await (await transport(`${platform}/api/file/uploader`, { method: 'POST', body })).json()
-      const url = new URL(uploaded.data?.url, platform)
-      const match = /^\/api\/file\/(?:previewImage|dowloadFile)\/([a-f0-9]{24})\/([a-f0-9]{24})$/iu.exec(url.pathname)
-      if (url.origin !== new URL(platform).origin || !match || match[1] !== config.tenantId)
-        throw new Error('上传结果不是当前平台的有效文件引用。')
-      Object.assign(progress, { fileId: match[2], name, mime, bytes: bytes.length, ...dimensions })
+      const fileId = await uploadFile(bytes, mime, name)
+      Object.assign(progress, { fileId, name, mime, bytes: bytes.length, ...dimensions })
       await persist(path, progress)
     }
-    const data = { name: progress.name, spaceId: input.spaceId, library: 'project', category: kind === 'image' ? '镜头图片' : '镜头视频', sourceKind: 'generated', authorization: '自有', fileId: progress.fileId, originalName: progress.name, mime: progress.mime, sizeBytes: progress.bytes, width: progress.width, height: progress.height, durationSeconds: kind === 'image' ? 0 : source.duration, revision: 1, sourceDescription: JSON.stringify(kind === 'image' ? { generatedImage: source } : { generatedVideo: source }) }
+    const remakeVideo = kind === 'video' && input.planId === undefined
+    const data = { name: progress.name, spaceId: input.spaceId, library: 'project', category: kind === 'image' ? '镜头图片' : remakeVideo ? '后期成片' : '镜头视频', sourceKind: 'generated', authorization: '自有', fileId: progress.fileId, originalName: progress.name, mime: progress.mime, sizeBytes: progress.bytes, width: progress.width, height: progress.height, durationSeconds: kind === 'image' ? 0 : source.duration, revision: 1, sourceDescription: JSON.stringify(kind === 'image' ? { generatedImage: source } : { generatedVideo: source }) }
     if (!progress.materialId) {
       progress.materialId = await create(MATERIAL, data)
       await persist(path, progress)
     }
     if (!progress.relationId) {
-      progress.relationId = await create(RELATION, { spaceId: input.spaceId, projectId: input.projectId, materialId: progress.materialId, purpose: kind === 'image' ? '分镜图' : '镜头视频', sourceRevision: 1, usageSnapshot: JSON.stringify(data) })
+      progress.relationId = await create(RELATION, { spaceId: input.spaceId, projectId: input.projectId, materialId: progress.materialId, purpose: kind === 'image' ? '分镜图' : remakeVideo ? '成片' : '镜头视频', sourceRevision: 1, usageSnapshot: JSON.stringify(data) })
       await persist(path, progress)
     }
     progress.result = { relationId: progress.relationId, materialId: progress.materialId, fileId: progress.fileId, sourceRevision: 1, name: progress.name, mime: progress.mime, width: progress.width || 0, height: progress.height || 0, authorization: '自有', ...(kind === 'image' ? { origin: 'generated', generation: source, needsConfirmation: true } : {}) }
@@ -193,7 +200,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
     catch (error) { if (error.code !== 'ENOENT') throw error }
     if (!upload && !progress?.result) return view
     try {
-      if (upload) await authorizeWrites(input)
+      if (upload) await authorizeWrites(input, input.planId !== undefined)
       const result = await saveResult(input, 'image', task.result.source, () => imageBytes(task.result))
       return { ...view, status: 'succeeded', result, billingParameters: { imageOperation: source.referenceIds?.length ? 'edit' : 'generation',
         imageSize: `${result.width}x${result.height}`, imagePixels: result.width * result.height } }
@@ -202,18 +209,52 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       return { ...view, status: 'upload_failed', error: `图片已生成但上传未完成：${error.message} 请用原请求继续上传，不要重新生成。` }
     }
   }
+  async function mediaConfiguration() {
+    const readAccounts = async provider => {
+      try {
+        return await accounts.configuredModels(provider)
+      }
+      catch (error) {
+        if (typeof error.code !== 'string' || !error.code.startsWith('accounts/')) throw error
+        return { image: [], video: [], message: error.message }
+      }
+    }
+    const [ark, malanshan] = await Promise.all([readAccounts('ark'), readAccounts('malanshan')])
+    const seedance25Provider = malanshan.video.includes(SEEDANCE_MODEL) ? 'malanshan' : 'ark'
+    const availability = Object.fromEntries(SEEDANCE_MODELS.map(({ value, label }) => {
+      const state = value === SEEDANCE_MODEL && (malanshan.message || seedance25Provider === 'malanshan') ? malanshan : ark
+      const configured = state.video.includes(value)
+      return [value, configured ? { configured } : {
+        configured, message: state.message || `账号池没有启用支持 ${label} 的视频账号。`,
+      }]
+    }))
+    const image = { configured: SEEDREAM_MODELS.some(model => ark.image.includes(model)), model: defaultImageModel, models: SEEDREAM_MODELS }
+    return {
+      image,
+      whiteBackground: image,
+      video: {
+        configured: Object.values(availability).some(model => model.configured),
+        model: SEEDANCE_MODEL,
+        models: SEEDANCE_MODELS.map(model => model.value),
+        providers: malanshan.message ? {} : { [SEEDANCE_MODEL]: seedance25Provider },
+        availability,
+        referenceVideoAvailability: Object.fromEntries(SEEDANCE_MODELS.map(({ value, label }) => [
+          value, ark.video.includes(value) ? { configured: true }
+            : { configured: false, message: ark.message || `视频参考需要启用支持 ${label} 的火山方舟账号。` },
+        ])),
+      },
+    }
+  }
   async function execute(operation, input) {
     // 白底图可在需求阶段运行，不要求已创建方案；拥有独立的项目、角色与素材校验。
     if (operation.startsWith('white-background/')) return whiteBackground.run(operation.slice('white-background/'.length), input)
     const env = { CREATION_STUDIO_PLATFORM_URL: platform, CREATION_STUDIO_TENANT_ID: config.tenantId, CREATION_STUDIO_IMAGE_STATE_DIR: join(config.stateDirectory, 'images'), CREATION_STUDIO_IMAGE_RETRY_LIMIT: config.imageRetryLimit, CREATION_STUDIO_VIDEO_STATE_DIR: join(config.stateDirectory, 'seedance'), GPT_IMAGE_API_KEY: await keys(config.imageKeyRef || 'GPT_IMAGE_API_KEY'), ARK_API_KEY: await keys(config.arkKeyRef || 'ARK_API_KEY'), SEEDREAM_MODEL: defaultImageModel, PROVIDER_ACCOUNTS: accounts, IMAGE_BACKGROUND: imageBackground }
-    if (operation === 'config') {
-      return { image: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS }, video: { configured: await accounts.configured('ark', 'video'), model: SEEDANCE_MODEL, models: SEEDANCE_MODELS.map(model => model.value) },
-        whiteBackground: { configured: await accounts.configured('ark', 'image'), model: defaultImageModel, models: SEEDREAM_MODELS } }
-    }
+    if (operation === 'config') return mediaConfiguration()
     if (operation === 'billing/list') return billing ? billing.list(input) : { mode: 'metered', rows: [], total: 0 }
     if (operation === 'billing/sync') return billing ? billing.reconcile(input) : { mode: 'metered', processed: 0 }
     const images = createImageService({ ...env, CHECK_POINTS: spaceId => assertSpacePoints(auth, spaceId) }, transport)
-    const videos = createSeedanceService({ ...env, ORIGINAL_IMAGE: originalImage, PUBLIC_IMAGE_FETCH: fetcher }, transport)
+    const videos = createSeedanceService({ ...env, ORIGINAL_IMAGE: originalImage, PUBLIC_MEDIA_FETCH: fetcher, REMAKE_CLIPS: clips,
+      CHECK_POINTS: spaceId => assertSpacePoints(auth, spaceId) }, transport)
     if (operation === 'images/quote') {
       const request = await images.quote('host-authenticated', input)
       const binding = billing ? await billing.beginMedia(input) : undefined
@@ -225,7 +266,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
         ...(fee.priceVersionId === undefined ? {} : { priceVersionId: fee.priceVersionId }), reason: fee.reason, estimated: true }
     }
     if (operation === 'images/tasks') {
-      await authorizeWrites(input)
+      await authorizeWrites(input, input.planId !== undefined)
       return imageTaskView(await images.submit('host-authenticated', input), input, true)
     }
     if (operation === 'images/refresh') {
@@ -236,13 +277,13 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
           || new Set(input.taskIds).size !== input.taskIds.length) {
           throw new Error('请传入非空且不重复的 taskIds 数组。')
         }
-        await authorizeWrites(input)
+        await authorizeWrites(input, input.planId !== undefined)
         const saved = await images.list('host-authenticated', input)
         const tasks = input.taskIds.map(taskId => saved.find(task => task.taskId === taskId || task.previousTaskIds?.includes(taskId)))
         if (tasks.some(task => !task) || new Set(tasks.map(task => task?.requestId)).size !== tasks.length)
           throw new Error('图片任务不属于当前项目、方案或空间，或重复引用了同一任务。')
         return Promise.all(tasks.map(async task => {
-          const request = { projectId: input.projectId, planId: input.planId, spaceId: input.spaceId, requestId: task.requestId }
+          const request = { projectId: input.projectId, ...(input.planId === undefined ? {} : { planId: input.planId }), spaceId: input.spaceId, requestId: task.requestId }
           try { return await runtime.run(operation, request) }
           catch (error) {
             return { requestId: task.requestId, taskId: task.taskId, status: 'refresh_failed',
@@ -251,7 +292,7 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
         }))
       }
       // 查询可能触发供应商明确失败后的受控重提，仍需当前素材及引用写权限。
-      await authorizeWrites(input)
+      await authorizeWrites(input, input.planId !== undefined)
       return imageTaskView(await images.refresh('host-authenticated', input), input, true)
     }
     if (operation === 'images/list') {
@@ -264,9 +305,11 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       return saveResult(input, 'image', result.source, () => imageBytes(result))
     }
     if (operation === 'video/tasks') {
-      await authorizeWrites(input)
+      await authorizeWrites(input, input.planId !== undefined)
       return videos.submit('host-authenticated', input)
     }
+    if (operation === 'video/remake-transcript')
+      return videos.transcript('host-authenticated', input)
     if (operation === 'video/list') {
       const tasks = await videos.list('host-authenticated', input)
       return Promise.all(tasks.map(async (task) => {
@@ -290,29 +333,30 @@ export function createHarnessMediaRuntime(config, auth, keys, inspectImage, fetc
       }))
     }
     if (operation === 'video/refresh') {
-      const result = await videos.refresh('host-authenticated', input)
+      const { remakeClip, remakeMusic, remakeCaptions, ...result } = await videos.refresh('host-authenticated', input)
       if (result.status !== 'succeeded')
         return result
       try {
-        await authorizeWrites(input)
+        await authorizeWrites(input, input.planId !== undefined)
         const saved = await saveResult(input, 'video', { requestId: result.requestId, taskId: result.id, duration: result.duration, model: result.model, createdAt: result.createdAt, confirmedAt: '' }, async () => {
           const url = new URL(result.videoUrl)
           if (url.protocol !== 'https:' || !['.volces.com', '.volccdn.com', '.volcengine.com'].some(domain => url.hostname.endsWith(domain)))
             throw new Error('方舟结果地址不在受信任的视频存储域名中。')
           const response = await fetcher(url.href, { redirect: 'error', signal: AbortSignal.timeout(180_000) })
-          if (!response.ok || Number(response.headers.get('content-length')) > 250 * 1024 * 1024)
-            throw new Error('生成视频下载失败或超过250MB。')
-          const chunks = []
-          let total = 0
-          for await (const chunk of response.body) {
-            total += chunk.length
-            if (total > 250 * 1024 * 1024)
-              throw new Error('生成视频超过250MB。')
-            chunks.push(chunk)
+          let bytes = await readRemakeVideoBytes(response, (remakeClip || remakeMusic || remakeCaptions ? 120 : 250) * 1024 * 1024, '生成视频下载失败或文件格式、大小无效。')
+          // Only receipts that already pinned a local assembly plan require the worker.
+          if (remakeClip) {
+            if (!clips) throw new Error('原片剪辑服务未配置，请恢复 Worker 后查询原任务。')
+            bytes = await clips.merge(remakeClip, bytes)
           }
-          const bytes = Buffer.concat(chunks)
-          if (bytes.toString('ascii', 4, 8) !== 'ftyp' || response.headers.get('content-type')?.includes('text/html'))
-            throw new Error('生成视频内容不是有效的 MP4。')
+          if (remakeMusic) {
+            if (!clips) throw new Error('背景音乐剪辑服务未配置，请恢复 Worker 后查询原任务。')
+            bytes = await clips.mixMusic(remakeMusic, bytes)
+          }
+          if (remakeCaptions) {
+            if (!clips) throw new Error('字幕同步服务未配置，请恢复剪辑 Worker 后查询原任务。')
+            bytes = await clips.syncCaptions(remakeCaptions, bytes)
+          }
           return { bytes, mime: 'video/mp4', dimensions: {} }
         })
         return { ...result, videoUrl: `${platform}/api/file/dowloadFile/${config.tenantId}/${saved.fileId}`, videoRefId: saved.relationId, videoFileId: saved.fileId }

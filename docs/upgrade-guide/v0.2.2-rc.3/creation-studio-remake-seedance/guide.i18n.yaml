@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.3/creation-studio-remake-seedance/guide.md
+/:
+  en: 4f7902e1dee5852f
+  zh: ae8df03550407ddb
+/creation-studio-remakes-use-seedance-for-the-final-cut:
+  en: 2e7dff7b5cc16624
+  zh: 2fdd542307c122c6
+/creation-studio-remakes-use-seedance-for-the-final-cut/change:
+  en: 80c08e8e12b61832
+  zh: b3720c2eeede0d13
+/creation-studio-remakes-use-seedance-for-the-final-cut/migration:
+  en: d239138dddc032f5
+  zh: 8d1fe1c2307375b0

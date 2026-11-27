@@ -109,15 +109,25 @@ export function createImageService(env, transport = fetch) {
   async function authorize(token, input) {
     if (!platform || !tenant)
       throw new ApiError('生图服务缺少平台地址或租户配置。', 503)
-    if (!token || !id(input.projectId) || !id(input.spaceId) || !id(input.planId))
+    if (!token || !id(input.projectId) || !id(input.spaceId) || (input.planId !== undefined && !id(input.planId)))
       throw new ApiError('请登录并打开已保存的项目。', 401)
     const user = (await platformCall(token, '/api/oauth/currentUser')).userInfo
     if (!user?.id || user.corpId !== tenant)
       throw new ApiError('账号不属于当前租户。', 403)
-    const [project, space, plan] = await Promise.all([detail(token, MENU.project, input.projectId), detail(token, MENU.space, input.spaceId), detail(token, MENU.plan, input.planId)])
+    const [project, space, plan] = await Promise.all([
+      detail(token, MENU.project, input.projectId),
+      detail(token, MENU.space, input.spaceId),
+      input.planId === undefined ? undefined : detail(token, MENU.plan, input.planId),
+    ])
     if (project?._id !== input.projectId || project.spaceId !== input.spaceId || project.deletedAt
-      || space?._id !== input.spaceId || space.status === 'inactive' || project.adoptedPlanId !== input.planId
-      || plan?._id !== input.planId || plan.projectId !== input.projectId || plan.spaceId !== input.spaceId) {
+      || space?._id !== input.spaceId || space.status === 'inactive') {
+      throw new ApiError('项目、空间或当前采纳方案不可用。', 403)
+    }
+    const remake = parse(project.specification)?.videoRemake
+    if (input.planId === undefined
+      ? remake?.version !== 1 || !id(remake.sourceRefId) || Boolean(project.adoptedPlanId)
+      : project.adoptedPlanId !== input.planId || plan?._id !== input.planId
+        || plan.projectId !== input.projectId || plan.spaceId !== input.spaceId) {
       throw new ApiError('项目、空间或当前采纳方案不可用。', 403)
     }
     if (space.ownerUserId !== user.id) {
@@ -127,6 +137,7 @@ export function createImageService(env, transport = fetch) {
         throw new ApiError('当前角色不能生成图片。', 403)
       }
     }
+    if (input.planId === undefined) return user.id
     const shots = (await rows(token, MENU.shot, [filter('spaceId', input.spaceId), filter('projectId', input.projectId), filter('planId', input.planId)]))
       .sort((left, right) => Number(left.sortOrder) - Number(right.sortOrder))
     const requirement = { ...project, specification: parse(project.specification), caseIds: parse(project.caseIds || '[]'), _meta: { schemaVersion: '1.0', artifactType: 'creation-studio-requirement-intake', syncStatus: 'synced', tenantId: tenant, projectId: input.projectId, spaceId: input.spaceId, revision: Number(project.formRevision), baseRevision: Number(project.formRevision) } }

@@ -17,6 +17,18 @@ it('prices 144512 video tokens exactly once and waits for delivery', () => {
   expect(calculateShadowCharge(video, [price]).customerCharge).toBe('14.45')
   expect(calculateShadowCharge({ ...video, delivered: false }, [price]).chargeStatus).toBe('pending')
 })
+it('uses the matching published Ark rate only for Malanshan Seedance 2.5', () => {
+  const row = { ...video, provider: 'malanshan', modelKey: 'doubao-seedance-2-5-260628', parameters: { resolution: '480p' } }
+  const arkPrice = { ...price, modelKey: row.modelKey, resolution: '480p' }
+  const oldPrice = { ...arkPrice, provider: 'malanshan', videoPerMillionYuan: '50' }
+  const otherTier = { ...arkPrice, resolution: '720p' }
+  expect(calculateShadowCharge(row, [arkPrice, oldPrice, otherTier])).toMatchObject({
+    customerCharge: '14.45', priceVersionId: arkPrice._id, priceSnapshot: JSON.stringify(arkPrice),
+  })
+  expect(calculateShadowCharge(row, [oldPrice, otherTier]).chargeStatus).toBe('pending')
+  expect(calculateShadowCharge({ ...row, usageStatus: 'pending' }, [arkPrice]).chargeStatus).toBe('pending')
+  expect(calculateShadowCharge({ ...row, modelKey: video.modelKey }, [price]).chargeStatus).toBe('pending')
+})
 it('selects the actual image pixel tier and charges only references beyond the free first image', () => {
   const row = { ...video, scenario: 'image', modelKey: 'seedream', imageCount: 1, imageInputCount: 3, parameters: { imagePixels: 2610000 } }
   const imagePrice = { ...price, scenario: 'image', modelKey: 'seedream', billingUnit: 'image', imagePerUnitYuan: '0.3', imageInputPerUnitYuan: '0.02', imageFreeInputCount: 1, imageMinPixels: 0, imageMaxPixels: 2610000 }

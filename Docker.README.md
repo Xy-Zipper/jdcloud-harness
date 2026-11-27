@@ -83,6 +83,8 @@ TZ=Asia/Hong_Kong
 
 造物片场媒体插件随 JDCloud bundle 构建并装入镜像，无需到前端项目打包或单独安装媒体插件。两类媒体密钥可留空；配置后重建容器即可使用。任务回执和上传进度保存在 `data/creation-studio-media`，替换容器时保留该目录。Skill ZIP 继续通过 Skill 管理单独安装，详见[媒体包说明](packages/jdcloud/creation-studio-media/README.zh.md)。
 
+在私有媒体账号池启用马栏山的 Seedance 2.5 视频账号，并允许 Harness 出站访问 `maas.mlsvcloud.com:8559`。账号池保存后可刷新片场查看对应供应商的报价。[马栏山账号配置](packages/jdcloud/creation-studio-media/README.zh.md#seedance-25-provider)
+
 `JDCLOUD_IFRAME_PARENT_ORIGIN` 填写包含 iframe 的父页面 origin，只能包含协议、主机和端口，不能包含路径；设置为 `*` 会允许全部网站嵌入并接受点击劫持风险。Docker overlay 使用 Bearer 浏览器会话：token 只保存在当前标签页的 `sessionStorage`，同源 Fetch 与 RPC 通过 Authorization header 携带 token，WebSocket 使用短期单次 ticket。因此跨站 iframe 不再依赖第三方 cookie，也不要求 HTTPS。
 
 Bearer 只能解决浏览器拒绝跨站 cookie 的问题，不会加密 HTTP 流量。使用明文 HTTP 时，网络观察者或中间节点仍可窃取会话 token；能部署受信任 HTTPS 时仍应优先使用 HTTPS。修改 `.env` 或 `compose.yaml` 后必须重建容器；修改本仓库代码后还必须重新构建并加载镜像。
@@ -99,6 +101,31 @@ docker compose ps
 ```
 
 JDCloud Bearer 部署的根页面直接返回 `2xx`；健康检查仍将本地 `3080` 端口的 `2xx` 或 `3xx` 响应视为服务已就绪。修改 `compose.yaml` 后不需要重新构建镜像，但需要重建容器。
+
+## 启用造物片场一键复刻
+
+一键复刻需要新版 Harness、造物片场前端以及独立的 rea-video 拆解服务。在部署时同时使用 `compose.yaml` 与 `compose.video-remake.yaml`。在线构建时，在服务端仓库目录执行 `docker compose -f compose.yaml -f compose.video-remake.yaml build video-remake-worker` 构建拆解镜像。离线部署时，在打包机为 Linux amd64 构建并导出 `jdcloud-harness-video-remake:local`，随新版 Harness 镜像及两份 Compose 文件上传。
+
+Docker Hub 加速器无法读取 Python 基础镜像时，可在构建机设置 `CREATION_STUDIO_VIDEO_REMAKE_PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim-bookworm`。
+
+两项费率都在部署环境中设置，以百分之一积分为单位。以下为试运营示例，每秒 0.02 积分，每 MiB 0.01 积分。部署前按实际定价调整。
+
+```env
+CREATION_STUDIO_VIDEO_REMAKE_SECOND_CENTS=2
+CREATION_STUDIO_VIDEO_REMAKE_MIB_CENTS=1
+```
+
+镜像已加载后，在服务器执行以下命令。部署仍使用原有 `.env`、数据目录、可信域名和低代码账号。让反向代理允许至少 30 MiB 的请求体，并保留现有媒体接口读取超时。
+
+```sh
+docker compose -f compose.yaml -f compose.video-remake.yaml up -d --no-build --pull never
+```
+
+Worker 启动时根据容器实际可用的 CPU 与内存选择拆解并发。运行 `docker compose -f compose.yaml -f compose.video-remake.yaml logs --tail=20 video-remake-worker` 查看 `slots`。可用 `CREATION_STUDIO_VIDEO_REMAKE_WORKER_CPUS` 和 `CREATION_STUDIO_VIDEO_REMAKE_WORKER_MEM_LIMIT` 限制 Worker 的资源，内存上限默认为 8 GiB。改动配额后重建容器，让 Worker 重新计算并发。
+
+拆解费通过低代码用量表和扣积分助手结算。Harness 可核对积分流水，造物片场默认配置也支持核对直接更新余额的数据助手执行记录。先在测试空间核对一条 `rea-video` 用量记录的扣款，再查询同一任务并核对余额。保持单个 Harness Host 和持久化 `data/creation-studio-media` 目录。参见[视频拆解插件](packages/jdcloud/creation-studio-video-remake/README.zh.md)。
+
+同步部署造物片场前端和 Harness。新任务的画面、对白、配乐和字幕由 Seedance 生成，Harness 直接入库模型返回的 MP4。原片主体替换使用已启用视频参考的方舟账号，并按整段原片参考计价。`CREATION_STUDIO_VIDEO_REMAKE_WORKER_URL` 继续用于原片拆解及兼容转存，也供仍带本地合成计划的旧任务恢复入库。
 
 ## 修改模型配置
 

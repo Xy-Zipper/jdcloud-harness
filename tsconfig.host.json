@@ -11,6 +11,7 @@
     "snapshots/session/headless.snapshot.ts",
     "apps/web/tests/jdcloud-current-member.e2e.ts",
     "apps/web/tests/jdcloud-ordinary-user.e2e.ts",
+    "apps/web/tests/creation-studio-video-remake.e2e.ts",
     "apps/web/tests/home-whale.e2e.ts",
     "apps/web/tests/sidebar-drawer.e2e.ts",
     "apps/web/tests/creation-recommendations.e2e.ts",
@@ -625,6 +626,7 @@
     {"path":"./packages/api/jdcloud-auth-controller"},
     {"path":"./packages/jdcloud/tool-jdcloud-lowcode"},
     {"path":"./packages/jdcloud/creation-studio-media"},
+    {"path":"./packages/jdcloud/creation-studio-video-remake"},
     {"path":"./packages/bundle/jdcloud-login"}
   ]
 }

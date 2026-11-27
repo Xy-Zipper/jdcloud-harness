@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { VideoRemakeError } from '@deepseek-ai/dsh-creation-studio-video-remake'
 import { calculateShadowCharge, normalizeAgentUsage } from './billing-price.mjs'
 import { assertSpacePoints } from './project-points.mjs'
 
@@ -10,9 +11,25 @@ const USAGE = '6ad81c871f280486bb45ac5b'
 const SPACE = '6adb0fbec3ca9f3dcdaf499a'
 const MEMBER = '6adb0fbec3ca9f3dcdaf499d'
 const PROJECT = '6ad81c131f280486bb45ac3f'
+const LEDGER = '6ad81c871f280486bb45ac5f'
 const id = value => typeof value === 'string' && /^[a-f0-9]{24}$/iu.test(value)
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const filter = (enCode, value) => ({ enCode, method: 'eq', type: 'custom', value })
+const remakeFailure = (status, code, message) => new VideoRemakeError(status, code, message)
+function pointMicros(value) {
+  const raw = typeof value === 'number' && Number.isFinite(value) ? String(value) : value
+  if (typeof raw !== 'string' || !/^-?\d{1,12}(?:\.\d{1,6})?$/u.test(raw)) return undefined
+  const [integer, fraction = ''] = raw.replace(/^-/, '').split('.')
+  return BigInt(integer + fraction.padEnd(6, '0')) * (raw.startsWith('-') ? -1n : 1n)
+}
+function logJSON(value) {
+  if (typeof value !== 'string') return value
+  try { return JSON.parse(value) }
+  catch (error) {
+    if (!(error instanceof SyntaxError)) throw error
+    return undefined
+  }
+}
 const read = async path => {
   try {
     const value = JSON.parse(await readFile(path, 'utf8'))
@@ -52,17 +69,20 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
   async function platform(path, body, method = body === undefined ? 'GET' : 'POST') {
     return auth.requestAuthenticated({ path, method, ...(body === undefined ? {} : { body }) }, AbortSignal.timeout(30_000))
   }
-  async function rows(menuId, filters) {
+  async function rows(menuId, filters, sort) {
     const result = []
     for (let page = 1; page <= 20; page++) {
-      const data = await platform('/api/visualdev/form/list', { menuId, currentPage: page, pageSize: 200, connect: 'and', filter: filters, association: false, userInfoConvert: false })
+      const data = await platform('/api/visualdev/form/list', { menuId, currentPage: page, pageSize: 200, connect: 'and', filter: filters,
+        association: false, userInfoConvert: false, ...(sort && { sort }) })
       if (!Array.isArray(data?.list)) throw new Error('影子计费列表返回异常。')
       result.push(...data.list)
-      if (data.list.length < 200) return result
+      const total = Number(data.pagination?.total)
+      if (Number.isSafeInteger(total) && total >= 0 ? result.length >= total : data.list.length < 200) return result
+      if (data.list.length === 0) break
     }
     throw new Error('影子计费配置超过读取上限。')
   }
-  async function identity(input) {
+  async function identity(input, editing = false) {
     if (!id(input.spaceId)) throw new Error('计费记录缺少团队空间。')
     const status = await auth.status()
     if (!status.authenticated || status.corpId !== config.tenantId || status.baseUrl.replace(/\/$/u, '') !== config.platformURL.replace(/\/$/u, ''))
@@ -71,11 +91,17 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     if (!user?.id || user.corpId !== config.tenantId) throw new Error('计费操作人身份无效。')
     const scopeKey = await auth.currentScopeKey()
     const space = await platform('/api/visualdev/form/info', { menuId: SPACE, _id: input.spaceId })
-    if (space?._id !== input.spaceId || space.status === 'inactive') throw new Error('计费空间不可用。')
+    if (space?._id !== input.spaceId || space.status === 'inactive') {
+      if (editing) throw remakeFailure(403, 'space-forbidden', '当前空间不可用或没有拆解权限。')
+      throw new Error('计费空间不可用。')
+    }
     if (space.ownerUserId !== user.id) {
       const members = await rows(MEMBER, [filter('spaceId', input.spaceId), filter('userId', user.id)])
-      if (!members.some(member => member.spaceId === input.spaceId && member.userId === user.id && member.status === 'active'))
+      if (!members.some(member => member.spaceId === input.spaceId && member.userId === user.id && member.status === 'active'
+        && (!editing || ['admin', 'editor'].includes(member.role)))) {
+        if (editing) throw remakeFailure(403, 'space-forbidden', '当前空间不可用或没有拆解权限。')
         throw new Error('不能访问其他团队空间的计费记录。')
+      }
     }
     if (input.projectId) {
       if (!id(input.projectId)) throw new Error('计费项目编号无效。')
@@ -95,7 +121,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     try { return await pending }
     finally { if (active.get(key) === pending) active.delete(key) }
   }
-  async function sync(record) {
+  async function sync(record, file = `${record.key}.json`) {
     let creating = false
     try {
       const token = config.billingWriterKeyRef ? await keys(config.billingWriterKeyRef) : ''
@@ -147,11 +173,13 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
           throw new Error('已结算回执与当前费用或供应商任务编号不一致，请人工核对；未重复更新扣分。')
         return { ...record, remoteId, syncStatus: 'synced', syncMessage: '' }
       }
+      if (existing && record.row.usageSource === 'harness-video-remake')
+        return { ...record, syncStatus: 'unknown', syncMessage: '已有拆解用量的结算状态待核对。' }
       const data = JSON.stringify(payload)
       if (remoteId) await call('/api/visualdev/form/update', { menuId: USAGE, _id: remoteId, data }, 'PUT')
       else {
         record = { ...record, syncStatus: 'unknown' }
-        await persist(`${record.key}.json`, record)
+        await persist(file, record)
         creating = true
         remoteId = await call('/api/visualdev/form/create', { menuId: USAGE, data })
       }
@@ -167,7 +195,17 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     const key = hash([config.tenantId, row.usageEventKey])
     return serialize(key, async () => {
       const previous = await read(join(directory, `${key}.json`))
+      // Runtime preflight has no routed provider or task ID. Keep a previous attempt's receipt when retrying.
+      if (previous && row.scenario === 'video' && row.status === 'submitting' && !row.providerRequestId) return previous.row
       if (previous?.row.delivered && row.scenario !== 'agent' && !row.delivered) return previous.row
+      // Keep finalized receipts from before Seedance 2.5 shared the Ark price table.
+      if (previous?.row.scenario === 'video' && previous.row.provider === 'malanshan'
+        && previous.row.chargeStatus === 'ready' && logJSON(previous.row.priceSnapshot)?.provider === 'malanshan') {
+        if (previous.syncStatus === 'synced') return previous.row
+        const synced = await sync(previous)
+        await persist(`${key}.json`, synced)
+        return synced.row
+      }
       const pinned = previous?.prices ?? priceRows
       // 操作人由首次合法提交固定；他人查询/恢复不能把账单改为自己的消费。
       const normalized = { ...previous?.row, ...row, ...(previous ? { initiatedByUserId: previous.row.initiatedByUserId, occurredAt: previous.row.occurredAt } : {}),
@@ -199,6 +237,80 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     } catch { return undefined }
   }
   const sessionKey = session => hash([session.id, session.header.createdAt])
+  function remakeEventKey(owner, requestId) {
+    return `video-remake:${owner.spaceId}:${owner.initiatedByUserId}:${requestId}`
+  }
+  async function findBalanceDebit(record, spaceId, expected) {
+    const assistant = config.videoRemake?.balanceDebitAssistant
+    if (!assistant?.id || !assistant.nodeId) return undefined
+    let receiptId
+    for (let currentPage = 1; currentPage <= 10; currentPage++) {
+      const data = await platform(`/api/visualdev/dataAssistant/log/${assistant.id}`, {
+        currentPage, pageSize: 50, dateRange: [], result: '', triggerUser: '',
+      })
+      if (!Array.isArray(data?.list)) throw new Error('Invalid data assistant log page.')
+      for (const run of data.list) {
+        const trigger = logJSON(run.triggerData)
+        if (trigger?._id !== record.remoteId || run.result !== 'success') continue
+        const nodes = logJSON(run.nodeLogs)
+        if (!Array.isArray(nodes)) continue
+        const debits = nodes.filter(node => node.triggerNodeId === assistant.nodeId && node.result === 'success')
+        if (!debits.length) continue
+        const spaces = logJSON(debits[0].dataInfos)
+        if (receiptId || debits.length !== 1 || !id(run.id) || run.triggerType !== 'add'
+          || trigger.spaceId !== spaceId || trigger.chargeStatus !== 'settled' || pointMicros(trigger.customerCharge) !== expected
+          || !Array.isArray(spaces) || spaces.length !== 1 || spaces[0]?._id !== spaceId
+          || pointMicros(spaces[0].points) === undefined)
+          throw remakeFailure(409, 'settlement-conflict', '原任务的扣分执行记录不一致，请联系管理员核对。')
+        receiptId = run.id
+      }
+      // The platform lists newest logs first. Keep the adjacent executions to detect repeated debits.
+      if (data.list.length < 50 || (receiptId && Number(data.list.at(-1)?.triggerTime) < record.row.occurredAt))
+        return receiptId
+    }
+    return undefined
+  }
+  async function verifyRemake(record, spaceId, file) {
+    if (record.syncStatus !== 'synced')
+      throw remakeFailure(503, 'settlement-sync-pending', '拆解结果已保存，用量单仍待确认。请重试原任务。')
+
+    const linked = row => row.callId === record.remoteId && row.spaceId === spaceId && row.kind === 'settle'
+    const scope = filter('spaceId', spaceId)
+    const sort = { creatorTime: 'desc' }
+    let charges
+    try {
+      // Some ledger views only support the same space filter that Studio uses.
+      const exact = await rows(LEDGER, [scope, filter('callId', record.remoteId)], sort).catch(() => [])
+      charges = exact.filter(linked)
+      if (!charges.length) charges = (await rows(LEDGER, [scope], sort)).filter(linked)
+    } catch {
+      throw remakeFailure(503, 'settlement-check-unavailable', '暂时无法读取当前空间的积分流水。请查询原任务的扣费回执。')
+    }
+    const debits = charges.map(row => pointMicros(row.pointsDelta))
+    const expected = BigInt(record.result.cents) * 10_000n
+    if (charges.some(row => !id(row._id)) || new Set(charges.map(row => row._id)).size !== charges.length
+      || debits.some(amount => amount === undefined || amount >= 0n))
+      throw remakeFailure(409, 'settlement-conflict', '原任务的扣费流水有异常，请联系管理员核对。')
+    const deducted = debits.reduce((total, amount) => total - amount, 0n)
+    if (deducted > expected)
+      throw remakeFailure(409, 'settlement-conflict', '原任务的实际扣费超过确认金额，请联系管理员核对。')
+    if (deducted === 0n) {
+      if (id(record.balanceDebitRunId)) return record.result
+      let receiptId
+      try { receiptId = await findBalanceDebit(record, spaceId, expected) }
+      catch (error) {
+        if (error instanceof VideoRemakeError) throw error
+        throw remakeFailure(503, 'settlement-check-unavailable', '暂时无法读取扣分助手的执行记录。请查询原任务的扣费回执。')
+      }
+      if (receiptId) {
+        await persist(file, { ...record, balanceDebitRunId: receiptId })
+        return record.result
+      }
+    }
+    if (deducted < expected)
+      throw remakeFailure(503, 'settlement-pending', '拆解已完成，积分账本尚未返回足额扣款回执。请查询原任务。')
+    return record.result
+  }
   /** 只重算未完成的影子账，逐条串行恢复；不会调用模型或重新生成媒体。 */
   async function reconcile(input) {
     await identity(input)
@@ -225,6 +337,66 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
     return { mode: 'metered', processed }
   }
   return {
+    /** 保存测量结果再写入结算单，账本回执未确认时仍可查询同一操作。 */
+    async remake(input, perform) {
+      const owner = await identity(input, true)
+      if (stopping) throw remakeFailure(503, 'unavailable', '拆解服务正在重启，请稍后重试。')
+      const eventKey = remakeEventKey(owner, input.requestId)
+      const key = hash([config.tenantId, eventKey])
+      const file = `${key}.remake.json`
+      const checkBalance = async (cents) => {
+        const space = await platform('/api/visualdev/form/info', { menuId: SPACE, _id: owner.spaceId })
+        const balance = pointMicros(space?.points)
+        if (space?._id !== owner.spaceId || space.status === 'inactive' || balance === undefined)
+          throw remakeFailure(503, 'balance-unavailable', '当前空间积分暂时无法核实，请重试。')
+        if (balance < BigInt(cents) * 10_000n)
+          throw remakeFailure(402, 'insufficient-points', '当前空间积分不足，请充值后重试。')
+      }
+      return serialize(key, async () => {
+        let record = await read(join(directory, file))
+        if (record) {
+          if (record.digest !== input.digest || record.result.cents > input.maxCents)
+            throw remakeFailure(409, 'receipt-conflict', '上传文件或已确认金额与原拆解任务不一致。')
+        } else {
+          const occurredAt = Date.now()
+          const result = await perform(checkBalance)
+          const { duration, bytes, cents, rates } = result
+          record = { key, digest: input.digest, result, syncStatus: 'pending', row: {
+            spaceId: owner.spaceId, initiatedByUserId: owner.initiatedByUserId, requestId: input.requestId,
+            usageEventKey: eventKey, scenario: 'video', modelKey: 'rea-video', provider: 'harness',
+            billingMode: 'metered', payer: 'customer', status: 'succeeded', usageStatus: 'reported',
+            chargeStatus: 'ready', customerCharge: (cents / 100).toFixed(2), delivered: true,
+            usage: JSON.stringify({ duration, bytes }), parameters: { duration, bytes },
+            priceSnapshot: JSON.stringify({ currency: 'CNY', versionCode: 'video-remake-by-size-duration', ...rates }),
+            occurredAt, completedAt: Date.now(), usageSource: 'harness-video-remake',
+            schemaVersion: 'usage-decimal-2', reason: '参考视频拆解',
+          } }
+          await persist(file, record)
+        }
+        if (record.syncStatus !== 'synced') {
+          if (record.syncStatus === 'pending') await checkBalance(record.result.cents)
+          record = await sync(record, file)
+          await persist(file, record)
+        }
+        return verifyRemake(record, owner.spaceId, file)
+      })
+    },
+    /** Open the original receipt for the same authenticated account and space. */
+    async checkRemake(input) {
+      const owner = await identity(input, true)
+      if (stopping) throw remakeFailure(503, 'unavailable', '拆解服务正在重启，请稍后重试。')
+      const key = hash([config.tenantId, remakeEventKey(owner, input.requestId)])
+      return serialize(key, async () => {
+        const file = `${key}.remake.json`
+        const record = await read(join(directory, file))
+        if (!record) throw remakeFailure(404, 'task-not-found', '当前账号和空间下没有找到原拆解任务。')
+        if (input.digest !== undefined && record.digest !== input.digest)
+          throw remakeFailure(409, 'receipt-conflict', '参考视频与原拆解任务不一致，请重新选择原文件。')
+        if (record.result.cents > input.maxCents)
+          throw remakeFailure(409, 'receipt-conflict', '已确认金额与原拆解任务不一致。')
+        return verifyRemake(record, owner.spaceId, file)
+      })
+    },
     /** 已核验的空间绑定也随会话落盘；普通 Harness 会话没有绑定，不套用造物片场积分。 */
     async checkPoints(session, signal) {
       const history = bindings.get(sessionKey(session)) ?? await read(join(directory, `${sessionKey(session)}.bindings.json`))
@@ -309,12 +481,13 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
       if (!binding) return
       const failure = ['failed', 'expired', 'cancelled'].includes(task.status)
       const usage = task.usage
+      const provider = task.provider || 'ark'
       const validVideo = Number.isSafeInteger(usage?.completion_tokens) && usage.completion_tokens >= 0
         && (usage.total_tokens === undefined || usage.total_tokens === usage.completion_tokens)
       // 视频保存供应商返回的 cgt 编号；缺少新编号的中间状态不能清空原回执。
       const providerRequestId = task.id || task.taskId
       return save({ spaceId: binding.spaceId, projectId: input.projectId, initiatedByUserId: binding.initiatedByUserId,
-        requestId: input.requestId, scenario, provider: task.provider || 'ark',
+        requestId: input.requestId, scenario, provider,
         ...(task.providerAccountRef ? { providerAccountRef: task.providerAccountRef } : {}),
         modelKey: task.model || (scenario === 'image' ? input.model || 'doubao-seedream-5-0-pro-260628' : 'doubao-seedance-2-5-260628'),
         usageEventKey: `${scenario}:${input.spaceId}:${input.projectId}:${input.planId}:${input.requestId}`,
@@ -324,7 +497,7 @@ export function createBillingRecorder(config, auth, keys, fetcher = fetch) {
         ...(scenario === 'image' && task.imageInputCount !== undefined ? { imageInputCount: task.imageInputCount } : {}),
         ...(validVideo ? { videoOutputTokens: usage.completion_tokens, totalTokens: usage.total_tokens } : {}),
         delivered: Boolean(task.result?.relationId || task.videoRefId), occurredAt: Date.parse(task.createdAt) || Date.now(),
-        completedAt: Date.now(), usageSource: scenario === 'video' ? 'ark-task-usage' : 'platform-image-result',
+        completedAt: Date.now(), usageSource: scenario === 'video' ? `${provider}-task-usage` : 'platform-image-result',
         payer: 'customer' }, binding.prices, parameters)
     },
     reconcile,

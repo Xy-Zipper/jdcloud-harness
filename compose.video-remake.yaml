@@ -1,0 +1,33 @@
+services:
+  jdcloud-harness:
+    environment:
+      CREATION_STUDIO_VIDEO_REMAKE_WORKER_URL: http://video-remake-worker:8090/analyze
+      CREATION_STUDIO_VIDEO_REMAKE_SECOND_CENTS: ${CREATION_STUDIO_VIDEO_REMAKE_SECOND_CENTS:-}
+      CREATION_STUDIO_VIDEO_REMAKE_MIB_CENTS: ${CREATION_STUDIO_VIDEO_REMAKE_MIB_CENTS:-}
+    networks:
+      - default
+      - video-remake
+  video-remake-worker:
+    image: jdcloud-harness-video-remake:local
+    build:
+      context: ./packages/jdcloud/creation-studio-video-remake/worker
+      args:
+        PYTHON_IMAGE: ${CREATION_STUDIO_VIDEO_REMAKE_PYTHON_IMAGE:-python:3.11-slim-bookworm}
+    restart: unless-stopped
+    init: true
+    networks:
+      - video-remake
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${CREATION_STUDIO_VIDEO_REMAKE_WORKER_MEM_LIMIT:-8g}
+    cpus: ${CREATION_STUDIO_VIDEO_REMAKE_WORKER_CPUS:-0}
+    pids_limit: 256
+
+networks:
+  video-remake:
+    internal: true

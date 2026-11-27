@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { createAccountPoolReader } from './account-pool-reader.mjs'
-import { SEEDANCE_MODELS } from './seedance-request.mjs'
+import { SEEDANCE_MODEL, SEEDANCE_MODELS } from './seedance-request.mjs'
 import { assertSpacePoints } from './project-points.mjs'
 
 const open = new Set(['reserved', 'submitting', 'pending', 'queued', 'running', 'unknown', 'in_queue', 'generating'])
@@ -13,6 +13,7 @@ const failure = (message, code) => Object.assign(new Error(message), { code, sta
 const modelsByKind = {
   ark: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-5-0-flash-260915', ...SEEDANCE_MODELS.map(model => model.value)],
   jimeng: ['jimeng_t2i_v40'],
+  malanshan: [SEEDANCE_MODEL],
 }
 
 /**
@@ -39,6 +40,7 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     await writeFileAtomic(path, JSON.stringify(receipt), { mode: 0o600, dirMode: 0o700 })
   }
   async function environmentAccount(kind) {
+    if (kind === 'malanshan') return undefined
     const row = kind === 'ark'
       ? { apiKey: await keys(config.arkKeyRef || 'ARK_API_KEY') }
       : { accessKeyId: await keys(config.jimengAccessKeyRef || 'JIMENG_ACCESS_KEY_ID'),
@@ -71,7 +73,7 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     const codes = new Set()
     const credentials = new Set()
     for (const row of result) {
-      const secret = kind === 'ark' && typeof row.apiKey === 'string' ? row.apiKey.trim().replace(/^Bearer\s+/iu, '') : kind === 'ark' ? row.apiKey : row.accessKeyId
+      const secret = kind === 'jimeng' ? row.accessKeyId : typeof row.apiKey === 'string' ? row.apiKey.trim().replace(/^Bearer\s+/iu, '') : undefined
       if (row.provider !== kind || !/^[a-f0-9]{24}$/iu.test(row._id || '')
         || typeof row.accountCode !== 'string' || !row.accountCode.trim() || codes.has(row.accountCode.trim())
         || !Number.isSafeInteger(row.maxConcurrent) || row.maxConcurrent < 1
@@ -80,8 +82,10 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
         || typeof secret !== 'string' || !secret.trim() || credentials.has(secret.trim())
         || (kind === 'jimeng' && (typeof row.secretAccessKey !== 'string' || !row.secretAccessKey.trim())))
         throw failure('账号池存在无效编号、模型、重复密钥、缺失凭据或并发上限，请由管理员核对。', 'accounts/invalid-account')
+      if (kind === 'malanshan' && row.scenarios.some(value => value !== 'video'))
+        throw failure('马栏山账号的适用生成服务请仅选择「视频生成」。', 'accounts/malanshan-scenarios')
       row.accountCode = row.accountCode.trim()
-      if (kind === 'ark') row.apiKey = secret.trim()
+      if (kind !== 'jimeng') row.apiKey = secret.trim()
       else {
         row.accessKeyId = secret.trim()
         row.secretAccessKey = row.secretAccessKey.trim()
@@ -97,6 +101,10 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
     catch (error) { if (error.code === 'ENOENT') return []; throw error }
     return Promise.all(files.filter(name => /^[a-f0-9]{64}\.json$/u.test(name))
       .map(async name => JSON.parse(await readFile(join(directory, name), 'utf8'))))
+  }
+  async function configured(kind, scenario, model) {
+    return (await accounts(kind)).some(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(scenario)
+      && (model ? row.models.includes(model) : row.models.some(value => scenario === 'video' ? value.includes('seedance') : !value.includes('seedance'))))
   }
   /** Waiting happens outside the reservation lock so settlement can release account slots. */
   async function acquire(kind, input, waitForCapacity) {
@@ -115,11 +123,19 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
           const loads = new Map()
           for (const receipt of receipts.filter(item => open.has(item.status)))
             loads.set(receipt.providerAccountId, (loads.get(receipt.providerAccountId) || 0) + 1)
+          // Seedance needs all text-to-image originals in one edit to come from the same Ark account.
+          const remakeAccount = kind === 'ark' && input.scenario === 'image' && input.planId === undefined
+            ? receipts.find(receipt => receipt.provider === kind && receipt.scenario === 'image' && receipt.planId === undefined
+              && receipt.projectId === input.projectId && receipt.spaceId === input.spaceId
+              && (open.has(receipt.status) || receipt.status === 'succeeded' || receipt.status === 'unknown'))?.providerAccountId
+            : undefined
+          const requiredAccountId = input.requiredAccountId ?? remakeAccount
           // 原始模型人像仅能在生成它的同一方舟账号下使用，不转到其他空闲账号。
           const eligible = rows.filter(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(input.scenario) && row.models.includes(input.model)
-            && (input.requiredAccountId === undefined || row._id === input.requiredAccountId))
+            && (requiredAccountId === undefined || row._id === requiredAccountId))
           if (!eligible.length)
-            throw failure('没有启用且支持该模型的媒体账号，请联系管理员配置账号池。', 'accounts/unavailable')
+            throw failure(remakeAccount ? '当前复刻项目的方舟账号不支持所选模型，请换用该账号已开通的 Seedream 5 模型。'
+              : '没有启用且支持该模型的媒体账号，请联系管理员配置账号池。', 'accounts/unavailable')
           const available = eligible.filter(row => (loads.get(row._id) || 0) < row.maxConcurrent)
           if (!available.length)
             throw failure('媒体账号并发已满，请等待当前任务完成后重试。', 'accounts/busy')
@@ -180,9 +196,16 @@ export function createProviderAccountPool(config, auth, keys, fetcher = fetch) {
           for (const wake of capacityWaiters) wake()
       })
     },
-    async configured(kind, scenario, model) {
-      return (await accounts(kind)).some(row => [true, 1, '1'].includes(row.enabled) && row.scenarios.includes(scenario)
-        && (model ? row.models.includes(model) : row.models.some(value => scenario === 'video' ? value.includes('seedance') : !value.includes('seedance'))))
+    configured,
+    /** Report enabled models by service without disclosing account credentials. */
+    async configuredModels(kind) {
+      const enabled = (await accounts(kind)).filter(row => [true, 1, '1'].includes(row.enabled))
+      const models = scenario => [...new Set(enabled.filter(row => row.scenarios.includes(scenario)).flatMap(row => row.models))]
+      return { image: models('image'), video: models('video') }
+    },
+    /** Pick the provider from enabled rows, independently of temporary account capacity. */
+    async videoProvider(model) {
+      return model === SEEDANCE_MODEL && await configured('malanshan', 'video', model) ? 'malanshan' : 'ark'
     },
   }
 }

@@ -1,0 +1,39 @@
+{
+  "name": "@deepseek-ai/dsh-creation-studio-video-remake",
+  "description": "Authenticated reference-video analysis for Creation Studio",
+  "version": "0.2.2-rc.3",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/types/**/*.d.ts",
+    "lib/types/**/*.d.ts.map",
+    "lib/**/*.js.map",
+    "src"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/dsh-brand": "workspace:*",
+    "@deepseek-ai/dsh-error": "workspace:*",
+    "@deepseek-ai/schemastery": "workspace:~"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-api-jdcloud-auth-controller": "workspace:*",
+    "@deepseek-ai/dsh-host-webserver": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-api-jdcloud-auth-controller": "workspace:*",
+    "@deepseek-ai/dsh-host-webserver": "workspace:*"
+  }
+}
