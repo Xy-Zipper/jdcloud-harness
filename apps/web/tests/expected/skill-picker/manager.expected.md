@@ -1,22 +1,13 @@
 - dialog "Manage skills":
   - heading "Manage skills" [level=2]
   - button "Close skill manager"
-  - paragraph: Add reusable instructions and tools to the current workspace.
-  - tablist "Skill creation method":
-    - tab "Create skill" [selected]
-    - tab "Import SKILL.md"
-  - tabpanel "Create skill":
-    - text: Skill name
-    - textbox "Skill name":
-      - /placeholder: For example, order-review
-      - text: web-created-demo
-    - text: Use lowercase letters, numbers, and hyphens. Description
-    - textbox "Description":
-      - /placeholder: Briefly explain when to use this skill
-      - text: Created through the Web skill manager
-    - text: Instructions
-    - textbox "Instructions":
-      - /placeholder: Describe the steps, rules, and cautions the agent should follow
-      - text: Return a concise workspace summary.
+  - paragraph: View, import, and delete the skill folders this account can manage.
+  - text: Skill scope
+  - tablist "Skill scope":
+    - tab "Current project" [selected]
+  - text: Available only to Sessions in the current project.
+  - strong: web-created-demo
+  - text: Read 1 files
+  - button "Choose folder"
   - button "Cancel"
-  - button "Save skill"
+  - button "Import skill"

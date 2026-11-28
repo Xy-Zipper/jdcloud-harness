@@ -3,6 +3,7 @@ import { readFile, rm, mkdtemp, mkdir, writeFile, readdir } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { parseBuffer } from 'music-metadata';
 import { afterEach, expect, it, vi } from 'vitest';
 // The migrated JavaScript is loaded from source; URL imports avoid built declarations in source tests.
 const { createHarnessMediaRuntime } = await import(new URL('../src/runtime.mjs', import.meta.url).href);
@@ -12,6 +13,7 @@ const roots = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 const { frontendHash } = await import(new URL('../src/upstream.mjs', import.meta.url).href);
 import { decodeGenerationPrompt, encodeGenerationPrompt, SEEDANCE_MODELS } from '../src/seedance-request.mjs';
+import { narrationSampleCap } from '../src/reference-audio.mjs';
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VZkAAAAASUVORK5CYII=';
 const originalImageUrl = 'https://result.tos-cn-beijing.volces.com/original.png';
 const seedreamResult = () => Response.json({ created: Math.floor(Date.now() / 1000), data: [{ url: originalImageUrl }] });
@@ -980,6 +982,30 @@ it('submits official 2.5 reference tasks, uploads completed videos, and restores
     expect(usage[0]).toMatchObject({ videoOutputTokens: 144512, customerCharge: '14.45', deliveryStatus: 'delivered' });
 });
 
+it.each([
+    [SEEDANCE_MODELS[0].value, 31, 10, 10, 50],
+    [SEEDANCE_MODELS[1].value, 10, 3, 3, 15],
+])('rejects a batch above the combined reference limit for %s before provider submission', async (model, images, videos, audio, max) => {
+    const f = await setup();
+    const batch = f.records.get(f.batchId);
+    const { generation } = decodeGenerationPrompt(batch.prompt);
+    const reference = index => ({ relationId: index.toString(16).padStart(24, '0'), name: 'reference', purpose: 'reference content' });
+    batch.prompt = encodeGenerationPrompt('生成广告', {
+        ...generation, model,
+        references: Array.from({ length: images }, (_, index) => reference(index + 1)),
+        videoReferences: Array.from({ length: videos }, (_, index) => ({ ...reference(index + 100), durationSeconds: 2 })),
+        audioClips: Array.from({ length: audio }, (_, index) => ({ ...reference(index + 200), durationSeconds: 2 })),
+    });
+    const runtime = f.runtime();
+    try {
+        await expect(runtime.run('video/tasks', { ...f.input, batchId: f.batchId })).rejects.toMatchObject({
+            message: expect.stringContaining(`本批参考素材合计 ${max + 1} 个`),
+            submissionState: 'not-submitted',
+        });
+        expect(f.counts().videoCalls).toBe(0);
+    } finally { await runtime.close(); }
+});
+
 it('submits product-only reference video without per-shot images and rejects unconfirmed selected products', async () => {
     const f = await setup();
     for (const row of f.rows) row.storyboardImageRefId = '';
@@ -1012,11 +1038,11 @@ function wavFixture(seconds) {
     return wav;
 }
 
-function projectAudioFixture(f, { seconds = 4, declaredSeconds = 4 } = {}) {
-    const relationId = '6a'.repeat(12), materialId = '6b'.repeat(12), fileId = '6c'.repeat(12);
+function projectAudioFixture(f, { seconds = 4, declaredSeconds = 4, prefix = '6', mime = 'audio/wav', responseMime = mime } = {}) {
+    const relationId = `${prefix}a`.repeat(12), materialId = `${prefix}b`.repeat(12), fileId = `${prefix}c`.repeat(12);
     const relation = { _id: relationId, projectId: f.input.projectId, spaceId: f.input.spaceId, materialId, sourceRevision: 1 };
     const material = { _id: materialId, fileId, spaceId: f.input.spaceId, revision: 1, library: 'project',
-        sourceKind: 'uploaded', mime: 'audio/wav', authorization: '自有' };
+        sourceKind: 'uploaded', mime, authorization: '自有' };
     f.records.set(relationId, relation);
     f.records.set(materialId, material);
     const url = `${f.config.platformURL}/api/file/dowloadFile/${f.config.tenantId}/${fileId}`;
@@ -1024,7 +1050,7 @@ function projectAudioFixture(f, { seconds = 4, declaredSeconds = 4 } = {}) {
     f.provider.mockImplementation(async (requestUrl, init) => {
         if (requestUrl !== url) return previous(requestUrl, init);
         expect(new Headers(init?.headers).has('authorization')).toBe(false);
-        return new Response(wavFixture(seconds), { headers: { 'content-type': 'audio/wav' } });
+        return new Response(wavFixture(seconds), { headers: { 'content-type': responseMime } });
     });
     return { url, relation, material, clip: { relationId, name: 'music.wav', purpose: '参考配乐节奏', durationSeconds: declaredSeconds } };
 }
@@ -1051,6 +1077,45 @@ it.each(['another project', 'decoded duration', 'unreadable file'])('stops video
     } finally { await runtime.close(); }
 });
 
+it.each(['shared', 'current space', 'another space', 'over budget', 'duplicate'])('resolves system audio in a batch for %s', async (selection) => {
+    const f = await setup();
+    const systemId = 'a1'.repeat(12), fileId = 'a2'.repeat(12);
+    const systemBytes = wavFixture(6);
+    const spaceId = selection === 'another space' ? 'c'.repeat(24) : selection === 'current space' ? f.input.spaceId : '';
+    f.records.set(systemId, { _id: systemId, spaceId, fileId, mime: 'audio/wav' });
+    const project = projectAudioFixture(f, { seconds: selection === 'over budget' ? 10 : 4 });
+    const systemAudio = { voiceId: systemId, name: '系统音频样例', purpose: '参考声音语气', durationSeconds: 6 };
+    f.auth.downloadFileAuthenticated.mockImplementation(async actualFileId => {
+        expect(actualFileId).toBe(fileId);
+        return new Response(systemBytes, { headers: { 'content-type': 'audio/wav' } });
+    });
+    const batch = f.records.get(f.batchId);
+    const { generation } = decodeGenerationPrompt(batch.prompt);
+    batch.prompt = encodeGenerationPrompt('先参考 @音频1 的节奏，再参考 @音频2 的语气。', {
+        ...generation, model: SEEDANCE_MODELS[1].value,
+        audioClips: [project.clip, systemAudio, ...(selection === 'duplicate' ? [systemAudio] : [])],
+    });
+    const runtime = f.runtime();
+    try {
+        const input = { ...f.input, batchId: f.batchId };
+        const errorCode = { 'another space': 'video/reference-audio-unavailable', 'over budget': 'video/reference-audio-duration',
+            duplicate: 'video/invalid-request' }[selection];
+        if (errorCode) {
+            await expect(runtime.run('video/tasks', input)).rejects.toMatchObject({ code: errorCode, submissionState: 'not-submitted' });
+            expect(f.counts().videoCalls).toBe(0);
+            if (selection !== 'over budget') expect(f.auth.downloadFileAuthenticated).not.toHaveBeenCalled();
+            return;
+        }
+        expect(await runtime.run('video/tasks', input)).toMatchObject({ status: 'queued' });
+        const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init?.method === 'POST');
+        const content = JSON.parse(call[1].body).content;
+        expect(content[0].text).toMatch(/@音频1：参考配乐节奏[\s\S]*@音频2：系统音频样例；参考声音语气/u);
+        expect(content.filter(item => item.type === 'audio_url').map(item => item.audio_url.url)).toEqual([
+            project.url, `data:audio/wav;base64,${systemBytes.toString('base64')}`,
+        ]);
+    } finally { await runtime.close(); }
+});
+
 it.each([
     ['ark', 'legacy'],
     ['ark', 'complete'],
@@ -1058,9 +1123,36 @@ it.each([
     ['malanshan', 'edited'],
     ['ark', 'project audio'],
     ['malanshan', 'project audio'],
+    ['ark', 'trim wav'],
+    ['ark', 'trim mp3'],
+    ['ark', 'older model audio limit'],
+    ['ark', 'unconfirmed trim'],
+    ['ark', 'project audio leaves too little room'],
+    ['ark', 'new catalog voice'],
+    ['ark', 'uploaded voice'],
+    ['ark', 'WAV uploaded as MP3'],
+    ['ark', 'WAV served as MP3'],
+    ['ark', 'storyboard project voice'],
+    ['malanshan', 'uploaded voice'],
+    ['ark', 'trim uploaded voice'],
+    ['ark', 'foreign uploaded voice'],
+    ['ark', 'unknown speaker'],
 ])('uses only the saved audio and subtitle text in the %s request for a %s batch prompt', async (provider, mode) => {
     const f = await setup();
     const voiceId = 'a'.repeat(24), audioFileId = 'b'.repeat(24);
+    const newVoiceId = mode === 'new catalog voice' ? 'b1'.repeat(12) : voiceId;
+    const wrongAudioType = mode === 'WAV uploaded as MP3' || mode === 'WAV served as MP3';
+    const customVoice = wrongAudioType || ['uploaded voice', 'storyboard project voice', 'trim uploaded voice', 'foreign uploaded voice', 'unknown speaker'].includes(mode)
+        ? projectAudioFixture(f, {
+            seconds: mode === 'trim uploaded voice' ? 12 : 6,
+            declaredSeconds: 6,
+            prefix: '7',
+            mime: mode === 'WAV uploaded as MP3' ? 'audio/mpeg' : 'audio/wav',
+            ...(wrongAudioType && { responseMime: 'audio/mpeg' }),
+        }) : undefined;
+    const inheritedProjectVoice = mode === 'storyboard project voice'
+        ? { relationId: customVoice.clip.relationId, name: '自录样音.wav', durationSeconds: 6 } : undefined;
+    if (mode === 'foreign uploaded voice') customVoice.relation.projectId = 'd'.repeat(24);
     const copy = ['下单，报价，开标。', '麓山云，做软件开发。'];
     f.rows.forEach((row, index) => {
         const detail = JSON.parse(row.scriptDetail);
@@ -1069,8 +1161,9 @@ it.each([
         if (index === 0) detail.soundEffects = '旧按压声';
         row.scriptDetail = JSON.stringify(detail);
         row.voiceover = copy[index] ? `字幕：${copy[index]}\n旁白：${copy[index]}` : '';
-        row.supplement = copy[index] ? JSON.stringify({ schemaVersion: 'storyboard-speech-1', supplement: '',
-            speech: [{ speakerId: 'narrator', speakerName: '旁白', text: copy[index], voiceId }] }) : '';
+        row.supplement = copy[index] ? JSON.stringify({ schemaVersion: inheritedProjectVoice ? 'storyboard-speech-2' : 'storyboard-speech-1', supplement: '',
+            speech: [{ speakerId: 'narrator', speakerName: '旁白', text: copy[index], voiceId: mode === 'uploaded voice' || inheritedProjectVoice ? '' : voiceId,
+                ...(inheritedProjectVoice && { projectVoice: inheritedProjectVoice }) }] }) : '';
     });
     const stamps = JSON.parse(f.plan.stageConfirmations);
     stamps.script.scriptHash = frontendHash(f.rows.map(row => ({
@@ -1101,15 +1194,30 @@ it.each([
             ...(effect ? [`音效：${effect}`] : []),
         ].join('\n');
     }).join('\n\n');
-    const projectAudio = mode === 'project audio' ? projectAudioFixture(f) : undefined;
+    const trim = ['trim wav', 'trim mp3', 'trim uploaded voice'].includes(mode);
+    const voiceMime = mode === 'trim mp3' ? 'audio/mp3' : 'audio/wav';
+    const projectSeconds = { 'project audio': 4, 'trim wav': 24, 'trim mp3': 24, 'trim uploaded voice': 24, 'older model audio limit': 12,
+        'unconfirmed trim': 24, 'project audio leaves too little room': 29 }[mode];
+    const projectAudio = projectSeconds ? projectAudioFixture(f, { seconds: projectSeconds }) : undefined;
+    const model = wrongAudioType ? SEEDANCE_MODELS[2].value
+        : mode === 'older model audio limit' ? SEEDANCE_MODELS[1].value : SEEDANCE_MODELS[0].value;
     const authoredPrompt = projectAudio ? `${batchText}\n音乐：参考 @音频2 的节奏。` : batchText;
-    batch.prompt = encodeGenerationPrompt(authoredPrompt, { ...saved.generation,
+    const speakerId = mode === 'unknown speaker' ? 'not-in-script' : 'narrator';
+    const selection = (customVoice && !inheritedProjectVoice) || newVoiceId !== voiceId;
+    const sample = customVoice
+        ? { relationId: customVoice.clip.relationId, name: mode === 'WAV uploaded as MP3' ? '自录样音.mp3' : '自录样音.wav', durationSeconds: 6 }
+        : { voiceId: newVoiceId, name: '男声' };
+    batch.prompt = encodeGenerationPrompt(authoredPrompt, { ...saved.generation, model,
+        trimVoiceSamples: trim || mode === 'older model audio limit' || mode === 'project audio leaves too little room',
         ...(projectAudio && { audioClips: [projectAudio.clip] }),
-        audioReferences: [{ voiceId, name: '男声', speakerIds: ['narrator'], speakerNames: ['旁白'] }] });
-    f.records.set(voiceId, { _id: voiceId, spaceId: '', fileId: audioFileId, mime: 'audio/wav' });
-    const wav = wavFixture(3);
+        audioReferences: [{ ...sample, speakerIds: [speakerId], speakerNames: ['旁白'],
+            ...(selection && { overrideSpeakerIds: [speakerId] }) }] });
+    f.records.set(newVoiceId, { _id: newVoiceId, spaceId: '', fileId: audioFileId, mime: voiceMime });
+    const voiceBytes = mode === 'trim mp3' ? await readFile(new URL('./fixtures/reference-voice.mp3', import.meta.url))
+        : wavFixture(trim || mode === 'unconfirmed trim' || mode === 'project audio leaves too little room' ? 12
+            : mode === 'older model audio limit' ? 4 : 3);
     f.auth.downloadFileAuthenticated.mockImplementation(async fileId => fileId === audioFileId
-        ? new Response(wav, { headers: { 'content-type': 'audio/wav' } })
+        ? new Response(voiceBytes, { headers: { 'content-type': voiceMime } })
         : new Response(Buffer.from(png, 'base64'), { headers: { 'content-type': 'image/png' } }));
     const pool = provider === 'malanshan' ? [{
         _id: '8'.repeat(24), accountCode: 'MLS-A', provider, models: [SEEDANCE_MODELS[0].value],
@@ -1117,8 +1225,34 @@ it.each([
     }] : undefined;
     const runtime = f.runtime(undefined, pool);
     try {
-        const task = await runtime.run('video/tasks', { ...f.input, batchId: f.batchId });
+        const args = { ...f.input, batchId: f.batchId };
+        if (mode === 'foreign uploaded voice' || mode === 'unknown speaker') {
+            await expect(runtime.run('video/tasks', args)).rejects.toMatchObject({
+                code: mode === 'unknown speaker' ? 'video/voice-selection' : 'video/reference-audio-unavailable',
+                submissionState: 'not-submitted',
+            });
+            expect(f.counts().videoCalls).toBe(0);
+            return;
+        }
+        const failure = { 'older model audio limit': '超过 15 秒，请选择 Seedance 2.5',
+            'unconfirmed trim': '超过 30 秒，请裁剪', 'project audio leaves too little room': '超过 30 秒，请裁剪' }[mode];
+        if (failure) {
+            await expect(runtime.run('video/tasks', args)).rejects.toMatchObject({ code: 'video/reference-audio-duration',
+                submissionState: 'not-submitted', message: expect.stringContaining(failure) });
+            expect(f.counts().videoCalls).toBe(0);
+            return;
+        }
+        const task = await runtime.run('video/tasks', args);
         expect(task).toMatchObject({ provider, status: 'queued' });
+        if (selection) {
+            const referenceKey = customVoice ? `clip:${sample.relationId}` : `system:${newVoiceId}`;
+            expect(task.voiceSelection).toBe(JSON.stringify([[speakerId, referenceKey]]));
+            expect(task.storyboardConfirmedAt).toBe(stamps.storyboard.at);
+        }
+        if (inheritedProjectVoice) {
+            expect(task.storyboardConfirmedAt).toBe(stamps.storyboard.at);
+            expect(task).not.toHaveProperty('voiceSelection');
+        }
         const call = f.provider.mock.calls.find(([url, init]) => url.includes('contents/generations/tasks') && init?.method === 'POST');
         const body = JSON.parse(call[1].body);
         const text = body.content[0].text;
@@ -1134,14 +1268,31 @@ it.each([
             expect(text.split('瓶盖轻响')).toHaveLength(2);
         }
         expect(body.generate_audio).toBe(true);
-        expect(body.content.filter(item => item.type === 'audio_url')).toEqual([
-            { type: 'audio_url', role: 'reference_audio', audio_url: { url: `data:audio/wav;base64,${wav.toString('base64')}` } },
+        const audio = body.content.filter(item => item.type === 'audio_url');
+        const voiceUrl = trim || wrongAudioType ? expect.stringMatching(/^data:audio\/wav;base64,/u)
+            : customVoice?.url ?? `data:audio/wav;base64,${voiceBytes.toString('base64')}`;
+        expect(audio).toEqual([
+            { type: 'audio_url', role: 'reference_audio', audio_url: { url: voiceUrl } },
             ...(projectAudio ? [{ type: 'audio_url', role: 'reference_audio', audio_url: { url: projectAudio.url } }] : []),
         ]);
+        if (wrongAudioType) {
+            const submitted = Buffer.from(audio[0].audio_url.url.split(',')[1], 'base64');
+            expect(createHash('sha256').update(submitted).digest('hex')).toBe(createHash('sha256').update(wavFixture(6)).digest('hex'));
+        }
+        if (trim) {
+            const clipped = Buffer.from(audio[0].audio_url.url.split(',')[1], 'base64');
+            const metadata = await parseBuffer(clipped, { mimeType: 'audio/wav' }, { duration: true });
+            expect(metadata.format.duration + projectSeconds).toBe(30);
+            if (mode === 'trim mp3') expect(clipped.subarray(44).some(value => value !== 0)).toBe(true);
+        }
         if (projectAudio) {
-            expect(text).toContain('@音频1：参考男声的音色');
+            expect(text).toContain(selection ? '@音频1：旁白使用此样音的音色' : '@音频1：参考男声的音色');
             expect(text).toContain('@音频2：参考配乐节奏');
             expect(text).not.toContain('music.wav');
+        }
+        if (selection || inheritedProjectVoice) {
+            expect(text).toContain('@音频1：旁白使用此样音的音色');
+            expect(text).not.toContain(sample.name);
         }
         if (provider === 'malanshan') {
             expect(new URL(call[0]).host).toBe('maas.mlsvcloud.com:8559');
@@ -1150,9 +1301,17 @@ it.each([
         }
         if (mode === 'legacy') await expect(`${text}\n`).toMatchFileSnapshot('./expected/confirmed-video-copy-prompt.txt');
         if (mode === 'complete') await expect(`${text}\n`).toMatchFileSnapshot('./expected/complete-video-copy-prompt.txt');
+        if (mode === 'uploaded voice' && provider === 'ark')
+            await expect(`${text}\n`).toMatchFileSnapshot('./expected/uploaded-voice-video-prompt.txt');
     } finally {
         await runtime.close();
     }
+});
+
+it('keeps the short voice sample and divides remaining time between longer ones', () => {
+    expect(narrationSampleCap([2, 12, 19], 18)).toBe(8);
+    expect(narrationSampleCap([8, 10], 4)).toBe(2);
+    expect(narrationSampleCap([8, 10], 3.99)).toBeUndefined();
 });
 
 it('requires saved batch text before adding the fixed narration and subtitle rules', async () => {

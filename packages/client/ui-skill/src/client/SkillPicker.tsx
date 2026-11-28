@@ -400,6 +400,7 @@ export function SkillPickerView({
       description={t('manager.description')}
       closeLabel={t('manager.close')}
       className={css.manager ?? ''}
+      contentClassName={css.managerContent ?? ''}
       footer={(
         <>
           <Button variant="outline" onClick={closeManager} disabled={saving}>{t('manager.cancel')}</Button>
@@ -478,8 +479,8 @@ export function SkillPickerView({
             {t('manager.chooseFolder')}
           </Button>
         </div>
+        {managerError !== null && <p className={css.managerError} role="alert">{managerError}</p>}
       </div>
-      {managerError !== null && <p className={css.managerError} role="alert">{managerError}</p>}
     </Modal>
   ) : null
 

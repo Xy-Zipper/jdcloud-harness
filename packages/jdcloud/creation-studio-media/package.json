@@ -22,10 +22,12 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@audio/decode-wav": "2.0.1",
     "@deepseek-ai/dsh-atomic-write": "workspace:*",
     "@deepseek-ai/dsh-creation-studio-video-remake": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~",
     "@volcengine/openapi": "1.36.2",
+    "mpg123-decoder": "1.0.3",
     "music-metadata": "^12.3.2",
     "sharp": "0.35.5"
   },

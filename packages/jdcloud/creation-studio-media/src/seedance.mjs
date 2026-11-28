@@ -3,14 +3,15 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
 import { readRemakeDialogue, readRemakeShots } from '@deepseek-ai/dsh-creation-studio-video-remake'
-import { buildSeedanceRequest, decodeGenerationPrompt, defaultGenerationConfig, MAX_REFERENCE_AUDIO_BYTES, MAX_REFERENCE_VIDEO_BYTES, REFERENCE_AUDIO_FORMATS, REFERENCE_VIDEO_FORMATS, SEEDANCE_MODEL, SEEDANCE_MODELS, SEEDANCE_RATIOS, seedanceModel } from './seedance-request.mjs'
+import { batchVoiceSelection, buildSeedanceRequest, decodeGenerationPrompt, defaultGenerationConfig, MAX_REFERENCE_AUDIO_BYTES, MAX_REFERENCE_AUDIO_SECONDS, MAX_REFERENCE_VIDEO_BYTES, MIN_REFERENCE_AUDIO_SECONDS, REFERENCE_AUDIO_FORMATS, REFERENCE_VIDEO_FORMATS, SEEDANCE_MODEL, SEEDANCE_MODELS, SEEDANCE_RATIOS, narrationAudioIndex, referenceAudioDurationIssue, seedanceIssues, seedanceModel } from './seedance-request.mjs'
 import { confirmedStoryboardUpstream, frontendHash } from './upstream.mjs'
 import { generatedImagePending } from './image-generation.mjs'
 import { normalizeMaterialAuthorization } from './material-authorization.mjs'
 import { decodeMalanshanVideoResponse, queryMalanshanVideo, submitMalanshanVideo } from './malanshan-video.mjs'
 import { decodeStoryboardSupplement, narrationForShot } from './narration.mjs'
 import { readRemakeDetails, remakeDetailsPrompt } from './remake-details.mjs'
-import { parseBuffer, parseWebStream, TrackType } from 'music-metadata'
+import { narrationSampleCap, parseReferenceAudio, trimVoiceSample } from './reference-audio.mjs'
+import { parseWebStream, TrackType } from 'music-metadata'
 
 /** Seedance 服务端代理。平台权限逐次核对；方舟密钥只取服务端环境，不返回浏览器。 */
 const MENU = {
@@ -38,6 +39,10 @@ const retryable = new Set(["failed", "cancelled", "expired"]);
 const videoPortraitError = "InputVideoSensitiveContentDetected.PrivacyInformation";
 const originalVideoRejected = task => task.errorCode === videoPortraitError && !task.remakeChanges?.sourceVideoAssetId;
 const confirmedCopyRules = "已确认脚本声音与字幕（原文优先于下方画面描述及参考素材）：\n{}内只作朗读台词，〖〗内只作屏幕字幕，分隔符不显示也不朗读。逐字保留原文、字形、标点及顺序，不增删、改写、同音替字或转换简繁体；旁白与对应字幕同步，不把画面文字、说明或样音示例当台词。未指定字幕或旁白的时段不自行补充。";
+const audioDataUrl = ({ bytes, mime }) => `data:${mime};base64,${bytes.toString("base64")}`;
+const canonicalAudioMime = mime => REFERENCE_AUDIO_FORMATS.includes(mime)
+	? mime.includes("wav") ? "audio/wav" : "audio/mp3"
+	: undefined;
 
 /** Each numbered label identifies the media item after the leading prompt. */
 function formatProviderError(error, mediaLabels, fallback = "") {
@@ -246,7 +251,8 @@ export function createSeedanceService(env, transport = fetch) {
 		duration: task.duration,
 		usage: task.usage,
 		billingParameters: task.billingParameters,
-		...(task.storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt: task.storyboardConfirmedAt })
+		...(task.storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt: task.storyboardConfirmedAt }),
+		...(task.voiceSelection === undefined ? {} : { voiceSelection: task.voiceSelection })
 	});
 	async function projectReference(token, scope, referenceId, label, purpose) {
 		const relation = await detail(token, MENU.relation, referenceId);
@@ -358,35 +364,51 @@ export function createSeedanceService(env, transport = fetch) {
 		return { duration, url };
 	}
 
-	/** 音色只取当前可读的共享/本空间目录；实际解码核对时长，不信任调用方 URL 或时长。 */
-	async function audioData(token, scope, reference, maxSeconds) {
+	/** Resolve authorised catalog audio and measure its actual file before submission. */
+	async function catalogAudioData(token, scope, reference, label, byteLimit = MAX_REFERENCE_AUDIO_BYTES) {
 		const voice = await detail(token, MENU.voice, reference.voiceId);
 		if (voice?._id !== reference.voiceId || (voice.spaceId && voice.spaceId !== scope.spaceId)
 			|| !id(voice.fileId) || !["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav"].includes(voice.mime))
-			throw new ApiError(`旁白音色“${reference.name}”不可用或不属于当前空间。`, 403);
-		const response = await transport(`${platform}/api/file/dowloadFile/${tenant}/${voice.fileId}`, {
-			headers: { Authorization: token }, redirect: "error", signal: AbortSignal.timeout(60000)
-		});
-		if (!response.ok || !response.body) throw new ApiError(`旁白音色“${reference.name}”下载失败。`);
-		const chunks = [];
-		let size = 0;
-		for await (const chunk of response.body) {
-			size += chunk.length;
-			if (size > 15 * 1024 * 1024) throw new ApiError("旁白参考音频不能超过15MB。");
-			chunks.push(chunk);
+			throw new ApiError(`${label}“${reference.name}”在当前空间不可用。`, 403, "video/reference-audio-unavailable");
+		const unreadable = () => new ApiError(`${label}“${reference.name}”无法读取，请重新选择。`, 400, "video/reference-audio-unreadable");
+		let sample;
+		try {
+			const response = await transport(`${platform}/api/file/dowloadFile/${tenant}/${voice.fileId}`, {
+				headers: { Authorization: token }, redirect: "error", signal: AbortSignal.timeout(60000)
+			});
+			if (!response.ok || !response.body) {
+				await response.body?.cancel();
+				throw unreadable();
+			}
+			const chunks = [];
+			let size = 0;
+			for await (const chunk of response.body) {
+				size += chunk.length;
+				if (size > byteLimit) throw new ApiError(`${label}“${reference.name}”不能超过 15 MB。`, 400, "video/reference-audio-size");
+				chunks.push(chunk);
+			}
+			sample = await parseReferenceAudio(Buffer.concat(chunks, size), voice.mime);
+		} catch (cause) {
+			if (cause instanceof ApiError) throw cause;
+			throw Object.assign(unreadable(), { cause });
 		}
-		const bytes = Buffer.concat(chunks);
-		const metadata = await parseBuffer(bytes, { mimeType: voice.mime }, { duration: true });
-		const duration = metadata.format.duration;
-		if (!Number.isFinite(duration) || duration < 2 || duration > maxSeconds)
-			throw new ApiError(`旁白音色“${reference.name}”的样音须为2–${maxSeconds}秒。`);
-		const mime = voice.mime.includes("wav") ? "audio/wav" : "audio/mp3";
-		return { duration, url: `data:${mime};base64,${bytes.toString("base64")}` };
+		const { duration } = sample;
+		if (!Number.isFinite(duration) || duration < MIN_REFERENCE_AUDIO_SECONDS)
+			throw new ApiError(`${label}“${reference.name}”至少需要 ${MIN_REFERENCE_AUDIO_SECONDS} 秒。`, 400, "video/reference-audio-duration");
+		return sample;
 	}
 
-	/** Verify the project's pinned audio and measure the bytes available to the provider. */
-	async function projectAudioData(token, scope, reference, label, maxSeconds, purpose) {
-		const { relation, material } = await projectReference(token, scope, reference.relationId, label, purpose);
+	/** Verify pinned audio. A voice sample keeps its bytes available for confirmed trims. */
+	async function projectAudioData(token, scope, reference, label, maxSeconds, { purpose, voiceSample = false } = {}) {
+		let projectAudio;
+		try {
+			projectAudio = await projectReference(token, scope, reference.relationId, label, purpose);
+		} catch (error) {
+			if (voiceSample && error instanceof ApiError)
+				throw new ApiError(`${label}在当前项目不可用，请重新选择样音。`, 400, "video/reference-audio-unavailable");
+			throw error;
+		}
+		const { relation, material } = projectAudio;
 		const source = Number(material.revision) === Number(relation.sourceRevision) ? material : parse(relation.usageSnapshot);
 		if (!object(source) || Number(source.revision) !== Number(relation.sourceRevision) || !id(source.fileId)
 			|| !["project", "brand"].includes(source.library) || !["uploaded", "referenced", "generated"].includes(source.sourceKind)
@@ -395,15 +417,17 @@ export function createSeedanceService(env, transport = fetch) {
 		const tooLarge = () => new ApiError(`${label}超过 15 MB，请更换文件。`, 400, "video/reference-audio-size");
 		if (Number(source.sizeBytes) > MAX_REFERENCE_AUDIO_BYTES) throw tooLarge();
 		const url = `${platform}/api/file/dowloadFile/${tenant}/${source.fileId}`;
-		const unreadable = () => new ApiError(`${label}无法读取，请核对音频格式和项目素材。`, 400, "video/reference-audio-unreadable");
-		let format;
+		const unreadable = () => new ApiError(`${label}下载失败，请在项目素材中检查音频能否播放。`, 400, "video/reference-audio-unreadable");
+		let bytes;
+		let responseMime;
 		try {
 			const response = await (env.PUBLIC_MEDIA_FETCH || transport)(url, { redirect: "error", signal: AbortSignal.timeout(30_000) });
+			responseMime = (response.headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
 			if (Number(response.headers.get("content-length")) > MAX_REFERENCE_AUDIO_BYTES) {
 				await response.body?.cancel();
 				throw tooLarge();
 			}
-			if (!response.ok || !response.body || response.headers.get("content-type")?.includes("text/html")) {
+			if (!response.ok || !response.body || responseMime === "text/html") {
 				await response.body?.cancel();
 				throw unreadable();
 			}
@@ -414,18 +438,70 @@ export function createSeedanceService(env, transport = fetch) {
 				if (size > MAX_REFERENCE_AUDIO_BYTES) throw tooLarge();
 				chunks.push(chunk);
 			}
-			({ format } = await parseBuffer(Buffer.concat(chunks, size), { mimeType: source.mime }, { duration: true, skipCovers: true }));
+			bytes = Buffer.concat(chunks, size);
 		} catch (cause) {
 			if (cause instanceof ApiError) throw cause;
 			throw Object.assign(unreadable(), { cause });
 		}
-		const matchesFormat = source.mime.includes("wav") ? format.container === "WAVE"
-			: format.container === "MPEG" && /Layer 3$/u.test(format.codec);
-		if (!matchesFormat) throw unreadable();
-		const { duration } = format;
-		if (!Number.isFinite(duration) || duration < 2 || duration > maxSeconds)
-			throw new ApiError(`${label}须为 2–${maxSeconds} 秒，请缩短后重新添加。`, 400, "video/reference-audio-duration");
-		return { duration, url };
+		let sample;
+		try {
+			sample = await parseReferenceAudio(bytes, source.mime);
+		} catch (cause) {
+			throw Object.assign(new ApiError(`${label}的音频内容无法按 MP3 或 WAV 读取，请重新导出后选用。`,
+				400, "video/reference-audio-unreadable"), { cause });
+		}
+		const { duration, mime } = sample;
+		if (!Number.isFinite(duration) || duration < MIN_REFERENCE_AUDIO_SECONDS || duration > maxSeconds)
+			throw new ApiError(`${label}须为 ${MIN_REFERENCE_AUDIO_SECONDS}–${maxSeconds} 秒，请调整后重新添加。`, 400, "video/reference-audio-duration");
+		// Use typed bytes when the platform or the material advertises a different encoding.
+		const urlMatches = mime === canonicalAudioMime(source.mime)
+			&& (!responseMime.startsWith("audio/") || mime === canonicalAudioMime(responseMime));
+		if (voiceSample) return { ...sample, ...(urlMatches && { url }) };
+		return { duration, url: urlMatches ? url : audioDataUrl(sample) };
+	}
+
+	/** Measure every batch reference and apply only the confirmed voice sample trims. */
+	async function prepareBatchAudio(token, input, generation, model) {
+		const voices = [];
+		const clipUrls = [];
+		const labels = [];
+		for (const [index, reference] of (generation.audioReferences ?? []).entries()) {
+			const label = `旁白音色${index + 1}`;
+			labels.push(label);
+			voices.push('voiceId' in reference
+				? await catalogAudioData(token, input, reference, label, 15 * 1024 * 1024)
+				: await projectAudioData(token, input, reference, label, MAX_REFERENCE_AUDIO_SECONDS, { voiceSample: true }));
+		}
+		let clipSeconds = 0;
+		for (const reference of generation.audioClips ?? []) {
+			const label = `${'voiceId' in reference ? '系统音频' : '参考音频'}${labels.length + 1}`;
+			const audio = 'voiceId' in reference
+				? await catalogAudioData(token, input, reference, label)
+				: await projectAudioData(token, input, reference, label, MAX_REFERENCE_AUDIO_SECONDS);
+			clipSeconds += audio.duration;
+			clipUrls.push('url' in audio ? audio.url : audioDataUrl(audio));
+			labels.push(label);
+		}
+		const issueFor = seconds => referenceAudioDurationIssue(seconds, model);
+		const lengths = voices.map(voice => voice.duration);
+		const originalSeconds = lengths.reduce((total, seconds) => total + seconds, clipSeconds);
+		const issue = issueFor(originalSeconds);
+		if (issue) {
+			const cap = generation.trimVoiceSamples && model.value === SEEDANCE_MODEL
+				? narrationSampleCap(lengths, model.maxSeconds - clipSeconds) : undefined;
+			if (cap === undefined)
+				throw new ApiError(`${issue} 实测合计 ${Number(originalSeconds.toFixed(3))} 秒。`, 400, "video/reference-audio-duration");
+			for (const [index, voice] of voices.entries()) {
+				if (voice.duration <= cap) continue;
+				try { voices[index] = await trimVoiceSample(voice, cap); }
+				catch (cause) {
+					throw Object.assign(new ApiError(`${labels[index]}无法自动裁剪，请更换较短的样音。`, 400, "video/reference-audio-trim"), { cause });
+				}
+			}
+			const remainingIssue = issueFor(voices.reduce((total, voice) => total + voice.duration, clipSeconds));
+			if (remainingIssue) throw new ApiError(remainingIssue, 400, "video/reference-audio-duration");
+		}
+		return { urls: [...voices.map(voice => voice.url ?? audioDataUrl(voice)), ...clipUrls], labels };
 	}
 
 	async function remakeSourceMaterial(token, input, refId) {
@@ -499,7 +575,7 @@ export function createSeedanceService(env, transport = fetch) {
 		const audioClips = [];
 		const audioUrls = [];
 		if (bgm?.mode === "upload") {
-			const audio = await projectAudioData(token, input, bgm, "背景音乐", model.maxSeconds, "需求附件");
+			const audio = await projectAudioData(token, input, bgm, "背景音乐", model.maxSeconds, { purpose: "需求附件" });
 			if (bgm.end > audio.duration + 0.02)
 				throw new ApiError("背景音乐选段超过文件时长，请重新选择。", 400, "video/remake-bgm-invalid");
 			audioClips.push({ relationId: bgm.relationId, name: "背景音乐", durationSeconds: audio.duration,
@@ -641,22 +717,24 @@ export function createSeedanceService(env, transport = fetch) {
 		const batchShots = allShots.filter((shot) => shot.videoBatchId === input.batchId);
 		const duration = batchShots.reduce((sum, shot) => sum + Number(shot.expectedSeconds), 0);
 		const audioReferences = generation.audioReferences ?? [];
-		const audioClips = generation.audioClips ?? [];
-		const usedAudio = new Set();
+		const usedAudio = new Map();
 		// Validate voice bindings against confirmed speakers. The saved batch supplies all spoken and displayed text.
 		for (const shot of batchShots) {
 			const detail = parse(shot.scriptDetail);
 			const speech = narrationForShot({ detail }, decodeStoryboardSupplement(shot.supplement || "").speech);
 			for (const line of speech) {
-				const index = audioReferences.findIndex(reference => reference.voiceId === line.voiceId && reference.speakerIds.includes(line.speakerId));
-				if (index < 0 || !generation.generateAudio) throw new ApiError("请先在分镜资产为每位旁白选择音色并开启生成音频。");
-				usedAudio.add(index);
+				const index = narrationAudioIndex(audioReferences, line);
+				if (index < 0 || !generation.generateAudio) throw new ApiError("请在视频生成页为每位旁白选择系统音色或上传样音，并开启生成音频。", 400, "video/voice-selection");
+				const speakers = usedAudio.get(index) ?? new Map();
+				speakers.set(line.speakerId, line.speakerName);
+				usedAudio.set(index, speakers);
 			}
 		}
-		if (audioReferences.some((_reference, index) => !usedAudio.has(index)))
-			throw new ApiError("旁白音色必须对应本批脚本中的真实旁白角色。");
-		buildSeedanceRequest(generation, fullPrompt, duration, generation.references.map(() => "pending"),
-			Array(audioReferences.length + audioClips.length).fill("pending"), videoReferences.map(() => "pending"));
+		if (audioReferences.some((reference, index) => reference.speakerIds.some((id, speakerIndex) =>
+			usedAudio.get(index)?.get(id) !== reference.speakerNames[speakerIndex])))
+			throw new ApiError("旁白音色必须对应本批脚本中的真实旁白角色。请重新选择音色。", 400, "video/voice-selection");
+		const issues = seedanceIssues(generation, fullPrompt, duration);
+		if (issues.length) throw new ApiError(issues[0]);
 		const urls = [];
 		const originalAccounts = new Set();
 		for (const [index, reference] of generation.references.entries()) {
@@ -668,24 +746,7 @@ export function createSeedanceService(env, transport = fetch) {
 		if (originalAccounts.size > 1) throw new ApiError("本批文生图原始产物来自不同方舟账号，不能合并提交。请返回分镜，使用同账号产物或调整批次。");
 		const requiredAccountId = [...originalAccounts][0];
 		if (requiredAccountId && !env.PROVIDER_ACCOUNTS) throw new ApiError("缺少原始生图账号解析能力，未提交视频；请联系管理员恢复原账号池。");
-		const audioUrls = [];
-		let audioDuration = 0;
-		for (const reference of audioReferences) {
-			const audio = await audioData(token, input, reference, selectedModel.maxSeconds);
-			audioDuration += audio.duration;
-			if (audioDuration > selectedModel.maxSeconds) throw new ApiError(`参考音频总时长超过${selectedModel.maxSeconds}秒，请选择更短的音色样音或分批生成。`);
-			audioUrls.push(audio.url);
-		}
-		const audioReferenceLabels = audioReferences.map((_reference, index) => `旁白音色${index + 1}`);
-		for (const reference of audioClips) {
-			const label = `参考音频${audioUrls.length + 1}`;
-			const audio = await projectAudioData(token, input, reference, label, selectedModel.maxSeconds);
-			audioDuration += audio.duration;
-			if (audioDuration > selectedModel.maxSeconds)
-				throw new ApiError(`旁白音色和参考音频总时长不能超过 ${selectedModel.maxSeconds} 秒。`, 400, "video/reference-audio-duration");
-			audioUrls.push(audio.url);
-			audioReferenceLabels.push(label);
-		}
+		const { urls: audioUrls, labels: audioReferenceLabels } = await prepareBatchAudio(token, input, generation, selectedModel);
 		const videoUrls = [];
 		const videoReferenceLabels = [];
 		let videoDuration = 0;
@@ -701,8 +762,8 @@ export function createSeedanceService(env, transport = fetch) {
 		const request = buildSeedanceRequest(generation, fullPrompt, duration, urls, audioUrls, videoUrls);
 		if (Buffer.byteLength(JSON.stringify(request)) > 64 * 1024 * 1024) throw new ApiError("请求体超过64MB，请减少本批参考音频或提示词。", 400, "video/request-too-large");
 		return { provider, request, duration, requiredAccountId, imageReferenceLabels,
-			...(videoReferenceLabels.length && { videoReferenceLabels }), ...(audioClips.length && { audioReferenceLabels }),
-			storyboardConfirmedAt: Number(stamps.storyboard.at) };
+			...(videoReferenceLabels.length && { videoReferenceLabels }), ...(audioReferenceLabels.length && { audioReferenceLabels }),
+			storyboardConfirmedAt: Number(stamps.storyboard.at), voiceSelection: batchVoiceSelection(generation) };
 	}
 	async function submit(token, input) {
 		if (!apiKey && !env.PROVIDER_ACCOUNTS) throw new ApiError("视频服务尚未配置账号池或 ARK_API_KEY。", 503);
@@ -726,7 +787,7 @@ export function createSeedanceService(env, transport = fetch) {
 			if (!retryable.has(prior?.status))
 				throw new ApiError("原复刻任务尚未明确失败，请继续查询原任务。", 409, "video/remake-original-active");
 		}
-		const { provider, request, duration, requiredAccountId, imageReferenceLabels, videoReferenceLabels, audioReferenceLabels, storyboardConfirmedAt } = remake
+		const { provider, request, duration, requiredAccountId, imageReferenceLabels, videoReferenceLabels, audioReferenceLabels, storyboardConfirmedAt, voiceSelection } = remake
 			? await prepareRemakeRequest(token, input, remake, selection)
 			: await prepareStoryboardRequest(token, input, project, plan);
 		if (provider === 'malanshan' && requiredAccountId)
@@ -750,7 +811,8 @@ export function createSeedanceService(env, transport = fetch) {
 				inputVideoMode: request.content.some(item => item.type === "video_url") ? "present" : "none", serviceTier: "default" },
 			...(selection && { remakeChanges: { sourceRefId: remake.sourceRefId, subjects: selection.subjects, prompt: request.content[0].text,
 				...(selection.assetId && { sourceVideoAssetId: selection.assetId }) } }),
-			...(storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt })
+			...(storyboardConfirmedAt === undefined ? {} : { storyboardConfirmedAt }),
+			...(voiceSelection === undefined ? {} : { voiceSelection })
 		};
 		await mkdir(directory, { recursive: true });
 		try {

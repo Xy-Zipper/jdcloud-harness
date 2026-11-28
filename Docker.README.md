@@ -26,7 +26,7 @@ description: "在 macOS 或 Windows 构建 jdcloud-harness 镜像，推送到阿
 
 脚本从 Git 读取 `HEAD` 作为客户端提交标识，并打包当前工作区中的构建文件，包括未提交的改动。构建成功后，脚本以 `萧影科技` 登录阿里云镜像仓库，按指定版本打标签并推送。请在 Docker 的提示中输入密码。
 
-代理端口参数通过 `host.docker.internal` 提供给构建容器，用于下载 pnpm 和 npm 依赖。如果错误发生在拉取 Node 基础镜像或推送镜像时，请检查 Docker Desktop 的代理设置。 [Docker Desktop 代理设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#proxies)
+代理端口参数通过 `host.docker.internal` 提供给构建容器，用于下载 pnpm 和 npm 依赖。Docker Desktop 负责解析和拉取 `FROM` 中的基础镜像，也负责推送镜像。若 `load metadata` 报错指向 Docker Hub 加速器，可使用下文的 `NODE_IMAGE` 覆盖。 [Docker Desktop 代理设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#proxies)
 
 如果 Apple Silicon 上的构建长时间停在 `Host bundle`，在 Docker Desktop 的 **Settings → General** 中关闭 **Use Rosetta for x86_64/amd64 emulation on Apple Silicon**，应用设置后重试。 [Docker Desktop 通用设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#general)
 
@@ -56,6 +56,8 @@ NODE_IMAGE=public.ecr.aws/docker/library/node:24-bookworm ./scripts/release-dock
 ```
 
 镜像在构建阶段和运行阶段均按根目录 `package.json` 的 `packageManager` 安装 pnpm。若手动构建时出现 npm registry 网络错误，可在 Docker 构建命令中增加 `--build-arg NPM_REGISTRY=https://registry.npmmirror.com`。构建仍使用 `--frozen-lockfile` 和锁文件完整性校验。
+
+Docker 构建依次执行编译和类型检查，降低 Docker Desktop 虚拟机的峰值内存占用。
 
 ## 上传并启动
 
